@@ -34,7 +34,7 @@ setup(
     keywords = "Analysis Perservation",
     packages = find_packages(exclude=[]),
     install_requires = [
-        "Chern==4", "click", "colored", "python-daemon", "ipython"
+        "Chern==4", "click", "colored", "python-daemon", "ipython", "PyYAML>=5.1,<6.0", "reana-client"
     ],
     include_package_data = True,
     entry_points = {
