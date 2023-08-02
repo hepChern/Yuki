@@ -5,6 +5,7 @@ import time
 from Chern.utils import csys
 from Chern.utils import metadata
 from Yuki.kernel.VJob import VJob
+from Yuki.kernel.VWorkflow import VWorkflow
 """
 This should have someting
 A image can be determined uniquely by the ?
@@ -17,7 +18,9 @@ class VImage(VJob):
     def run(self):
         self.prepare()
         self.build()
-        return "Finished"
+        workflow = VWorkflow(self)
+        response = workflow.run()
+        return response
 
     def upload(self):
         # Upload to remote runner
@@ -36,7 +39,7 @@ class VImage(VJob):
         """
         # if (machine is the local machine): build the image
         # FIXME Let us pretend to run it because we want to test the asym execution
-        time.sleep(60)
+        time.sleep(1)
 
         return 
         os.chdir(self.run_path)
