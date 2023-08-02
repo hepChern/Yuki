@@ -12,11 +12,15 @@ class VJob(object):
         """ Initialize the project the only **information** of a object instance
         """
         self.path = path
-        self.mathine_id = machine_id
+        self.machine_id = machine_id
         self.run_path = os.path.join(self.path, machine_id, "run")
         self.config_file = metadata.ConfigFile(
+            os.path.join(self.path, "config.json")
+            )
+        self.run_config_file = metadata.ConfigFile(
             os.path.join(self.path, machine_id, "config.json")
             )
+        
 
     def __str__(self):
         """ Define the behavior of print(vobject)
@@ -43,10 +47,10 @@ class VJob(object):
         return self.job_type() == ""
 
     def set_runid(self, runid):
-        self.config_file.write_variable("runid", runid)
+        self.run_config_file.write_variable("runid", runid)
 
     def runid(self):
-        return self.config_file.read_variable("runid", "")
+        return self.run_config_file.read_variable("runid", "")
 
     """ Let's consider when to update the status later
     """
@@ -79,3 +83,8 @@ class VJob(object):
         with open(self.path+"/error", "w") as f:
             f.write(message)
             f.write("\n")
+
+    def dependencies(self):
+        """ Return the preccessor of the object
+        """
+        return self.config_file.read_variable("dependencies", [])
