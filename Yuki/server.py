@@ -46,6 +46,7 @@ def connect():
 
 @celeryapp.task
 def task_exec_impression(impression_uuid, machine_uuid):
+    print(machine_uuid)
     job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression_uuid)
     config_file = ConfigFile(os.path.join(job_path, "config.json"))
     object_type = config_file.read_variable("object_type", "")
@@ -157,7 +158,7 @@ def machine_id(machine):
     else:
         config_path = os.path.join(os.environ["HOME"], ".Yuki/", "runner_config.json")
         config_file = ConfigFile(config_path)
-        runner_id = config_file.read_variable("runner_id", {})
+        runner_id = config_file.read_variable("runners_id", {})
         return runner_id[machine]
 
 # @app.route("/runstatus/<impression>", method=['GET'])
