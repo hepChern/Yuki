@@ -11,6 +11,8 @@ from Chern.utils import csys
 from Chern.utils import metadata
 from Yuki.kernel.VJob import VJob
 from Yuki.kernel.VImage import VImage
+from Yuki.kernel.VWorkflow import VWorkflow
+from time import sleep
 
 class VContainer(VJob):
     """
@@ -19,12 +21,14 @@ class VContainer(VJob):
     A container should be able to be created from a task?
     What to determine a container?
     """
-    def __init__(self, path):
-        """
-        Set the uuid
-        """
-        super(VContainer, self).__init__(path)
-        pass
+    def __init__(self, path, machine_id):
+        super(VContainer, self).__init__(path, machine_id)
+
+    def run(self):
+        sleep(1)
+        workflow = VWorkflow(self)
+        response = workflow.run()
+        return response
 
     def machine_storage(self):
         config_file = metadata.ConfigFile(os.path.join(os.environ["HOME"], ".Yuki/config.json"))
@@ -32,13 +36,12 @@ class VContainer(VJob):
         return "run." + machine_id
 
     def satisfied(self):
-        for pred_object in self.predecessors():
-            print(pred_object)
+        for pred_object in self.dependencies():
             if pred_object.is_zombie():
                 return False
-            if pred_object.job_type() == "container" and VContainer(pred_object.path).status() != "done":
+            if pred_object.job_type() == "task" and VContainer(pred_object.path).status() != "done":
                 return False
-            if pred_object.job_type() == "image" and VImage(pred_object.path).status() != "built":
+            if pred_object.job_type() == "algorithm" and VImage(pred_object.path).status() != "built":
                 return False
         return True
 
