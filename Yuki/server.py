@@ -19,6 +19,7 @@ from celery import Celery
 from logging import getLogger
 import logging
 
+from multiprocessing import Process
 
 app = Flask(__name__)
 
@@ -243,6 +244,17 @@ def index():
 
     return redirect(url_for('index'))
 
+def start_flask_app():
+    app.run(
+        host='127.0.0.1',
+        port= 3315,
+        debug= False,
+        )
+
+def start_celery_worker():
+    argv = ["-A", "Yuki.server.celeryapp", "worker", "--loglevel=info"]
+    celeryapp.worker_main(argv)
+
 def server_start():
     daemon_path = os.path.join(os.environ["HOME"], ".Yuki/daemon")
     print(colorize("[*[*[* Starting the Data Integration Thought Entity *]*]*]", "title0"))
@@ -251,12 +263,17 @@ def server_start():
     #     pidfile=pidfile.TimeoutPIDLockFile(daemon_path + "/server.pid"),
     #     stderr=open(daemon_path + "/server.log", "w+"),
     #     ):
-    app.run(
-        host='127.0.0.1',
-        port= 3315,
-        debug=True,
-        )
 
+    flask_process = Process(target=start_flask_app)
+    celery_process = Process(target=start_celery_worker)
+
+    flask_process.start()
+    celery_process.start()
+
+    flask_process.join()
+    celery_process.join()
+
+    
 def stop():
     if status() == "stop":
         return
