@@ -7,30 +7,44 @@ from Chern.utils import csys
 from Chern.utils import metadata
 from Chern.kernel.ChernCache import ChernCache
 from Yuki.kernel.VJob import VJob
+from Yuki.kernel.VContainer import VContainer
 import time
 import json
 # Comments:
 # To use the reana api, we need the environment variable REANA_SERVER_URL
 # However, setting the environment variable in the python script "might" not work
 # Maybe we can try the execv function in the os module, let me see
+# It seems to works at my MacOS, but I don't know whether it will still work at, for example, Ubuntu
 cherncache = ChernCache.instance()
 
 class VWorkflow(object):
-    def __init__(self, job):
+    uuid = None
+    def __init__(self, jobs, uuid = None):
         """ Initialize it with a job
         """
         # Create a uuid for the workflow
-        self.uuid = csys.generate_uuid()
-        self.path = os.path.join(os.environ["HOME"], ".Yuki", "Workflows", self.uuid)
-        self.start_job = job
+        if uuid:
+            self.uuid = uuid
+            self.start_job = None
+            self.path = os.path.join(os.environ["HOME"], ".Yuki", "Workflows", self.uuid)
+            self.config_file = metadata.ConfigFile(os.path.join(self.path, "config.json"))
+            self.machine_id = self.config_file.read_variable("machine_id", "")
+        else:
+            self.uuid = csys.generate_uuid()
+            self.start_job = jobs.copy()
+            self.path = os.path.join(os.environ["HOME"], ".Yuki", "Workflows", self.uuid)
+            self.config_file = metadata.ConfigFile(os.path.join(self.path, "config.json"))
+            self.machine_id = self.start_job[0].machine_id
+            self.config_file.write_variable("machine_id", self.machine_id)
+
+        # FIXME: if it is not the starting of the workflow, one should read the information from bookkeeping, except for the access_token
         self.yaml_file = None # YamlFile()
         self.jobs = []
-        self.machine_id = job.machine_id
         self.set_enviroment(self.machine_id)
         self.access_token = self.get_access_token(self.machine_id)
 
     def get_access_token(self, machine_id):
-        path = os.path.join(os.environ["HOME"], ".Yuki", "runner_config.json")
+        path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
         config_file = metadata.ConfigFile(path)
         tokens = config_file.read_variable("tokens", {})
         token = tokens.get(machine_id, "")
@@ -38,7 +52,7 @@ class VWorkflow(object):
 
     def set_enviroment(self, machine_id):
         # Set the enviroment variable
-        path = os.path.join(os.environ["HOME"], ".Yuki", "runner_config.json")
+        path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
         config_file = metadata.ConfigFile(path)
         urls = config_file.read_variable("urls", {})
         url = urls.get(machine_id, "")
@@ -61,29 +75,71 @@ class VWorkflow(object):
         # parameters=None,
         # workflow_engine="yadage",
         # outputs=None,
+
+        print(self.machine_id)
+        print(self.get_access_token(self.machine_id))
         client.create_workflow_from_json(
             self.get_name(),
             self.get_access_token(self.machine_id),
-            self.get_workflow_json(),
+            {"steps": self.get_steps()},
             None,
-            None,
+            {"files": self.get_files()
+             },
             "serial",
-            None)
+            None
+        )
+        
+    def get_files(self):
+        files = []
+        for job in self.jobs:
+            files.extend(job.files())
+        return files
+
+    def parameters(self):
+        return []
+
+    def get_file_list(self):
+        for job in jobs:
+            for filename in job.files:
+                file = "impression/{}/{}".format(job.impression(), filename)
+                self.files.append(file)
+
+    def get_parameters(self):
+        for job in jobs:
+            for parameter in job.parameters:
+                parname = "par_{}_{}".format(job.impression(), parameter)
+                value = self.get_parameter(parameter)
+                self.parameters[parname] = value
+
+    def get_steps(self):
+        steps = []
+
+        for job in self.jobs:
+            if job.object_type() == "algorithm":
+                # In this case, if the command is compile, we need to compile it
+                pass
+            if job.object_type() == "task":
+                steps.append(VContainer(job.path, job.machine_id).step())
+                # Replace the ${alg} -> algorithm folder
+                # Replace the ${parameters} -> actual parameters
+                # Replace the ${}
+        return steps
+
+
+
+    def upload_file(self):
+        from reana_client.api import client
+        for job in self.jobs:
+            for name in job.files():
+                client.upload_file(
+                    self.get_name(),
+                    open(os.path.join(job.path, "contents", name[8:]), "rb"),
+                    name,
+                    self.get_access_token(self.machine_id)
+                )
 
     def get_name(self):
         return "w-" + self.uuid[:8]
-
-    def get_workflow_json(self):
-        workflow_file = os.path.join(self.path, "workflow.json")
-        csys.mkdir(self.path)
-        d = {}
-        d["version"] = "0.6.0"
-        d["inputs"] = {}
-        d["outputs"] = {}
-        d["steps"] = []
-        # json.dump(d, open(workflow_file, "w"))
-        return d
-        # return workflow_file
 
     def get_workflow(self, job):
         last_consult_time = cherncache.consult_table.get(job.path, -1)
@@ -97,9 +153,7 @@ class VWorkflow(object):
             return
 
         for dependence in job.dependencies():
-            print(dependence)
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", dependence)
-            print(path)
             self.get_workflow(VJob(path, self.machine_id))
         self.jobs.append(job)
 
@@ -114,11 +168,6 @@ class VWorkflow(object):
             if job.object_type == "task":
                 self.writeline(job.to_yaml())
 
-    def upload(self, jobs):
-        for job in jobs:
-            if job.require_upload:
-                job.upload()
-    
     def run_workflow(self):
         # use the reana api to run the workflow
         pass
@@ -126,14 +175,37 @@ class VWorkflow(object):
     def check_status(self):
         # Check the status of the workflow
         # Check whether the workflow is finished, every 5 seconds
+        counter = 0
         while True:
-            status = self.get_status()
-            if status == "finished":
-                break
-            time.sleep(5)
-        pass
+            # Check the status every minute
+            if counter % 600 == 0: 
+                self.update_workflow_status()
 
+            status = self.status()
+            if status == "finished" or status == "failed":
+                return status
+            time.sleep(1)
+            counter += 1
 
+    def update_workflow_status(self):
+        from reana_client.api import client
+        results = client.get_workflow_status(
+            self.get_name(),
+            self.get_access_token(self.machine_id))
+        path = os.path.join(self.path, "results.json")
+        results_file = metadata.ConfigFile(path)
+        results_file.write_variable("results", results)
+
+    def status(self):
+        status, last_consult_time = cherncache.consult_table.get(self.uuid, ("unknown", -1))
+        if time.time() - last_consult_time < 1: return status
+
+        path = os.path.join(self.path, "results.json")
+        results_file = metadata.ConfigFile(path)
+        results = results_file.read_variable("results", {})
+        status = results.get("status", "unknown")
+        cherncache.consult_table[self.uuid] = (status, time.time())
+        return status
 
     def writeline(self, line):
         self.yaml_file.writeline(line)
@@ -142,16 +214,24 @@ class VWorkflow(object):
         pass
 
     def run(self):
-        self.get_workflow(self.start_job)
+        for job in self.start_job: 
+            self.get_workflow(job)
         path = [job.path for job in self.jobs]
+        for job in self.jobs:
+            job.set_workflow_id(self.uuid)
         self.create_workflow()
-        return ""
-        self.construct()
-        self.write_to()
-        self.upload()
-        self.run_workflow()
+        self.upload_file()
+        self.start_workflow()
         self.check_status()
         self.download()
+
+    def start_workflow(self):
+        from reana_client.api import client
+        client.start_workflow(
+            self.get_name(),
+            self.get_access_token(self.machine_id),
+            {}
+        )
 
     def download(self):
         pass

@@ -5,7 +5,7 @@ import time
 from Chern.utils import csys
 from Chern.utils import metadata
 from Yuki.kernel.VJob import VJob
-from Yuki.kernel.VWorkflow import VWorkflow
+# from Yuki.kernel.VWorkflow import VWorkflow
 """
 This should have someting
 A image can be determined uniquely by the ?
@@ -18,8 +18,8 @@ class VImage(VJob):
     def run(self):
         self.prepare()
         self.build()
-        workflow = VWorkflow(self)
-        response = workflow.run()
+        # workflow = VWorkflow([self], None)
+        # response = workflow.run()
         return response
 
     def upload(self):

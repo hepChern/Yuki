@@ -20,7 +20,9 @@ class VJob(object):
         self.run_config_file = metadata.ConfigFile(
             os.path.join(self.path, machine_id, "config.json")
             )
-        
+        self.yaml_file = metadata.YamlFile(
+            os.path.join(self.path, "contents", "chern.yaml")
+        )
 
     def __str__(self):
         """ Define the behavior of print(vobject)
@@ -43,6 +45,14 @@ class VJob(object):
         """
         return self.config_file.read_variable("object_type", "")
 
+    def object_type(self):
+        """ Return the type of the object under a specific path.
+        If path is left blank, return the type of the object itself.
+        """
+        return self.config_file.read_variable("object_type", "")
+
+
+
     def is_zombie(self):
         return self.job_type() == ""
 
@@ -51,6 +61,13 @@ class VJob(object):
 
     def runid(self):
         return self.run_config_file.read_variable("runid", "")
+
+    def set_workflow_id(self, workflow_uuid):
+        self.run_config_file.write_variable("workflow", workflow_uuid)
+
+    def workflow_id(self):
+        return self.run_config_file.read_variable("workflow", "")
+
 
     """ Let's consider when to update the status later
     """
@@ -88,3 +105,26 @@ class VJob(object):
         """ Return the preccessor of the object
         """
         return self.config_file.read_variable("dependencies", [])
+
+    def files(self):
+        file_list = []
+        tree = self.config_file.read_variable("tree", [])
+        for dirpath, dirnames, filenames in tree:
+            for f in filenames:
+                if f == "chern.yaml": continue
+                name = self.impression()[:7]
+                if dirpath == ".": 
+                    name = os.path.join(name, f)
+                else:
+                    name = os.path.join(name, dirpath, f)
+                file_list.append(name)
+        return file_list
+
+    def predecessors(self):
+        dep = self.dependencies()
+        path = os.path.join(os.environ["HOME"], ".Yuki", "Storage")
+        return [VJob(os.path.join(path, x), self.machine_id) for x in dep]
+    def impression(self):
+        # [FIXME], the method ought to work for VJob, not VContainer
+        impression = self.path[-32:]
+        return impression

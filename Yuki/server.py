@@ -11,6 +11,7 @@ import os
 from Yuki.kernel.VJob import VJob
 from Yuki.kernel.VImage import VImage
 from Yuki.kernel.VContainer import VContainer
+from Yuki.kernel.VWorkflow import VWorkflow
 from Chern.utils.metadata import ConfigFile
 from Chern.utils.pretty import colorize
 import sys
@@ -45,17 +46,20 @@ def connect():
     return conn
 
 @celeryapp.task
-def task_exec_impression(impression_uuid, machine_uuid):
-    print(machine_uuid)
-    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression_uuid)
-    config_file = ConfigFile(os.path.join(job_path, "config.json"))
-    object_type = config_file.read_variable("object_type", "")
-    if object_type == "algorithm":
-        job = VImage(job_path, machine_uuid)
-        return job.run()
-    if object_type == "task":
-        job = VContainer(job_path, machine_uuid)
-        return job.run()
+def task_exec_impression(impressions, machine_uuid):
+    jobs = []
+    for impression_uuid in impressions.split(" "):
+        job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression_uuid)
+        job = VJob(job_path, machine_uuid)
+        jobs.append(job)
+    workflow = VWorkflow(jobs, None)
+    workflow.run()
+
+@celeryapp.task
+def task_update_workflow_status(workflow_id):
+    workflow = VWorkflow([], workflow_id)
+    workflow.update_workflow_status()
+
 
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_file():
@@ -76,6 +80,20 @@ def upload_file():
     return "Successful"
     # FIXME should check whether the upload is successful or not
 
+@app.route('/execute', methods=['GET', 'POST'])
+def execute():
+    if request.method == 'POST':
+        machine = request.form["machine"]
+        contents = request.files["impressions"].read().decode()
+        task = task_exec_impression.apply_async(args=[contents, machine])
+        for impression in contents.split(" "):
+            job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+            VJob(job_path, machine).set_runid(task.id)
+        return task.id
+
+    # FIXME should check whether the upload is successful or not
+
+
 @app.route("/download/<filename>", methods=['GET'])
 def download_file(filename):
     directory = os.path.join(os.getcwd(), "data")  # Assuming in the current directory
@@ -83,44 +101,71 @@ def download_file(filename):
 
 @app.route("/status/<impression>", methods=['GET'])
 def status(impression):
-    path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
     runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
     runner_config_file = ConfigFile(runner_config_path)
     runners = runner_config_file.read_variable("runners", [])
-    runner_id = runner_config_file.read_variable("runner_id", {})
-    config_path = os.path.join(os.environ["HOME"], ".Yuki/", "runner_config.json")
-    config_file = ConfigFile(config_path)
-    machine_id = config_file.read_variable("machine_id", "")
+    runners_id = runner_config_file.read_variable("runners_id", {})
 
-    runners.insert(0, "local")
-    runner_id["local"] = machine_id
-
-    object_type = ConfigFile(os.path.join(os.environ["HOME"], ".Yuki/Storage", impression, "config.json")).read_variable("object_type", "")
+    config_file = ConfigFile(os.path.join(job_path, "config.json"))
+    object_type = config_file.read_variable("object_type", "")
 
     for machine in runners:
-        machine_id = runner_id[machine]
-        job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+        machine_id = runners_id[machine]
 
         if object_type == "":
-            return "unsubmitted"
+            return "empty"
 
-        if object_type == "algorithm":
-            image = VImage(job_path, machine_id)
-            logger.info(job_path)
-            runid = image.runid()
-            if runid != "":
-                results = task_exec_impression.AsyncResult(runid)
-                logger.info(runid)
-                logger.info(results.status)
-                image.update_status(results.status)
-            status = image.status()
+        job = VJob(job_path, machine_id)
+        # FIXME: workflow should not be initialized like this
+        workflow = VWorkflow([], job.workflow_id())
+        status = workflow.status()
+        if status != "finished" and status != "failed":
+            task_update_workflow_status.apply_async(args=[workflow.uuid])
+
+        if status != "unknown":
             return status
-        if object_type == "task":
-            logger.info("container")
-            return VContainer(job_path, machine_id).status()
+
         if os.path.exists(job_path):
-            return "submitted"
-    return "unsubmitted"
+            return "deposited"
+
+    return "empty"
+
+@app.route("/status/<impression>/<machine>", methods=['GET'])
+def runstatus(impression):
+    # FIXME, should updated as status()
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    runners_id = runner_config_file.read_variable("runners_id", {})
+
+    config_file = ConfigFile(os.path.join(job_path, "config.json"))
+    object_type = config_file.read_variable("object_type", "")
+    machine_id = runners_id[machine]
+
+    if object_type == "":
+        return "empty"
+
+    # results = task_exec_impression.AsyncResult(runid)
+    job = VJob(job_path, machine_id)
+    # FIXME: workflow should not be initialized like this
+    workflow = VWorkflow([], job.workflow_id())
+    return workflow.status()
+
+    if os.path.exists(job_path):
+        return "deposited"
+
+    return "empty"
+
+@app.route("/deposited/<impression>", methods=['GET'])
+def deposited(impression):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    if os.path.exists(job_path):
+        return "TRUE"
+    return "FALSE"
+
+
 
 @app.route("/serverstatus", methods=['GET'])
 def serverstatus():
@@ -138,6 +183,7 @@ def run(impression, machine):
 
 @app.route("/register_machine/<machine>/<machine_id>", methods=['GET'])
 def register_machine(machine, machine_id):
+    # FIXME: runner_id -> runners_id
     config_path = os.path.join(os.environ["HOME"], ".Yuki/", "config.json")
     config_file = ConfigFile(config_path)
     runners = config_file.read_variable("runners", [])
@@ -150,16 +196,10 @@ def register_machine(machine, machine_id):
 @app.route("/machine_id/<machine>", methods=["GET"])
 def machine_id(machine):
     # print some debug information
-    if (machine == "local"):
-        config_path = os.path.join(os.environ["HOME"], ".Yuki/", "runner_config.json")
-        config_file = ConfigFile(config_path)
-        machine_id = config_file.read_variable("machine_id", "")
-        return machine_id
-    else:
-        config_path = os.path.join(os.environ["HOME"], ".Yuki/", "runner_config.json")
-        config_file = ConfigFile(config_path)
-        runner_id = config_file.read_variable("runners_id", {})
-        return runner_id[machine]
+    config_path = os.path.join(os.environ["HOME"], ".Yuki/", "config.json")
+    config_file = ConfigFile(config_path)
+    runner_id = config_file.read_variable("runners_id", {})
+    return runner_id[machine]
 
 # @app.route("/runstatus/<impression>", method=['GET'])
 # def runstatus(impression):
