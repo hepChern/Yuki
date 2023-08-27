@@ -14,6 +14,7 @@ from Yuki.kernel.VContainer import VContainer
 from Yuki.kernel.VWorkflow import VWorkflow
 from Chern.utils.metadata import ConfigFile
 from Chern.utils.pretty import colorize
+from Chern.utils import csys
 import sys
 from celery import Celery
 from logging import getLogger
@@ -34,10 +35,10 @@ logger.setLevel(logging.DEBUG)
 app.config['SECRET_KEY'] = 'top-secret!'
 
 # Celery configuration
-app.config['CELERY_BROKER_URL'] = 'amqp://localhost'
-app.config['CELERY_RESULT_BACKEND'] = 'rpc://'
+app.config['CELERY_broker_url'] = 'amqp://localhost'
+app.config['result_backend'] = 'rpc://'
 
-celeryapp = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+celeryapp = Celery(app.name, broker=app.config['CELERY_broker_url'])
 celeryapp.conf.update(app.config)
 
 import sqlite3
@@ -79,7 +80,8 @@ def upload_file():
         logger.info(config)
         request.files[config].save(os.path.join(storage_path, tarname[:-7], config))
     return "Successful"
-    # FIXME should check whether the upload is successful or not
+
+
 
 @app.route('/execute', methods=['GET', 'POST'])
 def execute():
@@ -100,6 +102,19 @@ def download_file(filename):
     directory = os.path.join(os.getcwd(), "data")  # Assuming in the current directory
     return send_from_directory(directory, filename, as_attachment=True)
 
+@app.route("/setsampleuuid/<impression>/<sampleuuid>", methods=['GET'])
+def setsampleuuid(impression, sampleuuid):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    config_file = ConfigFile(os.path.join(job_path, "config.json"))
+    config_file.write_variable("sample_uuid", sampleuuid)
+    return "ok"
+
+@app.route("/samplestatus/<impression>", methods=['GET'])
+def samplestatus(impression):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    config_file = ConfigFile(os.path.join(job_path, "config.json"))
+    return config_file.read_variable("sample_uuid", "")
+
 @app.route("/status/<impression>", methods=['GET'])
 def status(impression):
     job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
@@ -111,14 +126,15 @@ def status(impression):
     config_file = ConfigFile(os.path.join(job_path, "config.json"))
     object_type = config_file.read_variable("object_type", "")
 
+    if object_type == "":
+            return "empty"
+
     for machine in runners:
         machine_id = runners_id[machine]
 
-        if object_type == "":
-            return "empty"
-
         job = VJob(job_path, machine_id)
-        # FIXME: workflow should not be initialized like this
+        if job.workflow_id() == "":
+            continue
         workflow = VWorkflow([], job.workflow_id())
         status = workflow.status()
         if status != "finished" and status != "failed":
@@ -209,20 +225,65 @@ def machine_id(machine):
 #     #return statu0s
 #     return ""
 
-@app.route("/outputs/<impression>", methods=['GET'])
-def outputs(impression):
+@app.route("/outputs/<impression>/<machine>", methods=['GET'])
+def outputs(impression, machine):
+    if machine == "none":
+        path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+        job = VJob(path, None)
+        if job.job_type() == "task":
+            return " ".join(VContainer(path, None).outputs())
+
     path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
-    job = VJob(path)
-    if job.job_type() == "container":
-        return " ".join(VContainer(path).outputs())
+    job = VJob(path, machine)
+    if job.job_type() == "task":
+        return " ".join(VContainer(path, machine).outputs())
     return ""
 
 @app.route("/getfile/<impression>/<filename>", methods=['GET'])
 def get_file(impression, filename):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    runners_id = runner_config_file.read_variable("runners_id", {})
+
+    config_file = ConfigFile(os.path.join(job_path, "config.json"))
+    object_type = config_file.read_variable("object_type", "")
+
+    for machine in runners:
+        machine_id = runners_id[machine]
+        path = os.path.join(job_path, machine_id, "outputs", filename)
+        if os.path.exists(path):
+            return path
+    return "NOTFOUND"
+
+@app.route("/impression/<impression>", methods=['GET'])
+def impression(impression):
     path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
-    job = VJob(path)
-    if job.job_type() == "container":
-        return VContainer(path).get_file(filename)
+    return path
+
+@app.route("/collect/<impression>", methods=['GET'])
+def collect(impression):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    runners_id = runner_config_file.read_variable("runners_id", {})
+
+    config_file = ConfigFile(os.path.join(job_path, "config.json"))
+    object_type = config_file.read_variable("object_type", "")
+
+    for machine in runners:
+        machine_id = runners_id[machine]
+        job = VJob(job_path, machine_id)
+        if job.workflow_id() == "":
+            continue
+        workflow = VWorkflow([], job.workflow_id())
+        if workflow.status() == "finished":
+            workflow.download(impression)
+    return "ok"
+
+
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -243,6 +304,33 @@ def index():
         return render_template('index.html', impressions=impressions)
 
     return redirect(url_for('index'))
+
+@app.route('/workflow/<impression>', methods=['GET'])
+def workflow(impression):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    runners_id = runner_config_file.read_variable("runners_id", {})
+
+    config_file = ConfigFile(os.path.join(job_path, "config.json"))
+    object_type = config_file.read_variable("object_type", "")
+
+    for machine in runners:
+        machine_id = runners_id[machine]
+        job = VJob(job_path, machine_id)
+        if job.workflow_id() == "":
+            continue
+        # FIXME: workflow should not be initialized like this
+        workflow = VWorkflow([], job.workflow_id())
+        return "{} {}".format(machine, workflow.uuid)
+    return "UNDEFINED"
+
+@app.route('/sampleuuid/<impression>', methods=['GET'])
+def sampleuuid(impression):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    config_file = ConfigFile(os.path.join(job_path, "config.json"))
+    return config_file.read_variable("sample_uuid", "")
 
 def start_flask_app():
     app.run(
@@ -273,7 +361,7 @@ def server_start():
     flask_process.join()
     celery_process.join()
 
-    
+
 def stop():
     if status() == "stop":
         return

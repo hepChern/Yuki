@@ -34,7 +34,7 @@ setup(
     keywords = "Analysis Perservation",
     packages = find_packages(exclude=[]),
     install_requires = [
-        "Chern==4", "click", "colored", "python-daemon", "ipython", "PyYAML>=5.1,<6.0", "reana-client"
+        "Chern==4", "click", "colored", "python-daemon", "ipython", "PyYAML>=5.1,<6.0", "reana-client", "flask", "celery"
     ],
     include_package_data = True,
     entry_points = {
@@ -44,3 +44,8 @@ setup(
         ]
     }
 )
+
+# Python 3.10.12
+# Flask 2.2.2
+# Werkzeug 2.2.2
+# 5.2.7

@@ -11,7 +11,6 @@ from Chern.utils import csys
 from Chern.utils import metadata
 from Yuki.kernel.VJob import VJob
 from Yuki.kernel.VImage import VImage
-# from Yuki.kernel.VWorkflow import VWorkflow
 from time import sleep
 
 class VContainer(VJob):
@@ -64,11 +63,10 @@ class VContainer(VJob):
 
     def step(self):
         raw_commands = self.image().yaml_file.read_variable("commands", [])
-        commands = ["mkdir -p {}".format(self.impression()[:7])]
+        commands = ["mkdir -p {}".format(self.short_uuid())]
         for command in raw_commands:
             # Replace the commands (parameters):
             parameters, values = self.parameters()
-            print(parameters, values)
             for parameter in parameters:
                 value = values[parameter]
                 name = "${"+ parameter +"}"
@@ -76,22 +74,68 @@ class VContainer(VJob):
 
             # Replace the commands (inputs):
             alias_list, alias_map = self.inputs()
-            for alias in alias_list: 
+            for alias in alias_list:
                 impression = alias_map[alias]
                 name = "${"+ alias +"}"
                 command = command.replace(name, impression[:7])
-            command = command.replace("${output}", self.impression()[:7])
+            command = command.replace("${output}", self.short_uuid())
             image = self.image()
             if image:
-                command = command.replace("${code}", image.impression()[:7])
-            commands.append(command)
+                command = command.replace("${code}", image.short_uuid())
+            commands.append(command.replace("\"", "\\\""))
         step = {}
         step["commands"] = commands
+        commands.append("touch {}.done".format(self.short_uuid()))
+        commands = " && ".join(commands)
         step["environment"] = self.environment()
         step["kubernetes_memory_limit"] = self.memory()
-        step["name"] = "step_{}".format(self.impression()[:7])
+        step["name"] = "step{}".format(self.short_uuid())
+        step["kubernetes_uid"] = None
+        step["compute_backend"] = None
 
         return step
+
+    def snakemake_rule(self):
+        raw_commands = self.image().yaml_file.read_variable("commands", [])
+        commands = ["mkdir -p {}".format(self.short_uuid())]
+        for command in raw_commands:
+            # Replace the commands (parameters):
+            parameters, values = self.parameters()
+            for parameter in parameters:
+                value = values[parameter]
+                name = "${"+ parameter +"}"
+                command = command.replace(name, value)
+
+            # Replace the commands (inputs):
+            alias_list, alias_map = self.inputs()
+            for alias in alias_list:
+                impression = alias_map[alias]
+                name = "${"+ alias +"}"
+                command = command.replace(name, impression[:7])
+            command = command.replace("${output}", self.short_uuid())
+            image = self.image()
+            if image:
+                command = command.replace("${code}", image.short_uuid())
+            commands.append(command.replace("\"", "\\\""))
+        step = {}
+        step["commands"] = commands
+        commands.append("touch {}.done".format(self.short_uuid()))
+        step["environment"] = self.environment()
+        step["memory"] = self.memory()
+        step["name"] = "step{}".format(self.short_uuid())
+        step["output"] = "{}.done".format(self.short_uuid())
+
+        step["inputs"] = []
+        alias_list, alias_map = self.inputs()
+        for alias in alias_list:
+            impression = alias_map[alias]
+            step["inputs"].append("{}.done".format(impression[:7]))
+        image = self.image()
+        if image:
+            step["inputs"].append("{}.done".format(image.short_uuid()))
+
+        return step
+
 
     def environment(self):
         return self.yaml_file.read_variable("environment", "")
@@ -153,11 +197,18 @@ class VContainer(VJob):
         return "submitted"
 
     def outputs(self):
-        dirs = csys.list_dir(self.path)
-        for run in dirs:
-            if run.startswith("run.") or run.startswith("raw."):
-                return csys.list_dir(os.path.join(self.path, run, "output"))
-        return []
+        print("outputs")
+        if self.machine_id is None:
+            path = os.path.join(self.path, "rawdata")
+            return csys.list_dir(path)
+        path = os.path.join(self.path, self.machine_id, "outputs")
+        dirs = csys.list_dir(path)
+        return dirs
+
+    def collect(self, impression):
+        workflow_id = self.workflow_id()
+        workflow = VWorkflow(os.path.join(self.path, workflow_id))
+        workflow.collect(impression)
 
     def get_file(self, filename):
         dirs = csys.list_dir(self.path)

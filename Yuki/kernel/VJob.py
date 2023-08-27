@@ -13,16 +13,18 @@ class VJob(object):
         """
         self.path = path
         self.machine_id = machine_id
-        self.run_path = os.path.join(self.path, machine_id, "run")
         self.config_file = metadata.ConfigFile(
             os.path.join(self.path, "config.json")
-            )
-        self.run_config_file = metadata.ConfigFile(
-            os.path.join(self.path, machine_id, "config.json")
             )
         self.yaml_file = metadata.YamlFile(
             os.path.join(self.path, "contents", "chern.yaml")
         )
+        if machine_id is not None:
+            self.run_path = os.path.join(self.path, machine_id, "run")
+            self.run_config_file = metadata.ConfigFile(
+                os.path.join(self.path, machine_id, "config.json")
+                )
+
 
     def __str__(self):
         """ Define the behavior of print(vobject)
@@ -50,8 +52,6 @@ class VJob(object):
         If path is left blank, return the type of the object itself.
         """
         return self.config_file.read_variable("object_type", "")
-
-
 
     def is_zombie(self):
         return self.job_type() == ""
@@ -112,8 +112,8 @@ class VJob(object):
         for dirpath, dirnames, filenames in tree:
             for f in filenames:
                 if f == "chern.yaml": continue
-                name = self.impression()[:7]
-                if dirpath == ".": 
+                name = self.short_uuid()
+                if dirpath == ".":
                     name = os.path.join(name, f)
                 else:
                     name = os.path.join(name, dirpath, f)
@@ -124,7 +124,10 @@ class VJob(object):
         dep = self.dependencies()
         path = os.path.join(os.environ["HOME"], ".Yuki", "Storage")
         return [VJob(os.path.join(path, x), self.machine_id) for x in dep]
+
     def impression(self):
-        # [FIXME], the method ought to work for VJob, not VContainer
         impression = self.path[-32:]
         return impression
+
+    def short_uuid(self):
+        return self.impression()[:7]

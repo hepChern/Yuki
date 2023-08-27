@@ -3,13 +3,16 @@ Construction of a workflow with the jobs, especially from the task
 """
 import os
 from Chern import utils
-from Chern.utils import csys 
+from Chern.utils import csys
 from Chern.utils import metadata
 from Chern.kernel.ChernCache import ChernCache
 from Yuki.kernel.VJob import VJob
 from Yuki.kernel.VContainer import VContainer
+from Yuki.kernel.VImage import VImage
 import time
 import json
+from Yuki.utils import snakefile
+
 # Comments:
 # To use the reana api, we need the environment variable REANA_SERVER_URL
 # However, setting the environment variable in the python script "might" not work
@@ -68,27 +71,20 @@ class VWorkflow(object):
     def create_workflow(self):
         # create a workflow
         from reana_client.api import client
-        # name,
-        # access_token,
-        # workflow_json=None,
-        # workflow_file=None,
-        # parameters=None,
-        # workflow_engine="yadage",
-        # outputs=None,
+        reana_json = dict(workflow={})
+        reana_json["workflow"]["specification"] = {
+                "job_dependencies": self.dependencies,
+                "steps": self.steps,
+                }
+        reana_json["workflow"]["type"] = "snakemake"
+        reana_json["workflow"]["file"] = "Snakefile"
+        reana_json["inputs"] = {"files": self.get_files()}
+        client.create_workflow(
+                reana_json,
+                self.get_name(),
+                self.get_access_token(self.machine_id)
+                )
 
-        print(self.machine_id)
-        print(self.get_access_token(self.machine_id))
-        client.create_workflow_from_json(
-            self.get_name(),
-            self.get_access_token(self.machine_id),
-            {"steps": self.get_steps()},
-            None,
-            {"files": self.get_files()
-             },
-            "serial",
-            None
-        )
-        
     def get_files(self):
         files = []
         for job in self.jobs:
@@ -112,8 +108,6 @@ class VWorkflow(object):
                 self.parameters[parname] = value
 
     def get_steps(self):
-        steps = []
-
         for job in self.jobs:
             if job.object_type() == "algorithm":
                 # In this case, if the command is compile, we need to compile it
@@ -125,7 +119,49 @@ class VWorkflow(object):
                 # Replace the ${}
         return steps
 
+    def construct_snake_file(self):
+        self.snakefile_path = os.path.join(self.path, "Snakefile")
+        snake_file = snakefile.SnakeFile(os.path.join(self.path, "Snakefile"))
 
+
+        self.dependencies = {}
+        self.steps = []
+
+        snake_file.addline("rule all:", 0)
+        snake_file.addline("input:", 1)
+        self.dependencies["all"] = []
+        for job in self.jobs:
+            snake_file.addline("\"{}.done\",".format(job.short_uuid()), 2)
+            self.dependencies["all"].append("step{}".format(job.short_uuid()))
+
+        for job in self.jobs:
+            if job.object_type() == "algorithm":
+                # In this case, if the command is compile, we need to compile it
+                snakemake_rule = VImage(job.path, job.machine_id).snakemake_rule()
+                step = VImage(job.path, job.machine_id).step()
+
+                # In this case, we also need to run the "touch"
+            if job.object_type() == "task":
+                snakemake_rule = VContainer(job.path, job.machine_id).snakemake_rule()
+                step = VContainer(job.path, job.machine_id).step()
+
+            snake_file.addline("\n", 0)
+            snake_file.addline("rule step{}:".format(job.short_uuid()), 0)
+            snake_file.addline("input:", 1)
+            for input_file in snakemake_rule["inputs"]:
+                snake_file.addline("\""+input_file+"\"" + ",", 2)
+            snake_file.addline("output:", 1)
+            snake_file.addline("\"{}.done\"".format(job.short_uuid()), 2)
+            snake_file.addline("container:", 1)
+            snake_file.addline("\"docker://{}\"".format(snakemake_rule["environment"]), 2)
+            snake_file.addline("resources:", 1)
+            snake_file.addline("kubernete_memory_limit=\"{}\"".format(snakemake_rule["memory"]), 2)
+            snake_file.addline("shell:", 1)
+            snake_file.addline("\""+" && ".join(snakemake_rule["commands"])+"\"", 2)
+
+            self.steps.append(step)
+
+        snake_file.write()
 
     def upload_file(self):
         from reana_client.api import client
@@ -137,6 +173,24 @@ class VWorkflow(object):
                     name,
                     self.get_access_token(self.machine_id)
                 )
+        client.upload_file(
+            self.get_name(),
+            open(self.snakefile_path, "rb"),
+            "Snakefile",
+            self.get_access_token(self.machine_id)
+        )
+        yaml_file = metadata.YamlFile(os.path.join(self.path, "reana.yaml"))
+        yaml_file.write_variable("workflow", {
+            "type": "snakemake",
+            "file": "Snakefile",
+            })
+        client.upload_file(
+            self.get_name(),
+            open(os.path.join(self.path, "reana.yaml"), "rb"),
+            "reana.yaml",
+            self.get_access_token(self.machine_id)
+        )
+
 
     def get_name(self):
         return "w-" + self.uuid[:8]
@@ -146,7 +200,7 @@ class VWorkflow(object):
         if time.time() - last_consult_time < 1: return
         cherncache.consult_table[job.path] = time.time()
 
-        # Even if the job is finished, we still need to add it to the workflow, 
+        # Even if the job is finished, we still need to add it to the workflow,
         # because we need to upload the files
         if job.status() == "finished":
             self.jobs.append(job)
@@ -178,7 +232,7 @@ class VWorkflow(object):
         counter = 0
         while True:
             # Check the status every minute
-            if counter % 600 == 0: 
+            if counter % 60 == 0:
                 self.update_workflow_status()
 
             status = self.status()
@@ -214,11 +268,13 @@ class VWorkflow(object):
         pass
 
     def run(self):
-        for job in self.start_job: 
+        for job in self.start_job:
             self.get_workflow(job)
         path = [job.path for job in self.jobs]
         for job in self.jobs:
             job.set_workflow_id(self.uuid)
+
+        self.construct_snake_file()
         self.create_workflow()
         self.upload_file()
         self.start_workflow()
@@ -233,5 +289,24 @@ class VWorkflow(object):
             {}
         )
 
-    def download(self):
-        pass
+    def download(self, impression = None):
+        from reana_client.api import client
+        if impression:
+            print("Downloading the files with impression {}".format(impression[0:7]))
+            files = client.list_files(
+                self.get_name(),
+                self.get_access_token(self.machine_id),
+                impression[0:7]
+            )
+            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", impression, self.machine_id)
+            for file in files:
+                output = client.download_file(
+                    self.get_name(),
+                    file["name"],
+                    self.get_access_token(self.machine_id),
+                )
+                os.makedirs(os.path.join(path, "outputs"), exist_ok = True)
+                filename = os.path.join(path, "outputs", file["name"][8:])
+                with open(filename, "wb") as f:
+                    f.write(output[0])
+

@@ -41,9 +41,9 @@ class VImage(VJob):
         # FIXME Let us pretend to run it because we want to test the asym execution
         time.sleep(1)
 
-        return 
+        return
         os.chdir(self.run_path)
-        
+
         stdout = open("docker.stdout", "wb")
         stderr = open("docker.stderr", "wb")
         ps = subprocess.open("docker build .", shell=True,
@@ -78,7 +78,7 @@ class VImage(VJob):
         status = status_file.read_variable("status")
         return status == "locked"
 
-    
+
     def image_id(self):
         dirs = csys.list_dir(self.path)
         for run in dirs:
@@ -94,8 +94,39 @@ class VImage(VJob):
         machine_id = config_file.read_variable("machine_id")
         return "run." + machine_id
 
-    
+
     def satisfied(self):
         return True
 
-    
+    def step(self):
+        commands = ["mkdir -p {}".format(self.short_uuid())]
+        commands.append("touch {}.done".format(self.short_uuid()))
+        step = {}
+        step["inputs"] = []
+        step["commands"] = commands
+        step["environment"] = self.environment()
+        step["memory"] = self.memory()
+        step["name"] = "step{}".format(self.short_uuid())
+
+
+
+        return step
+
+    def snakemake_rule(self):
+        commands = ["mkdir -p {}".format(self.short_uuid())]
+        commands.append("touch {}.done".format(self.short_uuid()))
+        step = {}
+        step["inputs"] = []
+        step["commands"] = commands
+        step["environment"] = self.environment()
+        step["memory"] = self.memory()
+        step["name"] = "step{}".format(self.short_uuid())
+
+        return step
+
+
+    def environment(self):
+        return self.yaml_file.read_variable("environment", "reanahub/reana-env-root6:6.18.04")
+
+    def memory(self):
+        return self.yaml_file.read_variable("kubernetes_memory_limit", "256Mi")
