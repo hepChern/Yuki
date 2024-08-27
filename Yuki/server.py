@@ -95,7 +95,7 @@ def execute():
             job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
             job = VJob(job_path, None)
             print("job", job, job.job_type(), job.status())
-            if job.job_type() == "task" and job.status() == "raw":
+            if job.job_type() == "task" and (job.status() == "raw" or job.status() == "failed"):
                 job.set_status("waiting")
                 start_jobs.append(job)
 
@@ -116,6 +116,26 @@ def execute():
 def download_file(filename):
     directory = os.path.join(os.getcwd(), "data")  # Assuming in the current directory
     return send_from_directory(directory, filename, as_attachment=True)
+
+@app.route("/export/<impression>/<filename>", methods=['GET'])
+def export(impression, filename):
+    # Download the file of the impression
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    runners_id = runner_config_file.read_variable("runners_id", {})
+    # Search for the first machine that has the file
+    for runner in runners:
+        runner_id = runners_id[runner]
+        path = os.path.join(job_path, runner_id, "outputs")
+        full_path = os.path.join(path, filename)
+        print("path", full_path)
+        if os.path.exists(full_path):
+            return send_from_directory(path, filename, as_attachment=True)
+    return "NOTFOUND"
+
+
 
 @app.route("/setsampleuuid/<impression>/<sampleuuid>", methods=['GET'])
 def setsampleuuid(impression, sampleuuid):
