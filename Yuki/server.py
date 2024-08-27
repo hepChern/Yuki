@@ -88,6 +88,21 @@ def execute():
     if request.method == 'POST':
         machine = request.form["machine"]
         contents = request.files["impressions"].read().decode()
+        start_jobs = []
+        print("contents:", contents)
+        for impression in contents.split(" "):
+            print("impression:", impression)
+            job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+            job = VJob(job_path, None)
+            print("job", job, job.job_type(), job.status())
+            if job.job_type() == "task" and job.status() == "raw":
+                job.set_status("waiting")
+                start_jobs.append(job)
+
+        if len(start_jobs) == 0:
+            return "no job to run"
+        contents = " ".join([job.uuid for job in start_jobs])
+
         task = task_exec_impression.apply_async(args=[contents, machine])
         for impression in contents.split(" "):
             job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
@@ -107,7 +122,35 @@ def setsampleuuid(impression, sampleuuid):
     job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
     config_file = ConfigFile(os.path.join(job_path, "config.json"))
     config_file.write_variable("sample_uuid", sampleuuid)
+    config_file.write_variable("status", "finished")
     return "ok"
+
+@app.route("/kill/<impression>", methods=['GET'])
+def kill(impression):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    runners_id = runner_config_file.read_variable("runners_id", {})
+
+    config_file = ConfigFile(os.path.join(job_path, "config.json"))
+    object_type = config_file.read_variable("object_type", "")
+
+    for machine in runners:
+        machine_id = runners_id[machine]
+        job = VJob(job_path, machine_id)
+        if job.workflow_id() == "":
+            continue
+        workflow = VWorkflow([], job.workflow_id())
+        workflow.kill()
+    return "ok"
+
+@app.route("/runners", methods=['GET'])
+def runners():
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    return " ".join(runners)
 
 @app.route("/samplestatus/<impression>", methods=['GET'])
 def samplestatus(impression):
@@ -137,6 +180,8 @@ def status(impression):
             continue
         workflow = VWorkflow([], job.workflow_id())
         status = workflow.status()
+        print("Status from workflow", status)
+        job.update_status_from_workflow(status)
         if status != "finished" and status != "failed":
             task_update_workflow_status.apply_async(args=[workflow.uuid])
 
@@ -146,7 +191,9 @@ def status(impression):
         if os.path.exists(job_path):
             return "deposited"
 
-    return "empty"
+    job = VJob(job_path, None)
+    return job.status()
+
 
 @app.route("/status/<impression>/<machine>", methods=['GET'])
 def runstatus(impression):
@@ -334,7 +381,8 @@ def sampleuuid(impression):
 
 def start_flask_app():
     app.run(
-        host='127.0.0.1',
+        # host='127.0.0.1',
+        host='0.0.0.0',
         port= 3315,
         debug= False,
         )

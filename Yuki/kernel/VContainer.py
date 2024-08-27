@@ -62,8 +62,11 @@ class VContainer(VJob):
         return None
 
     def step(self):
-        raw_commands = self.image().yaml_file.read_variable("commands", [])
         commands = ["mkdir -p {}".format(self.short_uuid())]
+        if self.is_input:
+            raw_commands = []
+        else:
+            raw_commands = self.image().yaml_file.read_variable("commands", [])
         for command in raw_commands:
             # Replace the commands (parameters):
             parameters, values = self.parameters()
@@ -87,7 +90,10 @@ class VContainer(VJob):
         step["commands"] = commands
         commands.append("touch {}.done".format(self.short_uuid()))
         commands = " && ".join(commands)
-        step["environment"] = self.environment()
+        if self.is_input:
+            step["environment"] = "reanahub/reana-env-root6:6.18.04"
+        else:
+            step["environment"] = self.environment()
         step["kubernetes_memory_limit"] = self.memory()
         step["name"] = "step{}".format(self.short_uuid())
         step["kubernetes_uid"] = None
@@ -96,8 +102,11 @@ class VContainer(VJob):
         return step
 
     def snakemake_rule(self):
-        raw_commands = self.image().yaml_file.read_variable("commands", [])
         commands = ["mkdir -p {}".format(self.short_uuid())]
+        if self.is_input:
+            raw_commands = []
+        else:
+            raw_commands = self.image().yaml_file.read_variable("commands", [])
         for command in raw_commands:
             # Replace the commands (parameters):
             parameters, values = self.parameters()
@@ -120,19 +129,23 @@ class VContainer(VJob):
         step = {}
         step["commands"] = commands
         commands.append("touch {}.done".format(self.short_uuid()))
-        step["environment"] = self.environment()
+        if self.is_input:
+            step["environment"] = "reanahub/reana-env-root6:6.18.04"
+        else:
+            step["environment"] = self.environment()
         step["memory"] = self.memory()
         step["name"] = "step{}".format(self.short_uuid())
         step["output"] = "{}.done".format(self.short_uuid())
 
         step["inputs"] = []
-        alias_list, alias_map = self.inputs()
-        for alias in alias_list:
-            impression = alias_map[alias]
-            step["inputs"].append("{}.done".format(impression[:7]))
-        image = self.image()
-        if image:
-            step["inputs"].append("{}.done".format(image.short_uuid()))
+        if not self.is_input:
+            alias_list, alias_map = self.inputs()
+            for alias in alias_list:
+                impression = alias_map[alias]
+                step["inputs"].append("{}.done".format(impression[:7]))
+            image = self.image()
+            if image:
+                step["inputs"].append("{}.done".format(image.short_uuid()))
 
         return step
 
@@ -197,11 +210,12 @@ class VContainer(VJob):
         return "submitted"
 
     def outputs(self):
-        print("outputs")
         if self.machine_id is None:
             path = os.path.join(self.path, "rawdata")
             return csys.list_dir(path)
         path = os.path.join(self.path, self.machine_id, "outputs")
+        if not os.path.exists(path):
+            return []
         dirs = csys.list_dir(path)
         return dirs
 

@@ -11,7 +11,9 @@ class VJob(object):
     def __init__(self, path, machine_id):
         """ Initialize the project the only **information** of a object instance
         """
+        self.is_input = False
         self.path = path
+        self.uuid = path[-32:]
         self.machine_id = machine_id
         self.config_file = metadata.ConfigFile(
             os.path.join(self.path, "config.json")
@@ -19,6 +21,8 @@ class VJob(object):
         self.yaml_file = metadata.YamlFile(
             os.path.join(self.path, "contents", "chern.yaml")
         )
+        if self.environment() == "rawdata":
+            self.is_input = True
         if machine_id is not None:
             self.run_path = os.path.join(self.path, machine_id, "run")
             self.run_config_file = metadata.ConfigFile(
@@ -68,6 +72,12 @@ class VJob(object):
     def workflow_id(self):
         return self.run_config_file.read_variable("workflow", "")
 
+    def environment(self):
+        yaml_file = metadata.YamlFile(
+            os.path.join(self.path, "contents", "chern.yaml")
+            )
+        return yaml_file.read_variable("environment", "")
+
 
     """ Let's consider when to update the status later
     """
@@ -75,10 +85,18 @@ class VJob(object):
         logger = getLogger("YukiLogger")
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
         logger.info(self.path)
-        status = config_file.read_variable("status", "submitted")
-        if status != "submitted":
+        status = config_file.read_variable("status", "raw")
+        if status != "raw":
             return status
-        return "submitted"
+        return "raw"
+
+    def set_status(self, status):
+        config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
+        config_file.write_variable("status", status)
+
+    def update_data_status(self, status):
+        config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
+        config_file.write_variable("status", status)
 
     def update_status(self, status):
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
@@ -86,6 +104,23 @@ class VJob(object):
             config_file.write_variable("status", "running")
         if status == "SUCCESS":
             config_file.write_variable("status", "success")
+
+    def update_status_from_workflow(self, status):
+        config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
+        current_status = config_file.read_variable("status", "raw")
+        if current_status == "raw":
+            config_file.write_variable("status", status)
+        elif current_status == "running":
+            if status == "success":
+                config_file.write_variable("status", "success")
+            elif status == "finished":
+                config_file.write_variable("status", "finished")
+            elif status == "failure":
+                config_file.write_variable("status", "failure")
+        elif current_status == "success" or current_status == "failure":
+            pass
+        else:
+            config_file.write_variable("status", status)
 
     def error(self):
         if os.path.exists(self.path+"/error"):
