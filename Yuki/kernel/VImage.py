@@ -100,6 +100,16 @@ class VImage(VJob):
 
     def step(self):
         commands = ["mkdir -p {}".format(self.short_uuid())]
+        commands.append("cd {}".format(self.short_uuid()))
+
+        compile_rules = self.yaml_file.read_variable("compile", [])
+        for rule in compile_rules:
+            # Replace the ${code} with the code path
+            rule = rule.replace("${code}", self.short_uuid())
+            rule = rule.replace("${workspace}", "$REANA_WORKSPACE")
+            commands.append(rule)
+
+        commands.append("cd $REANA_WORKSPACE")
         commands.append("touch {}.done".format(self.short_uuid()))
         step = {}
         step["inputs"] = []
@@ -114,6 +124,16 @@ class VImage(VJob):
 
     def snakemake_rule(self):
         commands = ["mkdir -p {}".format(self.short_uuid())]
+        commands.append("cd {}".format(self.short_uuid()))
+
+        compile_rules = self.yaml_file.read_variable("compile", [])
+        for rule in compile_rules:
+            # Replace the ${code} with the code path
+            rule = rule.replace("${code}", self.short_uuid())
+            rule = rule.replace("${workspace}", "$REANA_WORKSPACE")
+            commands.append(rule)
+
+        commands.append("cd $REANA_WORKSPACE")
         commands.append("touch {}.done".format(self.short_uuid()))
         step = {}
         step["inputs"] = []
