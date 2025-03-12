@@ -115,9 +115,9 @@ class VJob(object):
                 config_file.write_variable("status", "success")
             elif status == "finished":
                 config_file.write_variable("status", "finished")
-            elif status == "failure":
-                config_file.write_variable("status", "failure")
-        elif current_status == "success" or current_status == "failure":
+            elif status == "failed":
+                config_file.write_variable("status", "failed")
+        elif current_status == "success" or current_status == "failed":
             pass
         else:
             config_file.write_variable("status", status)
