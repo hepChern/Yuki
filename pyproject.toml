@@ -21,7 +21,6 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython"
 ]
 dependencies = [
-    "Chern",
     "click",
     "colored",
     "python-daemon",
