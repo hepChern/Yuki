@@ -198,6 +198,7 @@ def status(impression):
         job = VJob(job_path, machine_id)
         if job.workflow_id() == "":
             continue
+        print("Checking status for job", job)
         workflow = VWorkflow([], job.workflow_id())
         status = workflow.status()
         print("Status from workflow", status)
