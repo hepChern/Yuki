@@ -63,6 +63,7 @@ class VContainer(VJob):
 
     def step(self):
         commands = ["mkdir -p {}".format(self.short_uuid())]
+        commands.append("cd {}".format(self.short_uuid()))
         if self.is_input:
             raw_commands = []
         else:
@@ -81,6 +82,7 @@ class VContainer(VJob):
                 impression = alias_map[alias]
                 name = "${"+ alias +"}"
                 command = command.replace(name, impression[:7])
+            command = command.replace("${workspace}", "$REANA_WORKSPACE")
             command = command.replace("${output}", self.short_uuid())
             image = self.image()
             if image:
@@ -88,6 +90,7 @@ class VContainer(VJob):
             commands.append(command.replace("\"", "\\\""))
         step = {}
         step["commands"] = commands
+        commands.append("cd $REANA_WORKSPACE")
         commands.append("touch {}.done".format(self.short_uuid()))
         commands = " && ".join(commands)
         if self.is_input:
@@ -103,6 +106,7 @@ class VContainer(VJob):
 
     def snakemake_rule(self):
         commands = ["mkdir -p {}".format(self.short_uuid())]
+        commands.append("cd {}".format(self.short_uuid()))
         if self.is_input:
             raw_commands = []
         else:
@@ -121,6 +125,7 @@ class VContainer(VJob):
                 impression = alias_map[alias]
                 name = "${"+ alias +"}"
                 command = command.replace(name, impression[:7])
+            command = command.replace("${workspace}", "$REANA_WORKSPACE")
             command = command.replace("${output}", self.short_uuid())
             image = self.image()
             if image:
@@ -128,6 +133,7 @@ class VContainer(VJob):
             commands.append(command.replace("\"", "\\\""))
         step = {}
         step["commands"] = commands
+        commands.append("cd $REANA_WORKSPACE")
         commands.append("touch {}.done".format(self.short_uuid()))
         if self.is_input:
             step["environment"] = "reanahub/reana-env-root6:6.18.04"
