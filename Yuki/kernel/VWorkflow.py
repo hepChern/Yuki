@@ -2,7 +2,6 @@
 Construction of a workflow with the jobs, especially from the task
 """
 import os
-from Chern import utils
 from Chern.utils import csys
 from Chern.utils import metadata
 from Chern.kernel.ChernCache import ChernCache
@@ -10,7 +9,6 @@ from Yuki.kernel.VJob import VJob
 from Yuki.kernel.VContainer import VContainer
 from Yuki.kernel.VImage import VImage
 import time
-import json
 from Yuki.utils import snakefile
 
 # Comments:
@@ -46,27 +44,122 @@ class VWorkflow(object):
         self.set_enviroment(self.machine_id)
         self.access_token = self.get_access_token(self.machine_id)
 
-    def get_access_token(self, machine_id):
-        path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
-        config_file = metadata.ConfigFile(path)
-        tokens = config_file.read_variable("tokens", {})
-        token = tokens.get(machine_id, "")
-        return token
+    def get_name(self):
+        return "w-" + self.uuid[:8]
 
-    def set_enviroment(self, machine_id):
-        # Set the enviroment variable
-        path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
-        config_file = metadata.ConfigFile(path)
-        urls = config_file.read_variable("urls", {})
-        url = urls.get(machine_id, "")
-        os.environ["REANA_SERVER_URL"] = url
+    """ Run the workflow:
+    1. Construct the workflow from the start_job
+    2. Set all the jobs to be the waiting status
+    3. Check the dependencies
+    4. Run
+    """
+    def run(self):
+        for job in self.start_job:
+            self.construct_workflow_jobs(job)
+
+        # Set all the jobs to be the waiting status
+        for job in self.jobs:
+            if job.is_input: continue
+            job.set_status("waiting")
+
+        # First, check whether the dependencies are satisfied
+        while True:
+            all_finished = True
+            for job in self.jobs:
+                if not job.is_input: continue
+                workflow = VWorkflow([], job.workflow_id())
+                if workflow:
+                    workflow.update_workflow_status()
+                status = workflow.status()
+                job.update_status_from_workflow(status)
+                if job.status() != "finished":
+                    all_finished = False
+                    break
+            if all_finished: break
+            time.sleep(10)
+
+        for job in self.jobs:
+            if job.is_input: continue
+            job.set_workflow_id(self.uuid)
+            job.set_status("running")
+
+        try:
+            print("Constructing the snakefile")
+            self.construct_snake_file()
+        except:
+            print("Failed to construct the snakefile")
+            self.set_workflow_status("failed")
+            for job in self.jobs:
+                job.set_status("failed")
+            raise
+
+        try:
+            print("Creating the workflow")
+            self.create_workflow()
+        except:
+            print("Failed to create the workflow")
+            self.set_workflow_status("failed")
+            for job in self.jobs:
+                job.set_status("failed")
+            raise
+
+        try:
+            self.upload_file()
+        except:
+            self.set_workflow_status("failed")
+            for job in self.jobs:
+                job.set_status("failed")
+            raise
+
+        try:
+            self.start_workflow()
+        except:
+            self.set_workflow_status("failed")
+            for job in self.jobs:
+                job.set_status("failed")
+            raise
+
+        self.check_status()
+        self.download()
 
 
-    def ping(self):
-        # Ping the server
-        # We must import the client here because we need to set the enviroment variable first
+
+    def kill(self):
         from reana_client.api import client
-        return client.ping(self.access_token)
+        client.stop_workflow(
+            self.get_name(),
+            False,
+            self.get_access_token(self.machine_id)
+        )
+
+
+    def construct_workflow_jobs(self, job):
+        last_consult_time = cherncache.consult_table.get(job.path, -1)
+        if time.time() - last_consult_time < 1: return
+        cherncache.consult_table[job.path] = time.time()
+
+        # Even if the job is finished, we still need to add it to the workflow,
+        # because we need to upload the files
+        if job.status() == "finished":
+            if job.object_type() == "task": job.is_input = True
+            self.jobs.append(job)
+            return
+
+        if job.status() == "failed":
+            if job.object_type() == "task": job.is_input = True
+            self.jobs.append(job)
+            return
+
+        if job.status() == "pending" or job.status() == "running":
+            if job.object_type() == "task": job.is_input = True
+            self.jobs.append(job)
+            return
+
+        for dependence in job.dependencies():
+            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", dependence)
+            self.construct_workflow_jobs(VJob(path, self.machine_id))
+        self.jobs.append(job)
+
 
     def create_workflow(self):
         # create a workflow
@@ -119,6 +212,9 @@ class VWorkflow(object):
                 # Replace the ${}
         return steps
 
+
+    """  related to the snakemake
+    """
     def construct_snake_file(self):
         self.snakefile_path = os.path.join(self.path, "Snakefile")
         snake_file = snakefile.SnakeFile(os.path.join(self.path, "Snakefile"))
@@ -166,6 +262,23 @@ class VWorkflow(object):
             self.steps.append(step)
 
         snake_file.write()
+
+    """ Related to reana
+    """
+    def get_access_token(self, machine_id):
+        path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+        config_file = metadata.ConfigFile(path)
+        tokens = config_file.read_variable("tokens", {})
+        token = tokens.get(machine_id, "")
+        return token
+
+    def set_enviroment(self, machine_id):
+        # Set the enviroment variable
+        path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+        config_file = metadata.ConfigFile(path)
+        urls = config_file.read_variable("urls", {})
+        url = urls.get(machine_id, "")
+        os.environ["REANA_SERVER_URL"] = url
 
     def upload_file(self):
         from reana_client.api import client
@@ -221,60 +334,6 @@ class VWorkflow(object):
             self.get_access_token(self.machine_id)
         )
 
-
-    def get_name(self):
-        return "w-" + self.uuid[:8]
-
-    def get_workflow(self, job):
-        last_consult_time = cherncache.consult_table.get(job.path, -1)
-        if time.time() - last_consult_time < 1: return
-        cherncache.consult_table[job.path] = time.time()
-
-        # Even if the job is finished, we still need to add it to the workflow,
-        # because we need to upload the files
-        if job.status() == "finished":
-            if job.object_type() == "task": job.is_input = True
-            self.jobs.append(job)
-            return
-
-        if job.status() == "failed":
-            if job.object_type() == "task": job.is_input = True
-            self.jobs.append(job)
-            return
-
-        if job.status() == "pending" or job.status() == "running":
-            if job.object_type() == "task": job.is_input = True
-            self.jobs.append(job)
-            return
-
-        for dependence in job.dependencies():
-            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", dependence)
-            self.get_workflow(VJob(path, self.machine_id))
-        self.jobs.append(job)
-
-    def construct(self):
-        self.writeline("version 0.1.0")
-        # Write the code name for jobs
-        for job in self.jobs:
-            if job.object_type == "algorithm":
-                self.writeline(job.to_yaml())
-
-        for job in self.jobs:
-            if job.object_type == "task":
-                self.writeline(job.to_yaml())
-
-    def run_workflow(self):
-        # use the reana api to run the workflow
-        pass
-
-    def kill(self):
-        from reana_client.api import client
-        client.stop_workflow(
-            self.get_name(),
-            False,
-            self.get_access_token(self.machine_id)
-        )
-
     def check_status(self):
         # Check the status of the workflow
         # Check whether the workflow is finished, every 5 seconds
@@ -289,6 +348,7 @@ class VWorkflow(object):
                 return status
             time.sleep(1)
             counter += 1
+
 
     def set_workflow_status(self, status):
         path = os.path.join(self.path, "results.json")
@@ -320,77 +380,6 @@ class VWorkflow(object):
     def writeline(self, line):
         self.yaml_file.writeline(line)
 
-    def write_to(self):
-        pass
-
-    def run(self):
-        for job in self.start_job:
-            self.get_workflow(job)
-
-        # Set all the jobs to be the waiting status
-        for job in self.jobs:
-            if job.is_input: continue
-            job.set_status("waiting")
-
-        # First, check whether the dependencies are satisfied
-        while True:
-            all_finished = True
-            for job in self.jobs:
-                if not job.is_input: continue
-                workflow = VWorkflow([], job.workflow_id())
-                if workflow:
-                    workflow.update_workflow_status()
-                status = workflow.status()
-                job.update_status_from_workflow(status)
-                if job.status() != "finished":
-                    all_finished = False
-                    break
-            if all_finished: break
-            time.sleep(10)
-
-        for job in self.jobs:
-            if job.is_input: continue
-            job.set_workflow_id(self.uuid)
-            job.set_status("running")
-
-        try:
-            print("Constructing the snake file")
-            self.construct_snake_file()
-        except:
-            print("Failed to construct the snake file")
-            self.set_workflow_status("failed")
-            for job in self.jobs:
-                job.set_status("failed")
-            raise
-
-        try:
-            print("Creating the workflow")
-            self.create_workflow()
-        except:
-            print("Failed to create the workflow")
-            self.set_workflow_status("failed")
-            for job in self.jobs:
-                job.set_status("failed")
-            raise
-
-        try:
-            self.upload_file()
-        except:
-            self.set_workflow_status("failed")
-            for job in self.jobs:
-                job.set_status("failed")
-            raise
-
-        try:
-            self.start_workflow()
-        except:
-            self.set_workflow_status("failed")
-            for job in self.jobs:
-                job.set_status("failed")
-            raise
-
-        self.check_status()
-        self.download()
 
 
     def start_workflow(self):
@@ -423,4 +412,12 @@ class VWorkflow(object):
                 filename = os.path.join(path, "outputs", file["name"][8:])
                 with open(filename, "wb") as f:
                     f.write(output[0])
+
+
+    # FIXME: This function is not used
+    def ping(self):
+        # Ping the server
+        # We must import the client here because we need to set the enviroment variable first
+        from reana_client.api import client
+        return client.ping(self.access_token)
 
