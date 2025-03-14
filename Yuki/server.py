@@ -41,11 +41,6 @@ app.config['result_backend'] = 'rpc://'
 celeryapp = Celery(app.name, broker=app.config['CELERY_broker_url'])
 celeryapp.conf.update(app.config)
 
-import sqlite3
-
-def connect():
-    conn = sqlite3.connect(os.path.join(os.environ["HOME"], '.Yuki/Storage/impressions.db') )
-    return conn
 
 @celeryapp.task
 def task_exec_impression(impressions, machine_uuid):
@@ -137,13 +132,6 @@ def export(impression, filename):
 
 
 
-@app.route("/setsampleuuid/<impression>/<sampleuuid>", methods=['GET'])
-def setsampleuuid(impression, sampleuuid):
-    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
-    config_file = ConfigFile(os.path.join(job_path, "config.json"))
-    config_file.write_variable("sample_uuid", sampleuuid)
-    config_file.write_variable("status", "finished")
-    return "ok"
 
 @app.route("/kill/<impression>", methods=['GET'])
 def kill(impression):
@@ -286,13 +274,6 @@ def machine_id(machine):
     runner_id = config_file.read_variable("runners_id", {})
     return runner_id[machine]
 
-# @app.route("/runstatus/<impression>", method=['GET'])
-# def runstatus(impression):
-#     #task_id = get_run_id(impression)
-#     # long_task.AsyncResult(task_id)
-#     #return statu0s
-#     return ""
-
 @app.route("/outputs/<impression>/<machine>", methods=['GET'])
 def outputs(impression, machine):
     if machine == "none":
@@ -351,24 +332,10 @@ def collect(impression):
             workflow.download(impression)
     return "ok"
 
-
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'GET':
-        conn = connect()
-        c = conn.cursor()
-        cursor = c.execute("SELECT ID, STATUS from IMPRESSIONS")
         impressions = []
-        for row in cursor:
-            impression = {}
-            impression["id"] = row[0]
-            impression["status"] = row[1]
-            impression["size"] = "unknown"
-            impressions.append(impression)
-        conn.commit()
-        conn.close()
-
         return render_template('index.html', impressions=impressions)
 
     return redirect(url_for('index'))
@@ -394,15 +361,9 @@ def workflow(impression):
         return "{} {}".format(machine, workflow.uuid)
     return "UNDEFINED"
 
-@app.route('/sampleuuid/<impression>', methods=['GET'])
-def sampleuuid(impression):
-    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
-    config_file = ConfigFile(os.path.join(job_path, "config.json"))
-    return config_file.read_variable("sample_uuid", "")
 
 def start_flask_app():
     app.run(
-        # host='127.0.0.1',
         host='0.0.0.0',
         port= 3315,
         debug= False,
@@ -415,11 +376,6 @@ def start_celery_worker():
 def server_start():
     daemon_path = os.path.join(os.environ["HOME"], ".Yuki/daemon")
     print(colorize("[*[*[* Starting the Data Integration Thought Entity *]*]*]", "title0"))
-
-    # with daemon.DaemonContext(
-    #     pidfile=pidfile.TimeoutPIDLockFile(daemon_path + "/server.pid"),
-    #     stderr=open(daemon_path + "/server.log", "w+"),
-    #     ):
 
     flask_process = Process(target=start_flask_app)
     celery_process = Process(target=start_celery_worker)
@@ -437,3 +393,23 @@ def stop():
     daemon_path = os.path.join(os.environ["HOME"], ".Yuki/daemon")
     subprocess.call("kill {}".format(open(daemon_path + "/server.pid").read()), shell=True)
     subprocess.call("kill {}".format(open(daemon_path + "/runner.pid").read()), shell=True)
+
+# Deleted
+# @app.route("/setsampleuuid/<impression>/<sampleuuid>", methods=['GET'])
+# def setsampleuuid(impression, sampleuuid):
+#     job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+#     config_file = ConfigFile(os.path.join(job_path, "config.json"))
+#     config_file.write_variable("sample_uuid", sampleuuid)
+#     config_file.write_variable("status", "finished")
+#     return "ok"
+# @app.route('/sampleuuid/<impression>', methods=['GET'])
+# def sampleuuid(impression):
+#     job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+#     config_file = ConfigFile(os.path.join(job_path, "config.json"))
+#     return config_file.read_variable("sample_uuid", "")
+# import sqlite3
+#
+# def connect():
+#     conn = sqlite3.connect(os.path.join(os.environ["HOME"], '.Yuki/Storage/impressions.db') )
+#     return conn
+
