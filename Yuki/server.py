@@ -24,7 +24,6 @@ from multiprocessing import Process
 
 app = Flask(__name__)
 
-# logging.basicConfig(level=logging.DEBUG)
 logger = getLogger("YukiLogger")
 handler = logging.StreamHandler(sys.stdout)
 formatter = logging.Formatter('[%(asctime)s][%(levelname)s] - %(message)s')
@@ -240,8 +239,8 @@ def deposited(impression):
 
 
 
-@app.route("/serverstatus", methods=['GET'])
-def serverstatus():
+@app.route("/ditestatus", methods=['GET'])
+def ditestatus():
     return "ok"
 
 @app.route("/run/<impression>/<machine>", methods=['GET'])
