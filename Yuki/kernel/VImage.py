@@ -15,7 +15,7 @@ class VImage(VJob):
     def __init__(self, path, machine_id):
         super(VImage, self).__init__(path, machine_id)
 
-        def image_id(self):
+    def image_id(self):
         dirs = csys.list_dir(self.path)
         for run in dirs:
             if run.startswith("run."):
