@@ -19,6 +19,7 @@ import sys
 from celery import Celery
 from logging import getLogger
 import logging
+from time import sleep
 
 from multiprocessing import Process
 
@@ -60,6 +61,7 @@ def task_update_workflow_status(workflow_id):
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
+        print("Trying to upload files:", request.form)
 
         tarname = request.form["tarname"]
         storage_path = os.path.join(os.environ["HOME"], ".Yuki/Storage")
@@ -150,6 +152,9 @@ def kill(impression):
             continue
         workflow = VWorkflow([], job.workflow_id())
         workflow.kill()
+
+    job = VJob(job_path, None)
+    job.set_status("failed")
     return "ok"
 
 @app.route("/runners", methods=['GET'])
@@ -158,6 +163,75 @@ def runners():
     runner_config_file = ConfigFile(runner_config_path)
     runners = runner_config_file.read_variable("runners", [])
     return " ".join(runners)
+
+@app.route("/runnersurl", methods=['GET'])
+def runnersurl():
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    runners_id = runner_config_file.read_variable("runners_id", {})
+    runners_url = runner_config_file.read_variable("urls", {})
+    return " ".join([runners_url[runners_id[runner]] for runner in runners])
+
+def ping(url, token):
+    os.environ["REANA_SERVER_URL"] = url
+    from reana_client.api import client
+    return client.ping(token)
+
+@app.route("/runnerconnection/<runner>", methods=['GET'])
+def runnerconnection(runner):
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners_id = runner_config_file.read_variable("runners_id", {})
+    runner_id = runners_id.get(runner, "")
+    tokens = runner_config_file.read_variable("tokens", {})
+    token = tokens.get(runner_id, "")
+    urls = runner_config_file.read_variable("urls", {})
+    url = urls.get(runner_id, "")
+
+    print(url)
+    print(token)
+    return ping(url, token)
+
+
+@app.route("/registerrunner", methods=['POST'])
+def registerrunner():
+    if request.method == 'POST':
+        print(request.form)
+        runner = request.form["runner"]
+        runner_url = request.form["url"]
+        runner_id = csys.generate_uuid()
+        runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+        runner_config_file = ConfigFile(runner_config_path)
+        runners = runner_config_file.read_variable("runners", [])
+        runners_id = runner_config_file.read_variable("runners_id", {})
+        runners_url = runner_config_file.read_variable("urls", {})
+        runners.append(runner)
+        runners_id[runner] = runner_id
+        runners_url[runner_id] = runner_url
+        runner_config_file.write_variable("runners", runners)
+        runner_config_file.write_variable("runners_id", runners_id)
+        runner_config_file.write_variable("urls", runners_url)
+    return "successful"
+
+@app.route("/removerunner/<runner>", methods=['GET'])
+def removerunner(runner):
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    runners_id = runner_config_file.read_variable("runners_id", {})
+    urls = runner_config_file.read_variable("urls", {})
+    if runner not in runners:
+        return "runner not found"
+    runner_id = runners_id[runner]
+    print("runner_id", runner_id)
+    runners.remove(runner)
+    del runners_id[runner]
+    del urls[runner_id]
+    runner_config_file.write_variable("runners", runners)
+    runner_config_file.write_variable("runners_id", runners_id)
+    runner_config_file.write_variable("urls", urls)
+    return "successful"
 
 @app.route("/samplestatus/<impression>", methods=['GET'])
 def samplestatus(impression):
