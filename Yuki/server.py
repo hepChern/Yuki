@@ -104,9 +104,14 @@ def execute():
             job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
             VJob(job_path, machine).set_runid(task.id)
         return task.id
-
     # FIXME should check whether the upload is successful or not
 
+@app.route('/setjobstatus/<impression>/<status>', methods=['GET'])
+def setjobstatus(impression, status):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    job = VJob(job_path, None)
+    job.set_status(status)
+    return "ok"
 
 @app.route("/download/<filename>", methods=['GET'])
 def download_file(filename):

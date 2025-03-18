@@ -1,5 +1,4 @@
 import os
-from Chern.utils import utils
 from Chern.utils import csys
 from Chern.utils import metadata
 from logging import getLogger
