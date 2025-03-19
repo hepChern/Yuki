@@ -180,6 +180,8 @@ def runnersurl():
 
 def ping(url, token):
     os.environ["REANA_SERVER_URL"] = url
+    print("url", url)
+    print("token", token)
     from reana_client.api import client
     return client.ping(token)
 
@@ -205,18 +207,22 @@ def registerrunner():
         print(request.form)
         runner = request.form["runner"]
         runner_url = request.form["url"]
+        runner_token = request.form["token"]
         runner_id = csys.generate_uuid()
         runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
         runner_config_file = ConfigFile(runner_config_path)
         runners = runner_config_file.read_variable("runners", [])
         runners_id = runner_config_file.read_variable("runners_id", {})
         runners_url = runner_config_file.read_variable("urls", {})
+        tokens = runner_config_file.read_variable("tokens", {})
         runners.append(runner)
         runners_id[runner] = runner_id
         runners_url[runner_id] = runner_url
+        tokens[runner_id] = runner_token
         runner_config_file.write_variable("runners", runners)
         runner_config_file.write_variable("runners_id", runners_id)
         runner_config_file.write_variable("urls", runners_url)
+        runner_config_file.write_variable("tokens", tokens)
     return "successful"
 
 @app.route("/removerunner/<runner>", methods=['GET'])
