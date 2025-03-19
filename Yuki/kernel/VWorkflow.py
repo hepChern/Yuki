@@ -286,10 +286,11 @@ class VWorkflow(object):
         from reana_client.api import client
         for job in self.jobs:
             for name in job.files():
+                print("upload file: {}".format(name))
                 client.upload_file(
                     self.get_name(),
                     open(os.path.join(job.path, "contents", name[8:]), "rb"),
-                    name,
+                    "imp" + name,
                     self.get_access_token(self.machine_id)
                 )
             if job.environment() == "rawdata":

@@ -147,7 +147,7 @@ class VJob(object):
         for dirpath, dirnames, filenames in tree:
             for f in filenames:
                 if f == "chern.yaml": continue
-                name = self.short_uuid()
+                name = f"{self.short_uuid()}"
                 if dirpath == ".":
                     name = os.path.join(name, f)
                 else:

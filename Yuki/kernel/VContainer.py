@@ -28,8 +28,8 @@ class VContainer(VJob):
         return None
 
     def step(self):
-        commands = ["mkdir -p {}".format(self.short_uuid())]
-        commands.append("cd {}".format(self.short_uuid()))
+        commands = ["mkdir -p imp{}".format(self.short_uuid())]
+        commands.append("cd imp{}".format(self.short_uuid()))
         if self.is_input:
             raw_commands = []
         else:
@@ -48,10 +48,10 @@ class VContainer(VJob):
                 name = "${"+ alias +"}"
                 command = command.replace(name, impression[:7])
             command = command.replace("${workspace}", "$REANA_WORKSPACE")
-            command = command.replace("${output}", self.short_uuid())
+            command = command.replace("${output}", f"imp{self.short_uuid()}")
             image = self.image()
             if image:
-                command = command.replace("${code}", image.short_uuid())
+                command = command.replace("${code}", f"$REANA_WORKSPACE/imp{image.short_uuid()}")
             commands.append(command.replace("\"", "\\\""))
         step = {}
         step["commands"] = commands
@@ -70,8 +70,8 @@ class VContainer(VJob):
         return step
 
     def snakemake_rule(self):
-        commands = ["mkdir -p {}".format(self.short_uuid())]
-        commands.append("cd {}".format(self.short_uuid()))
+        commands = ["mkdir -p imp{}".format(self.short_uuid())]
+        commands.append("cd imp{}".format(self.short_uuid()))
         if self.is_input:
             raw_commands = []
         else:
@@ -91,10 +91,10 @@ class VContainer(VJob):
                 name = "${"+ alias +"}"
                 command = command.replace(name, impression[:7])
             command = command.replace("${workspace}", "$REANA_WORKSPACE")
-            command = command.replace("${output}", self.short_uuid())
+            command = command.replace("${output}", f"imp{self.short_uuid()}")
             image = self.image()
             if image:
-                command = command.replace("${code}", image.short_uuid())
+                command = command.replace("${code}", f"$REANA_WORKSPACE/imp{image.short_uuid()}")
             commands.append(command.replace("\"", "\\\""))
         step = {}
         step["commands"] = commands

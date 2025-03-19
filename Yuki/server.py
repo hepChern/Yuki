@@ -56,8 +56,10 @@ def task_exec_impression(impressions, machine_uuid):
 
 @celeryapp.task
 def task_update_workflow_status(workflow_id):
+    print("# >>> task_update_workflow_status")
     workflow = VWorkflow([], workflow_id)
     workflow.update_workflow_status()
+    print("# <<< task_update_workflow_status")
 
 
 @app.route('/upload', methods=['GET', 'POST'])
@@ -83,7 +85,7 @@ def upload_file():
 
 @app.route('/execute', methods=['GET', 'POST'])
 def execute():
-    print("Trying to execute")
+    print("# >>> execute")
     if request.method == 'POST':
         machine = request.form["machine"]
         contents = request.files["impressions"].read().decode()
@@ -95,12 +97,21 @@ def execute():
             job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
             job = VJob(job_path, None)
             print("job", job, job.job_type(), job.status())
-            if job.job_type() == "task" and (job.status() == "raw" or job.status() == "failed"):
+            if job.job_type() == "task":
+                if job.status() not in  ("raw", "failed"):
+                    print("job status is not raw or failed")
+                    continue
+                job.set_status("waiting")
+                start_jobs.append(job)
+            elif job.job_type() == "algorithm":
+                if job.environment() == "script":
+                    continue
                 job.set_status("waiting")
                 start_jobs.append(job)
 
         if len(start_jobs) == 0:
             print("no job to run")
+            print("# <<< execute")
             return "no job to run"
         contents = " ".join([job.uuid for job in start_jobs])
 
@@ -110,6 +121,7 @@ def execute():
         for impression in contents.split(" "):
             job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
             VJob(job_path, machine).set_runid(task.id)
+        print("### <<< execute")
         return task.id
     # FIXME should check whether the upload is successful or not
 

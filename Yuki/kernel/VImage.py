@@ -26,14 +26,14 @@ class VImage(VJob):
         return ""
 
     def step(self):
-        commands = ["mkdir -p {}".format(self.short_uuid())]
-        commands.append("cd {}".format(self.short_uuid()))
+        commands = ["mkdir -p imp{}".format(self.short_uuid())]
+        commands.append("cd imp{}".format(self.short_uuid()))
 
-        compile_rules = self.yaml_file.read_variable("compile", [])
+        compile_rules = self.yaml_file.read_variable("build", [])
         for rule in compile_rules:
             # Replace the ${code} with the code path
-            rule = rule.replace("${code}", self.short_uuid())
             rule = rule.replace("${workspace}", "$REANA_WORKSPACE")
+            rule = rule.replace("${code}", f"$REANA_WORKSPACE/imp{self.short_uuid()}")
             commands.append(rule)
 
         commands.append("cd $REANA_WORKSPACE")
@@ -47,14 +47,14 @@ class VImage(VJob):
         return step
 
     def snakemake_rule(self):
-        commands = ["mkdir -p {}".format(self.short_uuid())]
-        commands.append("cd {}".format(self.short_uuid()))
+        commands = ["mkdir -p imp{}".format(self.short_uuid())]
+        commands.append("cd imp{}".format(self.short_uuid()))
 
-        compile_rules = self.yaml_file.read_variable("compile", [])
+        compile_rules = self.yaml_file.read_variable("build", [])
         for rule in compile_rules:
             # Replace the ${code} with the code path
-            rule = rule.replace("${code}", self.short_uuid())
             rule = rule.replace("${workspace}", "$REANA_WORKSPACE")
+            rule = rule.replace("${code}", f"$REANA_WORKSPACE/imp{self.short_uuid()}")
             commands.append(rule)
 
         commands.append("cd $REANA_WORKSPACE")
@@ -69,7 +69,10 @@ class VImage(VJob):
         return step
 
     def environment(self):
-        return self.yaml_file.read_variable("environment", "reanahub/reana-env-root6:6.18.04")
+        environment = self.yaml_file.read_variable("environment", "reanahub/reana-env-root6:6.18.04")
+        if environment == "script":
+            return "reanahub/reana-env-root6:6.18.04"
+        return environment
 
     def memory(self):
         return self.yaml_file.read_variable("kubernetes_memory_limit", "256Mi")
