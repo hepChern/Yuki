@@ -49,7 +49,9 @@ def task_exec_impression(impressions, machine_uuid):
         job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression_uuid)
         job = VJob(job_path, machine_uuid)
         jobs.append(job)
+    print("jobs", jobs)
     workflow = VWorkflow(jobs, None)
+    print("workflow", workflow)
     workflow.run()
 
 @celeryapp.task
@@ -81,11 +83,13 @@ def upload_file():
 
 @app.route('/execute', methods=['GET', 'POST'])
 def execute():
+    print("Trying to execute")
     if request.method == 'POST':
         machine = request.form["machine"]
         contents = request.files["impressions"].read().decode()
         start_jobs = []
-        print("contents:", contents)
+        print("machine:", machine)
+        print("contents:", contents.split(" "))
         for impression in contents.split(" "):
             print("impression:", impression)
             job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
@@ -96,9 +100,12 @@ def execute():
                 start_jobs.append(job)
 
         if len(start_jobs) == 0:
+            print("no job to run")
             return "no job to run"
         contents = " ".join([job.uuid for job in start_jobs])
 
+        print("Asynchronous execution")
+        print("contents", contents)
         task = task_exec_impression.apply_async(args=[contents, machine])
         for impression in contents.split(" "):
             job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
@@ -195,9 +202,6 @@ def runnerconnection(runner):
     token = tokens.get(runner_id, "")
     urls = runner_config_file.read_variable("urls", {})
     url = urls.get(runner_id, "")
-
-    print(url)
-    print(token)
     return ping(url, token)
 
 
@@ -207,18 +211,22 @@ def registerrunner():
         print(request.form)
         runner = request.form["runner"]
         runner_url = request.form["url"]
+        runner_token = request.form["token"]
         runner_id = csys.generate_uuid()
         runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
         runner_config_file = ConfigFile(runner_config_path)
         runners = runner_config_file.read_variable("runners", [])
         runners_id = runner_config_file.read_variable("runners_id", {})
         runners_url = runner_config_file.read_variable("urls", {})
+        tokens = runner_config_file.read_variable("tokens", {})
         runners.append(runner)
         runners_id[runner] = runner_id
         runners_url[runner_id] = runner_url
+        tokens[runner_id] = runner_token
         runner_config_file.write_variable("runners", runners)
         runner_config_file.write_variable("runners_id", runners_id)
         runner_config_file.write_variable("urls", runners_url)
+        runner_config_file.write_variable("tokens", tokens)
     return "successful"
 
 @app.route("/removerunner/<runner>", methods=['GET'])
