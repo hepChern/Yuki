@@ -54,6 +54,8 @@ class VWorkflow(object):
     4. Run
     """
     def run(self):
+        # Construct the workflow
+        print("Constructing the workflow")
         for job in self.start_job:
             self.construct_workflow_jobs(job)
 

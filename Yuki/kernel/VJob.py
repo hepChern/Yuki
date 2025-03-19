@@ -48,6 +48,7 @@ class VJob(object):
         """ Return the type of the object under a specific path.
         If path is left blank, return the type of the object itself.
         """
+        print("job_type", self.config_file.read_variable("object_type", ""))
         return self.config_file.read_variable("object_type", "")
 
     def object_type(self):

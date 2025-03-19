@@ -49,7 +49,9 @@ def task_exec_impression(impressions, machine_uuid):
         job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression_uuid)
         job = VJob(job_path, machine_uuid)
         jobs.append(job)
+    print("jobs", jobs)
     workflow = VWorkflow(jobs, None)
+    print("workflow", workflow)
     workflow.run()
 
 @celeryapp.task
@@ -81,11 +83,13 @@ def upload_file():
 
 @app.route('/execute', methods=['GET', 'POST'])
 def execute():
+    print("Trying to execute")
     if request.method == 'POST':
         machine = request.form["machine"]
         contents = request.files["impressions"].read().decode()
         start_jobs = []
-        print("contents:", contents)
+        print("machine:", machine)
+        print("contents:", contents.split(" "))
         for impression in contents.split(" "):
             print("impression:", impression)
             job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
@@ -96,9 +100,12 @@ def execute():
                 start_jobs.append(job)
 
         if len(start_jobs) == 0:
+            print("no job to run")
             return "no job to run"
         contents = " ".join([job.uuid for job in start_jobs])
 
+        print("Asynchronous execution")
+        print("contents", contents)
         task = task_exec_impression.apply_async(args=[contents, machine])
         for impression in contents.split(" "):
             job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
@@ -195,9 +202,6 @@ def runnerconnection(runner):
     token = tokens.get(runner_id, "")
     urls = runner_config_file.read_variable("urls", {})
     url = urls.get(runner_id, "")
-
-    print(url)
-    print(token)
     return ping(url, token)
 
 
