@@ -15,6 +15,15 @@ class VImage(VJob):
     def __init__(self, path, machine_id):
         super(VImage, self).__init__(path, machine_id)
 
+    def inputs(self):
+        """
+        Input data.
+        """
+        print("Check the inputs of the image")
+        alias_to_imp = self.config_file.read_variable("alias_to_impression", {})
+        print(alias_to_imp)
+        return (alias_to_imp.keys(), alias_to_imp)
+
     def image_id(self):
         dirs = csys.list_dir(self.path)
         for run in dirs:
@@ -34,6 +43,11 @@ class VImage(VJob):
             # Replace the ${code} with the code path
             rule = rule.replace("${workspace}", "$REANA_WORKSPACE")
             rule = rule.replace("${code}", f"$REANA_WORKSPACE/imp{self.short_uuid()}")
+
+            alias_list, alias_map = self.inputs()
+            for alias in alias_list:
+                impression = alias_map[alias]
+                rule = rule.replace("${"+ alias +"}", f"$REANA_WORKSPACE/imp{impression[:7]}")
             commands.append(rule)
 
         commands.append("cd $REANA_WORKSPACE")
@@ -55,6 +69,11 @@ class VImage(VJob):
             # Replace the ${code} with the code path
             rule = rule.replace("${workspace}", "$REANA_WORKSPACE")
             rule = rule.replace("${code}", f"$REANA_WORKSPACE/imp{self.short_uuid()}")
+
+            alias_list, alias_map = self.inputs()
+            for alias in alias_list:
+                impression = alias_map[alias]
+                rule = rule.replace("${"+ alias +"}", f"$REANA_WORKSPACE/imp{impression[:7]}")
             commands.append(rule)
 
         commands.append("cd $REANA_WORKSPACE")
@@ -68,10 +87,13 @@ class VImage(VJob):
 
         return step
 
+    def default_environment(self):
+        return "docker.io/reanahub/reana-env-root6:6.18.04"
+
     def environment(self):
-        environment = self.yaml_file.read_variable("environment", "reanahub/reana-env-root6:6.18.04")
+        environment = self.yaml_file.read_variable("environment", self.default_environment())
         if environment == "script":
-            return "reanahub/reana-env-root6:6.18.04"
+            return self.default_environment()
         return environment
 
     def memory(self):

@@ -59,7 +59,7 @@ class VContainer(VJob):
         commands.append("touch {}.done".format(self.short_uuid()))
         commands = " && ".join(commands)
         if self.is_input:
-            step["environment"] = "reanahub/reana-env-root6:6.18.04"
+            step["environment"] = self.default_environment()
         else:
             step["environment"] = self.environment()
         step["kubernetes_memory_limit"] = self.memory()
@@ -68,6 +68,9 @@ class VContainer(VJob):
         step["compute_backend"] = None
 
         return step
+
+    def default_environment(self):
+        return "docker.io/reanahub/reana-env-root6:6.18.04"
 
     def snakemake_rule(self):
         commands = ["mkdir -p imp{}".format(self.short_uuid())]
@@ -101,7 +104,7 @@ class VContainer(VJob):
         commands.append("cd $REANA_WORKSPACE")
         commands.append("touch {}.done".format(self.short_uuid()))
         if self.is_input:
-            step["environment"] = "reanahub/reana-env-root6:6.18.04"
+            step["environment"] = self.default_environment()
         else:
             step["environment"] = self.environment()
         step["memory"] = self.memory()

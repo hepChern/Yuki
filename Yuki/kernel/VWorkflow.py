@@ -257,7 +257,7 @@ class VWorkflow(object):
             snake_file.addline("container:", 1)
             snake_file.addline("\"docker://{}\"".format(snakemake_rule["environment"]), 2)
             snake_file.addline("resources:", 1)
-            snake_file.addline("kubernete_memory_limit=\"{}\"".format(snakemake_rule["memory"]), 2)
+            snake_file.addline("kubernetes_memory_limit=\"{}\"".format(snakemake_rule["memory"]), 2)
             snake_file.addline("shell:", 1)
             snake_file.addline("\""+" && ".join(snakemake_rule["commands"])+"\"", 2)
 
