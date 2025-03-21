@@ -46,7 +46,7 @@ class VContainer(VJob):
             for alias in alias_list:
                 impression = alias_map[alias]
                 name = "${"+ alias +"}"
-                command = command.replace(name, impression[:7])
+                command = command.replace(name, f"$REANA_WORKSPACE/imp{impression[:7]}")
             command = command.replace("${workspace}", "$REANA_WORKSPACE")
             command = command.replace("${output}", f"imp{self.short_uuid()}")
             image = self.image()
@@ -89,7 +89,7 @@ class VContainer(VJob):
             for alias in alias_list:
                 impression = alias_map[alias]
                 name = "${"+ alias +"}"
-                command = command.replace(name, impression[:7])
+                command = command.replace(name, f"$REANA_WORKSPACE/imp{impression[:7]}")
             command = command.replace("${workspace}", "$REANA_WORKSPACE")
             command = command.replace("${output}", f"imp{self.short_uuid()}")
             image = self.image()

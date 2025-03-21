@@ -400,7 +400,7 @@ class VWorkflow(object):
             files = client.list_files(
                 self.get_name(),
                 self.get_access_token(self.machine_id),
-                impression[0:7]
+                "imp"+impression[0:7]
             )
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", impression, self.machine_id)
             print("Files: {}".format(files))
@@ -412,7 +412,7 @@ class VWorkflow(object):
                 )
                 print("Downloading {}".format(file["name"]))
                 os.makedirs(os.path.join(path, "outputs"), exist_ok = True)
-                filename = os.path.join(path, "outputs", file["name"][8:])
+                filename = os.path.join(path, "outputs", file["name"][11:])
                 with open(filename, "wb") as f:
                     f.write(output[0])
 
