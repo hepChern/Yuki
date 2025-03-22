@@ -82,9 +82,9 @@ class VJob(object):
     """ Let's consider when to update the status later
     """
     def status(self):
-        logger = getLogger("YukiLogger")
+        # logger = getLogger("YukiLogger")
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
-        logger.info(self.path)
+        # logger.info(self.path)
         status = config_file.read_variable("status", "raw")
         if status != "raw":
             return status
