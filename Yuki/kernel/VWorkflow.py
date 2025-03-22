@@ -56,10 +56,16 @@ class VWorkflow(object):
     def run(self):
         # Construct the workflow
         print("Constructing the workflow")
+        print(f"Start job: {self.start_job}")
         for job in self.start_job:
             self.construct_workflow_jobs(job)
 
+        print(f"Jobs after the construction: {self.jobs}")
         # Set all the jobs to be the waiting status
+        for job in self.jobs:
+            print(f"job: {job}, is input: {job.is_input}")
+            print(f"job status: {job.status()}")
+
         for job in self.jobs:
             if job.is_input: continue
             job.set_status("waiting")
@@ -69,6 +75,7 @@ class VWorkflow(object):
             all_finished = True
             for job in self.jobs:
                 if not job.is_input: continue
+                if job.status() == "archived": continue
                 workflow = VWorkflow([], job.workflow_id())
                 if workflow:
                     workflow.update_workflow_status()
@@ -153,6 +160,11 @@ class VWorkflow(object):
             return
 
         if job.status() == "pending" or job.status() == "running":
+            if job.object_type() == "task": job.is_input = True
+            self.jobs.append(job)
+            return
+
+        if job.status() == "archived":
             if job.object_type() == "task": job.is_input = True
             self.jobs.append(job)
             return
@@ -299,7 +311,7 @@ class VWorkflow(object):
                     client.upload_file(
                         self.get_name(),
                         open(os.path.join(job.path, "rawdata", filename), "rb"),
-                        job.short_uuid() + "/" + filename,
+                        "imp" + job.short_uuid() + "/" + filename,
                         self.get_access_token(self.machine_id)
                     )
             elif job.is_input:
