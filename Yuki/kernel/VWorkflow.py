@@ -327,7 +327,7 @@ class VWorkflow(object):
                     client.upload_file(
                         self.get_name(),
                         open(os.path.join(path, "outputs", filename), "rb"),
-                        job.short_uuid() + "/" + filename,
+                        "imp"+job.short_uuid() + "/outputs/" + filename,
                         self.get_access_token(self.machine_id)
                     )
 
