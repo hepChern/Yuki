@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>File List</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f6f8fa;
+            margin: 0;
+            padding: 2rem;
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 2rem;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            max-width: 800px;
+            margin: auto;
+        }
+
+        li {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            margin: auto;
+            border-radius: 6px;
+        }
+
+        a {
+            color: #007BFF;
+            text-decoration: none;
+            font-weight: bold;
+            word-break: break-all;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+  <h1>📁 Impression: {{impression}}</h1>
+    <ul>
+        {% for file in files %}
+            <li>
+                {% if file.is_image %}
+                    <a href="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" download>
+                        ⬇️ {{ file.name }}
+                    </a>
+                    <img src="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" alt="{{ file.name }}">
+                {% else %}
+                    <a href="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" download>
+                        ⬇️ {{ file.name }}
+                    </a>
+                {% endif %}
+            </li>
+        {% endfor %}
+    </ul>
+</body>
+</html>

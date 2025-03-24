@@ -155,8 +155,32 @@ def export(impression, filename):
             return send_from_directory(path, filename, as_attachment=True)
     return "NOTFOUND"
 
+@app.route("/impview/<impression>", methods=['GET'])
+def impview(impression):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    runner_config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    runner_config_file = ConfigFile(runner_config_path)
+    runners = runner_config_file.read_variable("runners", [])
+    runners_id = runner_config_file.read_variable("runners_id", {})
+    runner_id = runners_id["local"]
 
+    files = os.listdir(os.path.join(job_path, runner_id, "outputs"))
+    file_infos = []
+    for filename in files:
+        ext = os.path.splitext(filename)[1].lower()
+        is_image = ext in ('.png', '.jpg', '.jpeg', '.gif')
+        file_infos.append({
+            'name': filename,
+            'is_image': is_image,
+            })
+    return render_template('impview.html', impression=impression, runner_id=runner_id, files=file_infos)
 
+@app.route("/fileview/<impression>/<runner_id>/<filename>", methods=['GET'])
+def fileview(impression, runner_id, filename):
+    job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", impression)
+    path = os.path.join(job_path, runner_id, "outputs")
+    print(path)
+    return send_from_directory(path, filename)
 
 @app.route("/kill/<impression>", methods=['GET'])
 def kill(impression):

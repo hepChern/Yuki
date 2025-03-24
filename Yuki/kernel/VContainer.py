@@ -28,7 +28,7 @@ class VContainer(VJob):
         return None
 
     def step(self):
-        commands = ["mkdir -p imp{}".format(self.short_uuid())]
+        commands = ["mkdir -p imp{}/outputs".format(self.short_uuid())]
         commands.append("cd imp{}".format(self.short_uuid()))
         if self.is_input:
             raw_commands = []
@@ -73,7 +73,7 @@ class VContainer(VJob):
         return "docker.io/reanahub/reana-env-root6:6.18.04"
 
     def snakemake_rule(self):
-        commands = ["mkdir -p imp{}".format(self.short_uuid())]
+        commands = ["mkdir -p imp{}/outputs".format(self.short_uuid())]
         commands.append("cd imp{}".format(self.short_uuid()))
         if self.is_input:
             raw_commands = []
@@ -147,8 +147,8 @@ class VContainer(VJob):
         dirs = csys.list_dir(path)
         return dirs
 
-    def collect(self, impression):
-        workflow_id = self.workflow_id()
-        workflow = VWorkflow(os.path.join(self.path, workflow_id))
-        workflow.collect(impression)
+    # def collect(self, impression):
+    #     workflow_id = self.workflow_id()
+    #     workflow = VWorkflow(os.path.join(self.path, workflow_id))
+    #     workflow.collect(impression)
 
