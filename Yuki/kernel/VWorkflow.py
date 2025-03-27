@@ -76,6 +76,7 @@ class VWorkflow(object):
             for job in self.jobs:
                 if not job.is_input: continue
                 if job.status() == "archived": continue
+                print("Check the status of workflow", job.workflow_id())
                 workflow = VWorkflow([], job.workflow_id())
                 if workflow:
                     workflow.update_workflow_status()
@@ -84,6 +85,7 @@ class VWorkflow(object):
                 if job.status() != "finished":
                     all_finished = False
                     break
+                #FIXME: may check if some of the dependence fail
             if all_finished: break
             time.sleep(10)
 

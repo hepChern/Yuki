@@ -38,6 +38,13 @@ class VImage(VJob):
         commands = ["mkdir -p imp{}".format(self.short_uuid())]
         commands.append("cd imp{}".format(self.short_uuid()))
 
+        # Add ln -s $REANA_WORKSPACE/{alias} {alias} to the commands
+        alias_list, alias_map = self.inputs()
+        for alias in alias_list:
+            impression = alias_map[alias]
+            command = f"ln -s $REANA_WORKSPACE/imp{impression[:7]} {alias}"
+            commands.append(command)
+
         compile_rules = self.yaml_file.read_variable("build", [])
         for rule in compile_rules:
             # Replace the ${code} with the code path
@@ -63,6 +70,13 @@ class VImage(VJob):
     def snakemake_rule(self):
         commands = ["mkdir -p imp{}".format(self.short_uuid())]
         commands.append("cd imp{}".format(self.short_uuid()))
+
+        # Add ln -s $REANA_WORKSPACE/{alias} {alias} to the commands
+        alias_list, alias_map = self.inputs()
+        for alias in alias_list:
+            impression = alias_map[alias]
+            command = f"ln -s $REANA_WORKSPACE/imp{impression[:7]} {alias}"
+            commands.append(command)
 
         compile_rules = self.yaml_file.read_variable("build", [])
         for rule in compile_rules:

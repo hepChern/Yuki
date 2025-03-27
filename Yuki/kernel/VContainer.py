@@ -30,10 +30,22 @@ class VContainer(VJob):
     def step(self):
         commands = ["mkdir -p imp{}/outputs".format(self.short_uuid())]
         commands.append("cd imp{}".format(self.short_uuid()))
+
+        # Add ln -s $REANA_WORKSPACE/{alias} {alias} to the commands
+        image = self.image()
+        if image:
+            commands.append(f"ln -s $REANA_WORKSPACE/imp{image.short_uuid()} code")
+        alias_list, alias_map = self.inputs()
+        for alias in alias_list:
+            impression = alias_map[alias]
+            command = f"ln -s $REANA_WORKSPACE/imp{impression[:7]} {alias}"
+            commands.append(command)
+
         if self.is_input:
             raw_commands = []
         else:
             raw_commands = self.image().yaml_file.read_variable("commands", [])
+
         for command in raw_commands:
             parameters, values = self.parameters()
             for parameter in parameters:
@@ -75,10 +87,23 @@ class VContainer(VJob):
     def snakemake_rule(self):
         commands = ["mkdir -p imp{}/outputs".format(self.short_uuid())]
         commands.append("cd imp{}".format(self.short_uuid()))
+
+        # Add ln -s $REANA_WORKSPACE/{alias} {alias} to the commands
+        image = self.image()
+        if image:
+            commands.append(f"ln -s $REANA_WORKSPACE/imp{image.short_uuid()} code")
+        print("self.inputs", self.inputs())
+        alias_list, alias_map = self.inputs()
+        for alias in alias_list:
+            impression = alias_map[alias]
+            command = f"ln -s $REANA_WORKSPACE/imp{impression[:7]} {alias}"
+            commands.append(command)
+
         if self.is_input:
             raw_commands = []
         else:
             raw_commands = self.image().yaml_file.read_variable("commands", [])
+
         for command in raw_commands:
             # Replace the commands (parameters):
             parameters, values = self.parameters()
