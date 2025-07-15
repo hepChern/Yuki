@@ -3,15 +3,18 @@ Flask application setup and configuration.
 """
 import sys
 import logging
-from flask import Flask, render_template, redirect, url_for, request
 from logging import getLogger
+
+from flask import Flask, render_template, redirect, url_for, request
+
 from .tasks import celeryapp
+from .routes import upload, execution, status, runner, workflow
 
 
 def create_app():
     """Create and configure Flask application."""
-    app = Flask(__name__)
-    
+    flask_app = Flask(__name__)
+
     # Configure logging
     logger = getLogger("YukiLogger")
     handler = logging.StreamHandler(sys.stdout)
@@ -19,32 +22,31 @@ def create_app():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
-    
+
     # Flask configuration
-    app.config['SECRET_KEY'] = 'top-secret!'
-    app.config['CELERY_broker_url'] = 'amqp://localhost'
-    app.config['result_backend'] = 'rpc://'
-    
+    flask_app.config['SECRET_KEY'] = 'top-secret!'
+    flask_app.config['CELERY_broker_url'] = 'amqp://localhost'
+    flask_app.config['result_backend'] = 'rpc://'
+
     # Update celery configuration
-    celeryapp.conf.update(app.config)
-    
+    celeryapp.conf.update(flask_app.config)
+
     # Register blueprints
-    from .routes import upload, execution, status, runner, workflow
-    app.register_blueprint(upload.bp)
-    app.register_blueprint(execution.bp)
-    app.register_blueprint(status.bp)
-    app.register_blueprint(runner.bp)
-    app.register_blueprint(workflow.bp)
-    
+    flask_app.register_blueprint(upload.bp)
+    flask_app.register_blueprint(execution.bp)
+    flask_app.register_blueprint(status.bp)
+    flask_app.register_blueprint(runner.bp)
+    flask_app.register_blueprint(workflow.bp)
+
     # Main index route
-    @app.route('/', methods=['GET', 'POST'])
+    @flask_app.route('/', methods=['GET', 'POST'])
     def index():
         if request.method == 'GET':
             impressions = []
             return render_template('index.html', impressions=impressions)
         return redirect(url_for('index'))
-    
-    return app
+
+    return flask_app
 
 
 # Create app instance

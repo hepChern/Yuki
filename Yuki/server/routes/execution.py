@@ -1,9 +1,10 @@
 """
 Job execution routes.
 """
-import os
-from flask import Blueprint, request
 from logging import getLogger
+
+from flask import Blueprint, request
+
 from Yuki.kernel.VJob import VJob
 from Yuki.kernel.VContainer import VContainer
 from ..config import config
@@ -23,13 +24,13 @@ def execute():
         start_jobs = []
         print("machine:", machine)
         print("contents:", contents.split(" "))
-        
+
         for impression in contents.split(" "):
             print("impression:", impression)
             job_path = config.get_job_path(impression)
             job = VJob(job_path, None)
             print("job", job, job.job_type(), job.status())
-            
+
             if job.job_type() == "task":
                 if job.status() not in ("raw", "failed"):
                     print("job status is not raw or failed")
@@ -46,18 +47,20 @@ def execute():
             print("no job to run")
             print("# <<< execute")
             return "no job to run"
-            
+
         contents = " ".join([job.uuid for job in start_jobs])
 
         print("Asynchronous execution")
         print("contents", contents)
         task = task_exec_impression.apply_async(args=[contents, machine])
-        
+
         for impression in contents.split(" "):
             job_path = config.get_job_path(impression)
             VJob(job_path, machine).set_runid(task.id)
         print("### <<< execute")
         return task.id
+    
+    return ""  # For GET requests
 
 
 @bp.route("/run/<impression>/<machine>", methods=['GET'])
@@ -67,7 +70,7 @@ def run(impression, machine):
     task = task_exec_impression.apply_async(args=[impression, machine])
     job_path = config.get_job_path(impression)
     VJob(job_path, machine).set_runid(task.id)
-    logger.info("Run id = " + task.id)
+    logger.info("Run id = %s", task.id)
     return task.id
 
 

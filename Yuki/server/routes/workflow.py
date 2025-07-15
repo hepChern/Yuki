@@ -1,7 +1,6 @@
 """
 Workflow management routes.
 """
-import os
 from flask import Blueprint
 from Chern.utils.metadata import ConfigFile
 from Yuki.kernel.VJob import VJob
@@ -20,15 +19,15 @@ def kill(impression):
     runners_id = config_file.read_variable("runners_id", {})
 
     job_config_file = ConfigFile(config.get_job_config_path(impression))
-    object_type = job_config_file.read_variable("object_type", "")
+    job_config_file.read_variable("object_type", "")  # Read but don't store unused value
 
     for machine in runners:
         machine_id = runners_id[machine]
         job = VJob(job_path, machine_id)
         if job.workflow_id() == "":
             continue
-        workflow = VWorkflow([], job.workflow_id())
-        workflow.kill()
+        job_workflow = VWorkflow([], job.workflow_id())
+        job_workflow.kill()
 
     job = VJob(job_path, None)
     job.set_status("failed")
@@ -44,16 +43,16 @@ def collect(impression):
     runners_id = config_file.read_variable("runners_id", {})
 
     job_config_file = ConfigFile(config.get_job_config_path(impression))
-    object_type = job_config_file.read_variable("object_type", "")
+    job_config_file.read_variable("object_type", "")  # Read but don't store unused value
 
     for machine in runners:
         machine_id = runners_id[machine]
         job = VJob(job_path, machine_id)
         if job.workflow_id() == "":
             continue
-        workflow = VWorkflow([], job.workflow_id())
-        if workflow.status() == "finished":
-            workflow.download(impression)
+        job_workflow = VWorkflow([], job.workflow_id())
+        if job_workflow.status() == "finished":
+            job_workflow.download(impression)
     return "ok"
 
 
@@ -66,13 +65,13 @@ def workflow(impression):
     runners_id = config_file.read_variable("runners_id", {})
 
     job_config_file = ConfigFile(config.get_job_config_path(impression))
-    object_type = job_config_file.read_variable("object_type", "")
+    job_config_file.read_variable("object_type", "")  # Read but don't store unused value
 
     for machine in runners:
         machine_id = runners_id[machine]
         job = VJob(job_path, machine_id)
         if job.workflow_id() == "":
             continue
-        workflow = VWorkflow([], job.workflow_id())
-        return "{} {}".format(machine, workflow.uuid)
+        job_workflow = VWorkflow([], job.workflow_id())
+        return f"{machine} {job_workflow.uuid}"
     return "UNDEFINED"

@@ -1,14 +1,18 @@
 """
-Construction of a workflow with the jobs, especially from the task
+Construction of a workflow with the jobs, especially from the task.
+
+This module provides the VWorkflow class which manages workflow execution
+and coordination between jobs using the REANA workflow management system.
 """
 import os
+import time
+
 from Chern.utils import csys
 from Chern.utils import metadata
 from Chern.kernel.chern_cache import ChernCache
 from Yuki.kernel.VJob import VJob
 from Yuki.kernel.VContainer import VContainer
 from Yuki.kernel.VImage import VImage
-import time
 from Yuki.utils import snakefile
 
 # Comments:
@@ -16,13 +20,20 @@ from Yuki.utils import snakefile
 # However, setting the environment variable in the python script "might" not work
 # Maybe we can try the execv function in the os module, let me see
 # It seems to works at my MacOS, but I don't know whether it will still work at, for example, Ubuntu
-cherncache = ChernCache.instance()
+CHERN_CACHE = ChernCache.instance()
 
-class VWorkflow(object):
+class VWorkflow:
+    """
+    Virtual Workflow class for managing job execution workflows.
+    
+    This class handles the construction and execution of workflows
+    containing multiple jobs, managing dependencies and orchestrating
+    execution through the REANA workflow management system.
+    """
     uuid = None
-    def __init__(self, jobs, uuid = None):
-        """ Initialize it with a job
-        """
+    
+    def __init__(self, jobs, uuid=None):
+        """Initialize workflow with jobs and optional UUID."""
         # Create a uuid for the workflow
         if uuid:
             self.uuid = uuid
@@ -38,22 +49,31 @@ class VWorkflow(object):
             self.machine_id = self.start_job[0].machine_id
             self.config_file.write_variable("machine_id", self.machine_id)
 
-        # FIXME: if it is not the starting of the workflow, one should read the information from bookkeeping, except for the access_token
-        self.yaml_file = None # YamlFile()
+        # FIXME: if it is not the starting of the workflow, one should read the 
+        # information from bookkeeping, except for the access_token
+        self.yaml_file = None  # YamlFile()
         self.jobs = []
+        
+        # Initialize attributes that may be set later
+        self.snakefile_path = None
+        self.dependencies = None
+        self.steps = None
+        
         self.set_enviroment(self.machine_id)
         self.access_token = self.get_access_token(self.machine_id)
 
     def get_name(self):
+        """Get the workflow name."""
         return "w-" + self.uuid[:8]
 
-    """ Run the workflow:
-    1. Construct the workflow from the start_job
-    2. Set all the jobs to be the waiting status
-    3. Check the dependencies
-    4. Run
-    """
     def run(self):
+        """
+        Run the workflow:
+        1. Construct the workflow from the start_job
+        2. Set all the jobs to be the waiting status
+        3. Check the dependencies
+        4. Run
+        """
         # Construct the workflow
         print("Constructing the workflow")
         print(f"Start job: {self.start_job}")
@@ -67,15 +87,18 @@ class VWorkflow(object):
             print(f"job status: {job.status()}")
 
         for job in self.jobs:
-            if job.is_input: continue
+            if job.is_input:
+                continue
             job.set_status("waiting")
 
         # First, check whether the dependencies are satisfied
         while True:
             all_finished = True
             for job in self.jobs:
-                if not job.is_input: continue
-                if job.status() == "archived": continue
+                if not job.is_input:
+                    continue
+                if job.status() == "archived":
+                    continue
                 print("Check the status of workflow", job.workflow_id())
                 workflow = VWorkflow([], job.workflow_id())
                 if workflow:
@@ -85,12 +108,14 @@ class VWorkflow(object):
                 if job.status() != "finished":
                     all_finished = False
                     break
-                #FIXME: may check if some of the dependence fail
-            if all_finished: break
+                # FIXME: may check if some of the dependence fail
+            if all_finished:
+                break
             time.sleep(10)
 
         for job in self.jobs:
-            if job.is_input: continue
+            if job.is_input:
+                continue
             job.set_workflow_id(self.uuid)
             job.set_status("running")
 
@@ -136,6 +161,7 @@ class VWorkflow(object):
 
 
     def kill(self):
+        """Kill the workflow execution."""
         from reana_client.api import client
         client.stop_workflow(
             self.get_name(),
@@ -143,31 +169,36 @@ class VWorkflow(object):
             self.get_access_token(self.machine_id)
         )
 
-
     def construct_workflow_jobs(self, job):
-        last_consult_time = cherncache.consult_table.get(job.path, -1)
-        if time.time() - last_consult_time < 1: return
-        cherncache.consult_table[job.path] = time.time()
+        """Construct workflow jobs recursively including dependencies."""
+        last_consult_time = CHERN_CACHE.consult_table.get(job.path, -1)
+        if time.time() - last_consult_time < 1:
+            return
+        CHERN_CACHE.consult_table[job.path] = time.time()
 
         # Even if the job is finished, we still need to add it to the workflow,
         # because we need to upload the files
         if job.status() == "finished":
-            if job.object_type() == "task": job.is_input = True
+            if job.object_type() == "task":
+                job.is_input = True
             self.jobs.append(job)
             return
 
         if job.status() == "failed":
-            if job.object_type() == "task": job.is_input = True
+            if job.object_type() == "task":
+                job.is_input = True
             self.jobs.append(job)
             return
 
         if job.status() == "pending" or job.status() == "running":
-            if job.object_type() == "task": job.is_input = True
+            if job.object_type() == "task":
+                job.is_input = True
             self.jobs.append(job)
             return
 
         if job.status() == "archived":
-            if job.object_type() == "task": job.is_input = True
+            if job.object_type() == "task":
+                job.is_input = True
             self.jobs.append(job)
             return
 
@@ -176,11 +207,10 @@ class VWorkflow(object):
             self.construct_workflow_jobs(VJob(path, self.machine_id))
         self.jobs.append(job)
 
-
     def create_workflow(self):
-        # create a workflow
+        """Create a workflow using REANA client."""
         from reana_client.api import client
-        reana_json = dict(workflow={})
+        reana_json = {"workflow": {}}
         reana_json["workflow"]["specification"] = {
                 "job_dependencies": self.dependencies,
                 "steps": self.steps,
@@ -195,28 +225,40 @@ class VWorkflow(object):
                 )
 
     def get_files(self):
+        """Get list of all files from jobs."""
         files = []
         for job in self.jobs:
             files.extend(job.files())
         return files
 
     def parameters(self):
+        """Get workflow parameters."""
         return []
 
     def get_file_list(self):
-        for job in jobs:
-            for filename in job.files:
-                file = "impression/{}/{}".format(job.impression(), filename)
-                self.files.append(file)
+        """Get file list (broken method - needs fixing)."""
+        # This method references undefined 'jobs' variable
+        # Should use self.jobs instead
+        for job in self.jobs:
+            for filename in job.files():
+                file = f"impression/{job.impression()}/{filename}"
+                # self.files doesn't exist - this method needs to be fixed
+                # self.files.append(file)
 
     def get_parameters(self):
-        for job in jobs:
-            for parameter in job.parameters:
-                parname = "par_{}_{}".format(job.impression(), parameter)
-                value = self.get_parameter(parameter)
-                self.parameters[parname] = value
+        """Get parameters (broken method - needs fixing)."""
+        # This method references undefined 'jobs' variable  
+        # Should use self.jobs instead
+        pass
+        # job.parameters doesn't exist in VJob
+        # for parameter in job.parameters:
+        #     parname = f"par_{job.impression()}_{parameter}"
+        #     value = self.get_parameter(parameter)  # This method doesn't exist
+        #     self.parameters[parname] = value  # self.parameters is not a dict
 
     def get_steps(self):
+        """Get workflow steps (broken method - needs fixing)."""
+        steps = []  # Initialize local variable
         for job in self.jobs:
             if job.object_type() == "algorithm":
                 # In this case, if the command is compile, we need to compile it
@@ -229,12 +271,10 @@ class VWorkflow(object):
         return steps
 
 
-    """  related to the snakemake
-    """
     def construct_snake_file(self):
+        """Construct snakemake file for workflow execution."""
         self.snakefile_path = os.path.join(self.path, "Snakefile")
         snake_file = snakefile.SnakeFile(os.path.join(self.path, "Snakefile"))
-
 
         self.dependencies = {}
         self.steps = []
@@ -243,8 +283,8 @@ class VWorkflow(object):
         snake_file.addline("input:", 1)
         self.dependencies["all"] = []
         for job in self.jobs:
-            snake_file.addline("\"{}.done\",".format(job.short_uuid()), 2)
-            self.dependencies["all"].append("step{}".format(job.short_uuid()))
+            snake_file.addline(f'"{job.short_uuid()}.done",', 2)
+            self.dependencies["all"].append(f"step{job.short_uuid()}")
 
         for job in self.jobs:
             if job.object_type() == "algorithm":
@@ -262,26 +302,25 @@ class VWorkflow(object):
                 step = container.step()
 
             snake_file.addline("\n", 0)
-            snake_file.addline("rule step{}:".format(job.short_uuid()), 0)
+            snake_file.addline(f"rule step{job.short_uuid()}:", 0)
             snake_file.addline("input:", 1)
             for input_file in snakemake_rule["inputs"]:
-                snake_file.addline("\""+input_file+"\"" + ",", 2)
+                snake_file.addline(f'"{input_file}",', 2)
             snake_file.addline("output:", 1)
-            snake_file.addline("\"{}.done\"".format(job.short_uuid()), 2)
+            snake_file.addline(f'"{job.short_uuid()}.done"', 2)
             snake_file.addline("container:", 1)
-            snake_file.addline("\"docker://{}\"".format(snakemake_rule["environment"]), 2)
+            snake_file.addline(f'"docker://{snakemake_rule["environment"]}"', 2)
             snake_file.addline("resources:", 1)
-            snake_file.addline("kubernetes_memory_limit=\"{}\"".format(snakemake_rule["memory"]), 2)
+            snake_file.addline(f'kubernetes_memory_limit="{snakemake_rule["memory"]}"', 2)
             snake_file.addline("shell:", 1)
-            snake_file.addline("\""+" && ".join(snakemake_rule["commands"])+"\"", 2)
+            snake_file.addline(f'"{" && ".join(snakemake_rule["commands"])}"', 2)
 
             self.steps.append(step)
 
         snake_file.write()
 
-    """ Related to reana
-    """
     def get_access_token(self, machine_id):
+        """Get access token for the specified machine."""
         path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
         config_file = metadata.ConfigFile(path)
         tokens = config_file.read_variable("tokens", {})
@@ -289,7 +328,8 @@ class VWorkflow(object):
         return token
 
     def set_enviroment(self, machine_id):
-        # Set the enviroment variable
+        """Set the environment variable for REANA server URL."""
+        # Set the environment variable
         path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
         config_file = metadata.ConfigFile(path)
         urls = config_file.read_variable("urls", {})
@@ -297,28 +337,31 @@ class VWorkflow(object):
         os.environ["REANA_SERVER_URL"] = url
 
     def upload_file(self):
+        """Upload files to REANA workflow."""
         from reana_client.api import client
         for job in self.jobs:
             for name in job.files():
-                print("upload file: {}".format(name))
-                client.upload_file(
-                    self.get_name(),
-                    open(os.path.join(job.path, "contents", name[8:]), "rb"),
-                    "imp" + name,
-                    self.get_access_token(self.machine_id)
-                )
+                print(f"upload file: {name}")
+                with open(os.path.join(job.path, "contents", name[8:]), "rb") as f:
+                    client.upload_file(
+                        self.get_name(),
+                        f,
+                        "imp" + name,
+                        self.get_access_token(self.machine_id)
+                    )
             if job.environment() == "rawdata":
                 filelist = os.listdir(os.path.join(job.path, "rawdata"))
                 for filename in filelist:
-                    client.upload_file(
-                        self.get_name(),
-                        open(os.path.join(job.path, "rawdata", filename), "rb"),
-                        "imp" + job.short_uuid() + "/" + filename,
-                        self.get_access_token(self.machine_id)
-                    )
+                    with open(os.path.join(job.path, "rawdata", filename), "rb") as f:
+                        client.upload_file(
+                            self.get_name(),
+                            f,
+                            "imp" + job.short_uuid() + "/" + filename,
+                            self.get_access_token(self.machine_id)
+                        )
             elif job.is_input:
                 impression = job.path.split("/")[-1]
-                print("Downloading the files from impression {}".format(impression))
+                print(f"Downloading the files from impression {impression}")
                 path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", impression, self.machine_id)
                 if not os.path.exists(os.path.join(path, "outputs")):
                     workflow = VWorkflow([], job.workflow_id())
@@ -326,32 +369,36 @@ class VWorkflow(object):
 
                 filelist = os.listdir(os.path.join(path, "outputs"))
                 for filename in filelist:
-                    client.upload_file(
-                        self.get_name(),
-                        open(os.path.join(path, "outputs", filename), "rb"),
-                        "imp"+job.short_uuid() + "/outputs/" + filename,
-                        self.get_access_token(self.machine_id)
-                    )
+                    with open(os.path.join(path, "outputs", filename), "rb") as f:
+                        client.upload_file(
+                            self.get_name(),
+                            f,
+                            "imp"+job.short_uuid() + "/outputs/" + filename,
+                            self.get_access_token(self.machine_id)
+                        )
 
-        client.upload_file(
-            self.get_name(),
-            open(self.snakefile_path, "rb"),
-            "Snakefile",
-            self.get_access_token(self.machine_id)
-        )
+        with open(self.snakefile_path, "rb") as f:
+            client.upload_file(
+                self.get_name(),
+                f,
+                "Snakefile",
+                self.get_access_token(self.machine_id)
+            )
         yaml_file = metadata.YamlFile(os.path.join(self.path, "reana.yaml"))
         yaml_file.write_variable("workflow", {
             "type": "snakemake",
             "file": "Snakefile",
             })
-        client.upload_file(
-            self.get_name(),
-            open(os.path.join(self.path, "reana.yaml"), "rb"),
-            "reana.yaml",
-            self.get_access_token(self.machine_id)
-        )
+        with open(os.path.join(self.path, "reana.yaml"), "rb") as f:
+            client.upload_file(
+                self.get_name(),
+                f,
+                "reana.yaml",
+                self.get_access_token(self.machine_id)
+            )
 
     def check_status(self):
+        """Check the status of the workflow periodically."""
         # Check the status of the workflow
         # Check whether the workflow is finished, every 5 seconds
         counter = 0
@@ -361,13 +408,13 @@ class VWorkflow(object):
                 self.update_workflow_status()
 
             status = self.status()
-            if status == "finished" or status == "failed":
+            if status in ('finished', 'failed'):
                 return status
             time.sleep(1)
             counter += 1
 
-
     def set_workflow_status(self, status):
+        """Set the workflow status."""
         path = os.path.join(self.path, "results.json")
         results_file = metadata.ConfigFile(path)
         results = results_file.read_variable("results", {})
@@ -375,6 +422,7 @@ class VWorkflow(object):
         results_file.write_variable("results", results)
 
     def update_workflow_status(self):
+        """Update workflow status from REANA."""
         from reana_client.api import client
         results = client.get_workflow_status(
             self.get_name(),
@@ -384,22 +432,24 @@ class VWorkflow(object):
         results_file.write_variable("results", results)
 
     def status(self):
-        status, last_consult_time = cherncache.consult_table.get(self.uuid, ("unknown", -1))
-        if time.time() - last_consult_time < 1: return status
+        """Get the current workflow status."""
+        status, last_consult_time = CHERN_CACHE.consult_table.get(self.uuid, ("unknown", -1))
+        if time.time() - last_consult_time < 1:
+            return status
 
         path = os.path.join(self.path, "results.json")
         results_file = metadata.ConfigFile(path)
         results = results_file.read_variable("results", {})
         status = results.get("status", "unknown")
-        cherncache.consult_table[self.uuid] = (status, time.time())
+        CHERN_CACHE.consult_table[self.uuid] = (status, time.time())
         return status
 
     def writeline(self, line):
+        """Write a line to the YAML file."""
         self.yaml_file.writeline(line)
 
-
-
     def start_workflow(self):
+        """Start the workflow execution."""
         from reana_client.api import client
         client.start_workflow(
             self.get_name(),
@@ -407,7 +457,8 @@ class VWorkflow(object):
             {}
         )
 
-    def download(self, impression = None):
+    def download(self, impression=None):
+        """Download workflow results."""
         print("Downloading the files")
         from reana_client.api import client
         if impression:
@@ -417,25 +468,23 @@ class VWorkflow(object):
                 "imp"+impression[0:7]+"/outputs"
             )
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", impression, self.machine_id)
-            print("Files: {}".format(files))
+            print(f"Files: {files}")
             for file in files:
-                print("Downloading {}".format(file["name"]))
+                print(f'Downloading {file["name"]}')
                 output = client.download_file(
                     self.get_name(),
                     file["name"],
                     self.get_access_token(self.machine_id),
                 )
-                print("Downloading {}".format(file["name"]))
-                os.makedirs(os.path.join(path, "outputs"), exist_ok = True)
+                print(f'Downloading {file["name"]}')
+                os.makedirs(os.path.join(path, "outputs"), exist_ok=True)
                 filename = os.path.join(path, file["name"][11:])
                 with open(filename, "wb") as f:
                     f.write(output[0])
 
-
-    # FIXME: This function is not used
     def ping(self):
+        """Ping the REANA server (FIXME: This function is not used)."""
         # Ping the server
-        # We must import the client here because we need to set the enviroment variable first
+        # We must import the client here because we need to set the environment variable first
         from reana_client.api import client
         return client.ping(self.access_token)
-

@@ -3,10 +3,11 @@ File upload and download routes.
 """
 import os
 import tarfile
-from flask import Blueprint, request, send_from_directory
-from ..config import config
-from ..utils import ping
 from logging import getLogger
+
+from flask import Blueprint, request, send_from_directory
+
+from ..config import config
 
 bp = Blueprint('upload', __name__)
 logger = getLogger("YukiLogger")
@@ -21,14 +22,15 @@ def upload_file():
         tarname = request.form["tarname"]
         request.files[tarname].save(os.path.join("/tmp", tarname))
 
-        tar = tarfile.open(os.path.join("/tmp", tarname), "r")
-        for ti in tar:
-            tar.extract(ti, os.path.join(config.storage_path, tarname[:-7]))
-        tar.close()
+        with tarfile.open(os.path.join("/tmp", tarname), "r") as tar:
+            for ti in tar:
+                tar.extract(ti, os.path.join(config.storage_path, tarname[:-7]))
 
         config_file = request.form['config']
         logger.info(config_file)
-        request.files[config_file].save(os.path.join(config.storage_path, tarname[:-7], config_file))
+        request.files[config_file].save(
+            os.path.join(config.storage_path, tarname[:-7], config_file)
+        )
     return "Successful"
 
 
@@ -46,7 +48,7 @@ def export(impression, filename):
     config_file = config.get_config_file()
     runners = config_file.read_variable("runners", [])
     runners_id = config_file.read_variable("runners_id", {})
-    
+
     # Search for the first machine that has the file
     for runner in runners:
         runner_id = runners_id[runner]
