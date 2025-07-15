@@ -5,11 +5,11 @@ from Yuki.kernel.VContainer import VContainer
 from Yuki.kernel.VJob import VJob
 from Yuki.kernel.VImage import VImage
 
-from Yuki.register import register as machine_register
+# from Yuki.register import register as machine_register
 
-from Yuki.server import server_start
-from Yuki.server import stop as server_stop
-from Yuki.server import status as server_status
+from Yuki.server_main import server_start
+from Yuki.server_main import stop as server_stop
+from Yuki.server_main import status as server_status
 
 @click.group()
 @click.pass_context
