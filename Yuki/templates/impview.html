@@ -287,7 +287,7 @@
                     <li>
                         <div class="file-item">
                             <div class="file-info">
-                                <a href="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" download>
+                                <a href="{{ url_for('upload.fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" download>
                                     <span class="download-icon">⬇️</span>
                                     {{ file.name }}
                                 </a>
@@ -298,7 +298,7 @@
                                 {% endif %}
                             </div>
                             {% if file.is_image %}
-                                <img src="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" alt="{{ file.name }}">
+                                <img src="{{ url_for('upload.fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" alt="{{ file.name }}">
                             {% endif %}
                         </div>
                     </li>

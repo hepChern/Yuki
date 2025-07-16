@@ -2,6 +2,7 @@
 Flask application setup and configuration.
 """
 import sys
+import os
 import logging
 from logging import getLogger
 
@@ -13,7 +14,11 @@ from .routes import upload, execution, status, runner, workflow
 
 def create_app():
     """Create and configure Flask application."""
-    flask_app = Flask(__name__)
+    # Get the path to the templates directory (one level up from server)
+    current_dir = os.path.dirname(__file__)
+    parent_dir = os.path.dirname(current_dir)
+    template_dir = os.path.join(parent_dir, 'templates')
+    flask_app = Flask(__name__, template_folder=template_dir)
 
     # Configure logging
     logger = getLogger("YukiLogger")
