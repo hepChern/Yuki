@@ -4,73 +4,311 @@
     <meta charset="UTF-8">
     <title>File List</title>
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f6f8fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #2604a2 100%);
+            min-height: 100vh;
             margin: 0;
             padding: 2rem;
             color: #333;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
         }
 
         h1 {
             text-align: center;
             color: #2c3e50;
             margin-bottom: 2rem;
+            font-size: 2rem;
+            font-weight: 300;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+            background: linear-gradient(45deg, #667eea, #2604a2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         ul {
             list-style: none;
             padding: 0;
-            max-width: 800px;
-            margin: auto;
+            margin: 0;
+            display: grid;
+            gap: 1.5rem;
         }
 
         li {
             background: white;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            padding: 1rem;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border: none;
+            border-radius: 15px;
+            padding: 1.5rem;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        li::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #2604a2);
+        }
+
+        li:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
         }
 
         img {
             display: block;
             max-width: 100%;
             height: auto;
-            margin: auto;
-            border-radius: 6px;
+            margin: 1rem auto 0;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        img:hover {
+            transform: scale(1.02);
         }
 
         a {
-            color: #007BFF;
+            color: #667eea;
             text-decoration: none;
-            font-weight: bold;
+            font-weight: 600;
             word-break: break-all;
+            font-size: 1.1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #f8f9ff 0%, #e8efff 100%);
+            border: 2px solid transparent;
         }
 
         a:hover {
-            text-decoration: underline;
+            background: linear-gradient(135deg, #667eea 0%, #2604a2 100%);
+            color: white;
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .download-icon {
+            font-size: 1.2rem;
+            transition: transform 0.3s ease;
+        }
+
+        a:hover .download-icon {
+            transform: translateY(2px);
+        }
+
+        .file-item {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+
+        .file-type {
+            background: linear-gradient(135deg, #667eea, #2604a2);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+            }
+            
+            .container {
+                padding: 1.5rem;
+                border-radius: 15px;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            li {
+                padding: 1rem;
+            }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #666;
+            font-style: italic;
+        }
+
+        .impression-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .copy-btn {
+            background: linear-gradient(135deg, #667eea 0%, #2604a2 100%);
+            border: none;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .copy-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .copy-btn:active {
+            transform: translateY(0);
+        }
+
+        .copy-btn.copied {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+        }
+
+        .copy-icon {
+            font-size: 1rem;
+            transition: transform 0.2s ease;
+        }
+
+        .copy-btn:hover .copy-icon {
+            transform: scale(1.1);
+        }
+
+        @media (max-width: 768px) {
+            .impression-header {
+                flex-direction: column;
+                gap: 1rem;
+            }
+            
+            h1 {
+                margin-bottom: 0;
+                font-size: 1.5rem;
+            }
         }
     </style>
+    <script>
+        function copyImpression() {
+            const impression = "{{impression}}";
+            const copyBtn = document.getElementById('copyBtn');
+            const copyIcon = copyBtn.querySelector('.copy-icon');
+            const copyText = copyBtn.querySelector('.copy-text');
+            
+            navigator.clipboard.writeText(impression).then(function() {
+                // Success - update button appearance
+                copyBtn.classList.add('copied');
+                copyIcon.textContent = '✓';
+                copyText.textContent = 'Copied!';
+                
+                // Reset button after 2 seconds
+                setTimeout(function() {
+                    copyBtn.classList.remove('copied');
+                    copyIcon.textContent = '📋';
+                    copyText.textContent = 'Copy';
+                }, 2000);
+            }).catch(function(err) {
+                console.error('Failed to copy impression: ', err);
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = impression;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    copyBtn.classList.add('copied');
+                    copyIcon.textContent = '✓';
+                    copyText.textContent = 'Copied!';
+                    
+                    setTimeout(function() {
+                        copyBtn.classList.remove('copied');
+                        copyIcon.textContent = '📋';
+                        copyText.textContent = 'Copy';
+                    }, 2000);
+                } catch (err) {
+                    console.error('Fallback copy failed: ', err);
+                }
+                document.body.removeChild(textArea);
+            });
+        }
+    </script>
 </head>
 <body>
-  <h1>📁 Impression: {{impression}}</h1>
-    <ul>
-        {% for file in files %}
-            <li>
-                {% if file.is_image %}
-                    <a href="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" download>
-                        ⬇️ {{ file.name }}
-                    </a>
-                    <img src="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" alt="{{ file.name }}">
-                {% else %}
-                    <a href="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" download>
-                        ⬇️ {{ file.name }}
-                    </a>
-                {% endif %}
-            </li>
-        {% endfor %}
-    </ul>
+    <div class="container">
+        <div class="impression-header">
+            <h1>📁 Impression: {{impression}}</h1>
+            <button id="copyBtn" class="copy-btn" onclick="copyImpression()">
+                <span class="copy-icon">📋</span>
+                <span class="copy-text">Copy</span>
+            </button>
+        </div>
+        {% if files %}
+            <ul>
+                {% for file in files %}
+                    <li>
+                        <div class="file-item">
+                            <div class="file-info">
+                                <a href="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" download>
+                                    <span class="download-icon">⬇️</span>
+                                    {{ file.name }}
+                                </a>
+                                {% if file.is_image %}
+                                    <span class="file-type">Image</span>
+                                {% else %}
+                                    <span class="file-type">File</span>
+                                {% endif %}
+                            </div>
+                            {% if file.is_image %}
+                                <img src="{{ url_for('fileview', impression=impression, runner_id=runner_id, filename=file.name) }}" alt="{{ file.name }}">
+                            {% endif %}
+                        </div>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <div class="empty-state">
+                <p>No files found in this impression.</p>
+            </div>
+        {% endif %}
+    </div>
 </body>
 </html>
