@@ -12,7 +12,7 @@ from ..tasks import task_update_workflow_status
 bp = Blueprint('status', __name__)
 
 
-@bp.route('/setjobstatus/<impression_name>/<job_status>', methods=['GET'])
+@bp.route('/set-job-status/<impression_name>/<job_status>', methods=['GET'])
 def setjobstatus(impression_name, job_status):
     """Set job status for an impression."""
     job_path = config.get_job_path(impression_name)
@@ -59,7 +59,7 @@ def status(impression_name):
     return job.status()
 
 
-@bp.route("/status/<impression_name>/<machine>", methods=['GET'])
+@bp.route("/run-status/<impression_name>/<machine>", methods=['GET'])
 def runstatus(impression_name, machine):
     """Get run status for an impression on a specific machine."""
     job_path = config.get_job_path(impression_name)
@@ -87,13 +87,13 @@ def deposited(impression_name):
     return "FALSE"
 
 
-@bp.route("/ditestatus", methods=['GET'])
+@bp.route("/dite-status", methods=['GET'])
 def ditestatus():
     """Get DITE status."""
     return "ok"
 
 
-@bp.route("/samplestatus/<impression_name>", methods=['GET'])
+@bp.route("/sample-status/<impression_name>", methods=['GET'])
 def samplestatus(impression_name):
     """Get sample status for an impression."""
     job_config_file = ConfigFile(config.get_job_config_path(impression_name))
@@ -106,7 +106,7 @@ def impression(impression_name):
     return config.get_job_path(impression_name)
 
 
-@bp.route("/impview/<impression_name>", methods=['GET'])
+@bp.route("/imp-view/<impression_name>", methods=['GET'])
 def impview(impression_name):
     """View impression files."""
     job_path = config.get_job_path(impression_name)

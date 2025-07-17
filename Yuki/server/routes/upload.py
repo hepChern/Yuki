@@ -60,7 +60,7 @@ def export(impression, filename):
     return "NOTFOUND"
 
 
-@bp.route("/getfile/<impression>/<filename>", methods=['GET'])
+@bp.route("/get-file/<impression>/<filename>", methods=['GET'])
 def get_file(impression, filename):
     """Get the path to a specific file in an impression."""
     job_path = config.get_job_path(impression)
@@ -76,7 +76,7 @@ def get_file(impression, filename):
     return "NOTFOUND"
 
 
-@bp.route("/fileview/<impression>/<runner_id>/<filename>", methods=['GET'])
+@bp.route("/file-view/<impression>/<runner_id>/<filename>", methods=['GET'])
 def fileview(impression, runner_id, filename):
     """View a specific file."""
     job_path = config.get_job_path(impression)

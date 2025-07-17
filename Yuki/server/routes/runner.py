@@ -17,7 +17,7 @@ def runners():
     return " ".join(runners_list)
 
 
-@bp.route("/runnersurl", methods=['GET'])
+@bp.route("/runners-url", methods=['GET'])
 def runnersurl():
     """Get URLs of all runners."""
     config_file = config.get_config_file()
@@ -27,7 +27,7 @@ def runnersurl():
     return " ".join([runners_url[runners_id[runner]] for runner in runners_list])
 
 
-@bp.route("/runnerconnection/<runner>", methods=['GET'])
+@bp.route("/runner-connection/<runner>", methods=['GET'])
 def runnerconnection(runner):
     """Test connection to a specific runner."""
     config_file = config.get_config_file()
@@ -40,7 +40,7 @@ def runnerconnection(runner):
     return ping(url, token)
 
 
-@bp.route("/registerrunner", methods=['POST'])
+@bp.route("/register-runner", methods=['POST'])
 def registerrunner():
     """Register a new runner."""
     if request.method == 'POST':
@@ -68,7 +68,7 @@ def registerrunner():
     return "successful"
 
 
-@bp.route("/removerunner/<runner>", methods=['GET'])
+@bp.route("/remove-runner/<runner>", methods=['GET'])
 def removerunner(runner):
     """Remove a runner."""
     config_file = config.get_config_file()
@@ -94,7 +94,7 @@ def removerunner(runner):
     return "successful"
 
 
-@bp.route("/register_machine/<machine>/<machine_uuid>", methods=['GET'])
+@bp.route("/register-machine/<machine>/<machine_uuid>", methods=['GET'])
 def register_machine(machine, machine_uuid):
     """Register a machine."""
     config_file = config.get_config_file()
@@ -107,7 +107,7 @@ def register_machine(machine, machine_uuid):
     return "successful"
 
 
-@bp.route("/machine_id/<machine>", methods=["GET"])
+@bp.route("/machine-id/<machine>", methods=["GET"])
 def machine_id(machine):
     """Get machine ID for a specific machine."""
     config_file = config.get_config_file()
