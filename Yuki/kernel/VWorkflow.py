@@ -25,13 +25,13 @@ CHERN_CACHE = ChernCache.instance()
 class VWorkflow:
     """
     Virtual Workflow class for managing job execution workflows.
-    
+
     This class handles the construction and execution of workflows
     containing multiple jobs, managing dependencies and orchestrating
     execution through the REANA workflow management system.
     """
     uuid = None
-    
+
     def __init__(self, jobs, uuid=None):
         """Initialize workflow with jobs and optional UUID."""
         # Create a uuid for the workflow
@@ -46,19 +46,20 @@ class VWorkflow:
             self.start_job = jobs.copy()
             self.path = os.path.join(os.environ["HOME"], ".Yuki", "Workflows", self.uuid)
             self.config_file = metadata.ConfigFile(os.path.join(self.path, "config.json"))
+            print("The start job(s) are", self.start_job)
             self.machine_id = self.start_job[0].machine_id
             self.config_file.write_variable("machine_id", self.machine_id)
 
-        # FIXME: if it is not the starting of the workflow, one should read the 
+        # FIXME: if it is not the starting of the workflow, one should read the
         # information from bookkeeping, except for the access_token
         self.yaml_file = None  # YamlFile()
         self.jobs = []
-        
+
         # Initialize attributes that may be set later
         self.snakefile_path = None
         self.dependencies = None
         self.steps = None
-        
+
         self.set_enviroment(self.machine_id)
         self.access_token = self.get_access_token(self.machine_id)
 
@@ -85,6 +86,7 @@ class VWorkflow:
         for job in self.jobs:
             print(f"job: {job}, is input: {job.is_input}")
             print(f"job status: {job.status()}")
+            print(f"job machine: {job.machine_id}")
 
         for job in self.jobs:
             if job.is_input:
@@ -95,11 +97,12 @@ class VWorkflow:
         while True:
             all_finished = True
             for job in self.jobs:
+                print(f"Check the job {job}", job)
                 if not job.is_input:
                     continue
                 if job.status() == "archived":
                     continue
-                print("Check the status of workflow", job.workflow_id())
+                print(f"Check the status of workflow {job.workflow_id()}")
                 workflow = VWorkflow([], job.workflow_id())
                 if workflow:
                     workflow.update_workflow_status()
@@ -176,6 +179,12 @@ class VWorkflow:
             return
         CHERN_CACHE.consult_table[job.path] = time.time()
 
+        if job.machine_id is None:
+            job = VJob(job.path, self.machine_id)
+
+        if job.machine_id is None:
+            return
+
         # Even if the job is finished, we still need to add it to the workflow,
         # because we need to upload the files
         if job.status() == "finished":
@@ -204,12 +213,14 @@ class VWorkflow:
 
         for dependence in job.dependencies():
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", dependence)
-            self.construct_workflow_jobs(VJob(path, self.machine_id))
+            self.construct_workflow_jobs(VJob(path, None))
         self.jobs.append(job)
 
     def create_workflow(self):
         """Create a workflow using REANA client."""
         from reana_client.api import client
+        self.set_enviroment(self.machine_id)
+
         reana_json = {"workflow": {}}
         reana_json["workflow"]["specification"] = {
                 "job_dependencies": self.dependencies,
@@ -247,7 +258,7 @@ class VWorkflow:
 
     def get_parameters(self):
         """Get parameters (broken method - needs fixing)."""
-        # This method references undefined 'jobs' variable  
+        # This method references undefined 'jobs' variable
         # Should use self.jobs instead
         pass
         # job.parameters doesn't exist in VJob
@@ -334,11 +345,16 @@ class VWorkflow:
         config_file = metadata.ConfigFile(path)
         urls = config_file.read_variable("urls", {})
         url = urls.get(machine_id, "")
+        from reana_client.api import client
+        from reana_commons.api_client import BaseAPIClient
         os.environ["REANA_SERVER_URL"] = url
+        BaseAPIClient("reana-server")
+
 
     def upload_file(self):
         """Upload files to REANA workflow."""
         from reana_client.api import client
+        self.set_enviroment(self.machine_id)
         for job in self.jobs:
             for name in job.files():
                 print(f"upload file: {name}")
@@ -362,7 +378,7 @@ class VWorkflow:
             elif job.is_input:
                 impression = job.path.split("/")[-1]
                 print(f"Downloading the files from impression {impression}")
-                path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", impression, self.machine_id)
+                path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", impression, job.machine_id)
                 if not os.path.exists(os.path.join(path, "outputs")):
                     workflow = VWorkflow([], job.workflow_id())
                     workflow.download(impression)
@@ -424,6 +440,7 @@ class VWorkflow:
     def update_workflow_status(self):
         """Update workflow status from REANA."""
         from reana_client.api import client
+        self.set_enviroment(self.machine_id)
         results = client.get_workflow_status(
             self.get_name(),
             self.get_access_token(self.machine_id))
@@ -451,6 +468,7 @@ class VWorkflow:
     def start_workflow(self):
         """Start the workflow execution."""
         from reana_client.api import client
+        self.set_enviroment(self.machine_id)
         client.start_workflow(
             self.get_name(),
             self.get_access_token(self.machine_id),
@@ -461,6 +479,7 @@ class VWorkflow:
         """Download workflow results."""
         print("Downloading the files")
         from reana_client.api import client
+        self.set_enviroment(self.machine_id)
         if impression:
             files = client.list_files(
                 self.get_name(),
@@ -487,4 +506,5 @@ class VWorkflow:
         # Ping the server
         # We must import the client here because we need to set the environment variable first
         from reana_client.api import client
+        self.set_enviroment(self.machine_id)
         return client.ping(self.access_token)

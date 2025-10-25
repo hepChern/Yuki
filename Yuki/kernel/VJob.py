@@ -25,10 +25,15 @@ class VJob:
         )
         if self.environment() == "rawdata":
             self.is_input = True
-        if machine_id is not None:
-            self.run_path = os.path.join(self.path, machine_id, "run")
+        if machine_id is None:
+            status_file = metadata.ConfigFile(
+                os.path.join(self.path, "status.json")
+                )
+            self.machine_id = status_file.read_variable("machine_id", None)
+        if self.machine_id is not None:
+            self.run_path = os.path.join(self.path, self.machine_id, "run")
             self.run_config_file = metadata.ConfigFile(
-                os.path.join(self.path, machine_id, "config.json")
+                os.path.join(self.path, self.machine_id, "config.json")
                 )
 
 
@@ -71,6 +76,7 @@ class VJob:
 
     def workflow_id(self):
         """Get the workflow ID for this job."""
+        print("The machine id is:", self.machine_id)
         return self.run_config_file.read_variable("workflow", "")
 
     def environment(self):
@@ -111,6 +117,7 @@ class VJob:
         """Update job status based on workflow status."""
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
         current_status = config_file.read_variable("status", "raw")
+        config_file.write_variable("machine_id", self.machine_id)
         if current_status == "raw":
             config_file.write_variable("status", status)
         elif current_status == "running":

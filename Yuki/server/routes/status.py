@@ -68,11 +68,17 @@ def runstatus(impression_name, machine):
 
     job_config_file = ConfigFile(config.get_job_config_path(impression_name))
     object_type = job_config_file.read_variable("object_type", "")
-    machine_id = runners_id[machine]
-
     if object_type == "":
         return "empty"
 
+    if machine == "none":
+        for runner in runners_id:
+            machine_id = runners_id[runner]
+            job = VJob(job_path, None)
+            workflow = VWorkflow([], job.workflow_id())
+            return workflow.status()
+
+    machine_id = runners_id[machine]
     job = VJob(job_path, machine_id)
     workflow = VWorkflow([], job.workflow_id())
     return workflow.status()
@@ -112,7 +118,8 @@ def impview(impression_name):
     job_path = config.get_job_path(impression_name)
     config_file = config.get_config_file()
     runners_id = config_file.read_variable("runners_id", {})
-    runner_id = runners_id["local"]
+    job = VJob(job_path, None)
+    runner_id = job.machine_id
 
     files = os.listdir(os.path.join(job_path, runner_id, "outputs"))
     file_infos = []
