@@ -122,14 +122,47 @@ def impview(impression_name):
     runner_id = job.machine_id
 
     files = os.listdir(os.path.join(job_path, runner_id, "outputs"))
+    # sort with ext first and then name
+    files.sort(
+        key=lambda x: (os.path.splitext(x)[1].lower(), x.lower())
+            )
     file_infos = []
     for filename in files:
         ext = os.path.splitext(filename)[1].lower()
         is_image = ext in ('.png', '.jpg', '.jpeg', '.gif')
-        file_infos.append({
+        is_text = ext == '.txt'
+        file_info = {
             'name': filename,
             'is_image': is_image,
-        })
+            'is_text': is_text,
+        }
+
+        MAX_PREVIEW_CHARS = 10000
+        if is_text:
+            file_path = os.path.join(job_path, runner_id, "outputs", filename)  # adjust path
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    if len(content) > MAX_PREVIEW_CHARS * 2:
+                        head = content[:MAX_PREVIEW_CHARS]
+                        tail = content[-MAX_PREVIEW_CHARS:]
+                        # Add styled markers
+                        content_preview = (
+                            f'<span class="txt-message">[First {MAX_PREVIEW_CHARS} characters from head: **begin**]</span>\n'
+                            f'{head}\n'
+                            f'<span class="txt-message">[First {MAX_PREVIEW_CHARS} characters from head: **end**]</span>\n'
+                            f'<span class="txt-separator"></span>\n'
+                            f'<span class="txt-message">[Last {MAX_PREVIEW_CHARS} characters from tail: **begin**]</span>\n'
+                            f'{tail}\n'
+                            f'<span class="txt-message">[Last {MAX_PREVIEW_CHARS} characters from tail: **end**]</span>'
+                        )
+                    else:
+                        content_preview = f'<span class="txt-message">[Full content]</span>\n{content}'
+                    file_info['content'] = content_preview
+            except Exception as e:
+                file_info['content'] = f"[Error reading file: {e}]"
+
+        file_infos.append(file_info)
     return render_template('impview.html',
                           impression=impression_name,
                           runner_id=runner_id,
