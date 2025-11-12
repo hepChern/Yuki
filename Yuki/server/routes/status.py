@@ -44,13 +44,18 @@ def status(impression_name):
         print("Checking status for job", job)
         workflow = VWorkflow([], job.workflow_id())
         workflow_status = workflow.status()
-        print("Status from workflow", workflow_status)
-        job.update_status_from_workflow(workflow_status)
+        # print("Status from workflow", workflow_status)
+        print("Path:", os.path.join(os.path.join(os.environ["HOME"], ".Yuki", "Workflows", job.workflow_id())))
+        job.update_status_from_workflow( # workflow path
+                os.path.join(os.path.join(os.environ["HOME"], ".Yuki", "Workflows", job.workflow_id()))
+                )
         if workflow_status not in ('finished', 'failed'):
             task_update_workflow_status.apply_async(args=[workflow.uuid])
 
-        if workflow_status != "unknown":
-            return workflow_status
+        job_status = job.status()
+
+        if job_status != "unknown":
+            return job_status
 
         if os.path.exists(job_path):
             return "deposited"
@@ -124,13 +129,15 @@ def impview(impression_name):
     files = os.listdir(os.path.join(job_path, runner_id, "outputs"))
     # sort with ext first and then name
     files.sort(
-        key=lambda x: (os.path.splitext(x)[1].lower(), x.lower())
+        key=lambda x: ((0 if x == "chern.stdout" else 1),
+                       os.path.splitext(x)[1].lower(),
+                       x.lower())
             )
     file_infos = []
     for filename in files:
         ext = os.path.splitext(filename)[1].lower()
         is_image = ext in ('.png', '.jpg', '.jpeg', '.gif')
-        is_text = ext == '.txt'
+        is_text = ext in ('.txt', '.log', '.stdout')
         file_info = {
             'name': filename,
             'is_image': is_image,

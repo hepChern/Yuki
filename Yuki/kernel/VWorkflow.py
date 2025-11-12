@@ -6,6 +6,7 @@ and coordination between jobs using the REANA workflow management system.
 """
 import os
 import time
+import json
 
 from Chern.utils import csys
 from Chern.utils import metadata
@@ -46,7 +47,7 @@ class VWorkflow:
             self.start_job = jobs.copy()
             self.path = os.path.join(os.environ["HOME"], ".Yuki", "Workflows", self.uuid)
             self.config_file = metadata.ConfigFile(os.path.join(self.path, "config.json"))
-            print("The start job(s) are", self.start_job)
+            # print("The start job(s) are", self.start_job)
             self.machine_id = self.start_job[0].machine_id
             self.config_file.write_variable("machine_id", self.machine_id)
 
@@ -76,17 +77,17 @@ class VWorkflow:
         4. Run
         """
         # Construct the workflow
-        print("Constructing the workflow")
-        print(f"Start job: {self.start_job}")
+        # print("Constructing the workflow")
+        # print(f"Start job: {self.start_job}")
         for job in self.start_job:
             self.construct_workflow_jobs(job)
 
-        print(f"Jobs after the construction: {self.jobs}")
+        # print(f"Jobs after the construction: {self.jobs}")
         # Set all the jobs to be the waiting status
-        for job in self.jobs:
-            print(f"job: {job}, is input: {job.is_input}")
-            print(f"job status: {job.status()}")
-            print(f"job machine: {job.machine_id}")
+        # for job in self.jobs:
+        #     print(f"job: {job}, is input: {job.is_input}")
+        #     print(f"job status: {job.status()}")
+        #     print(f"job machine: {job.machine_id}")
 
         for job in self.jobs:
             if job.is_input:
@@ -97,17 +98,19 @@ class VWorkflow:
         while True:
             all_finished = True
             for job in self.jobs:
-                print(f"Check the job {job}", job)
+                # print(f"Check the job {job}", job)
                 if not job.is_input:
                     continue
                 if job.status() == "archived":
                     continue
-                print(f"Check the status of workflow {job.workflow_id()}")
+                # print(f"Check the status of workflow {job.workflow_id()}")
                 workflow = VWorkflow([], job.workflow_id())
                 if workflow:
                     workflow.update_workflow_status()
-                status = workflow.status()
-                job.update_status_from_workflow(status)
+                # status = workflow.status()
+                job.update_status_from_workflow(
+                        os.path.join(os.environ["HOME"], ".Yuki", "Workflows", job.workflow_id())
+                        )
                 if job.status() != "finished":
                     all_finished = False
                     break
@@ -123,20 +126,20 @@ class VWorkflow:
             job.set_status("running")
 
         try:
-            print("Constructing the snakefile")
+            # print("Constructing the snakefile")
             self.construct_snake_file()
         except:
-            print("Failed to construct the snakefile")
+            # print("Failed to construct the snakefile")
             self.set_workflow_status("failed")
             for job in self.jobs:
                 job.set_status("failed")
             raise
 
         try:
-            print("Creating the workflow")
+            # print("Creating the workflow")
             self.create_workflow()
         except:
-            print("Failed to create the workflow")
+            # print("Failed to create the workflow")
             self.set_workflow_status("failed")
             for job in self.jobs:
                 job.set_status("failed")
@@ -357,7 +360,7 @@ class VWorkflow:
         self.set_enviroment(self.machine_id)
         for job in self.jobs:
             for name in job.files():
-                print(f"upload file: {name}")
+                # print(f"upload file: {name}")
                 with open(os.path.join(job.path, "contents", name[8:]), "rb") as f:
                     client.upload_file(
                         self.get_name(),
@@ -377,9 +380,10 @@ class VWorkflow:
                         )
             elif job.is_input:
                 impression = job.path.split("/")[-1]
-                print(f"Downloading the files from impression {impression}")
+                # print(f"Downloading the files from impression {impression}")
                 path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", impression, job.machine_id)
-                if not os.path.exists(os.path.join(path, "outputs")):
+                if not os.path.exists(os.path.join(path, "outputs")) or \
+                        os.listdir(os.path.join(path, "outputs")) == ["chern.stdout"]:
                     workflow = VWorkflow([], job.workflow_id())
                     workflow.download(impression)
 
@@ -447,6 +451,12 @@ class VWorkflow:
         path = os.path.join(self.path, "results.json")
         results_file = metadata.ConfigFile(path)
         results_file.write_variable("results", results)
+        logpath = os.path.join(self.path, "log.json")
+        log_file = metadata.ConfigFile(logpath)
+        logstring = results.get("logs", "{}")
+        # decode the logstring with json
+        log = json.loads(logstring)
+        log_file.write_variable("logs", log)
 
     def status(self):
         """Get the current workflow status."""
@@ -477,7 +487,7 @@ class VWorkflow:
 
     def download(self, impression=None):
         """Download workflow results."""
-        print("Downloading the files")
+        # print("Downloading the files")
         from reana_client.api import client
         self.set_enviroment(self.machine_id)
         if impression:
@@ -487,15 +497,15 @@ class VWorkflow:
                 "imp"+impression[0:7]+"/outputs"
             )
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", impression, self.machine_id)
-            print(f"Files: {files}")
+            # print(f"Files: {files}")
             for file in files:
-                print(f'Downloading {file["name"]}')
+                # print(f'Downloading {file["name"]}')
                 output = client.download_file(
                     self.get_name(),
                     file["name"],
                     self.get_access_token(self.machine_id),
                 )
-                print(f'Downloading {file["name"]}')
+                # print(f'Downloading {file["name"]}')
                 os.makedirs(os.path.join(path, "outputs"), exist_ok=True)
                 filename = os.path.join(path, file["name"][11:])
                 with open(filename, "wb") as f:

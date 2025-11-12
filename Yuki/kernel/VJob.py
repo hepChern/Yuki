@@ -51,7 +51,7 @@ class VJob:
 
     def job_type(self):
         """Return the type of the object under a specific path."""
-        print("job_type", self.config_file.read_variable("object_type", ""))
+        # print("job_type", self.config_file.read_variable("object_type", ""))
         return self.config_file.read_variable("object_type", "")
 
     def object_type(self):
@@ -76,7 +76,7 @@ class VJob:
 
     def workflow_id(self):
         """Get the workflow ID for this job."""
-        print("The machine id is:", self.machine_id)
+        # print("The machine id is:", self.machine_id)
         return self.run_config_file.read_variable("workflow", "")
 
     def environment(self):
@@ -113,21 +113,49 @@ class VJob:
         if status == "SUCCESS":
             config_file.write_variable("status", "success")
 
-    def update_status_from_workflow(self, status):
+    def update_status_from_workflow(self, workflow_path):
         """Update job status based on workflow status."""
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
         current_status = config_file.read_variable("status", "raw")
         config_file.write_variable("machine_id", self.machine_id)
+        # print("Current status is: ", current_status)
+        if current_status in ('finished', 'success', 'failed'):
+            return
+
+        results_file = metadata.ConfigFile(os.path.join(workflow_path, "results.json"))
+        results = results_file.read_variable("results", {})
+        full_workflow_status = results.get("status", "unknown")
+
+        log_file = metadata.ConfigFile(os.path.join(workflow_path, "log.json"))
+        log = log_file.read_variable("logs", {})
+        matched_step = None
+        for step in log.values():
+            if step.get("job_name", "") == f"step{self.short_uuid()}":
+                matched_step = step
+
+        status = full_workflow_status
+        if matched_step:
+            status = matched_step.get("status", "unknown")
+            logs = matched_step.get("logs", "")
+            if not os.path.exists(os.path.join(self.path, self.machine_id, "outputs")):
+                os.makedirs(os.path.join(self.path, self.machine_id, "outputs"))
+            with open(os.path.join(self.path, self.machine_id, "outputs/chern.stdout"), "w", encoding='utf-8') as f:
+                f.write(logs)
+            started_at = matched_step.get("started_at", "")
+            finished_at = matched_step.get("ended_at", "")
+
+        # print("New status:", status)
         if current_status == "raw":
             config_file.write_variable("status", status)
         elif current_status == "running":
             if status == "success":
                 config_file.write_variable("status", "success")
             elif status == "finished":
+                # print("Updating job status")
                 config_file.write_variable("status", "finished")
             elif status == "failed":
                 config_file.write_variable("status", "failed")
-        elif current_status in ('success', 'failed'):
+        elif current_status in ('finished', 'success', 'failed'):
             pass
         else:
             config_file.write_variable("status", status)
