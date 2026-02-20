@@ -49,10 +49,10 @@ def execute():
                 start_job.set_use_eos(use_eos)
                 start_jobs.append(job)
             elif job.job_type() == "algorithm":
-                if job.environment() == "script":
-                    continue
-                job.set_status("waiting")
-                start_jobs.append(job)
+                job.set_status("ready")
+                # if job.environment() == "script":
+                #     continue
+                # start_jobs.append(job)
 
         if len(start_jobs) == 0:
             print("no job to run")
