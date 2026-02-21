@@ -9,7 +9,7 @@ from logging import getLogger
 from flask import Flask, render_template, redirect, url_for, request
 
 from .tasks import celeryapp
-from .routes import upload, execution, status, runner, workflow
+from .routes import upload, execution, status, runner, workflow, transfer
 
 
 def create_app():
@@ -43,6 +43,7 @@ def create_app():
     flask_app.register_blueprint(status.bp)
     flask_app.register_blueprint(runner.bp)
     flask_app.register_blueprint(workflow.bp)
+    flask_app.register_blueprint(transfer.bp)
 
     # Main index route
     @flask_app.route('/', methods=['GET', 'POST'])
