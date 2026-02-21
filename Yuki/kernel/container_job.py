@@ -5,6 +5,7 @@ This module contains the ContainerJob class which represents a container-based j
 that extends VJob functionality with container-specific operations like
 environment management, command execution, and input/output handling.
 """
+# pylint: disable=cyclic-import
 import os
 import time
 from CelebiChrono.utils import csys

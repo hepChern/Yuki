@@ -1,6 +1,7 @@
 """
 Snakefile utility class for generating Snakemake workflow files.
 """
+# pylint: disable=cyclic-import
 
 class SnakeFile:
     """ Helper class to write a snakefile

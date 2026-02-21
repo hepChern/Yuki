@@ -4,6 +4,7 @@ REANA workflow implementation.
 This module provides the ReanaWorkflow class which implements workflow execution
 through the REANA workflow management system.
 """
+# pylint: disable=cyclic-import
 import os
 import time
 import json

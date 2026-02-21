@@ -4,6 +4,7 @@ Virtual Job module for Yuki kernel.
 This module contains the VJob abstract base class which represents a virtual job object
 that can include VVolume, ImageJob, ContainerJob and other related entities.
 """
+# pylint: disable=cyclic-import
 import os
 import time
 from abc import ABC

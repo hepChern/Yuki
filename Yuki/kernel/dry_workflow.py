@@ -5,6 +5,7 @@ This module provides the DryWorkflow class which implements workflow execution
 by copying files to a local directory for manual/local execution instead of
 submitting to a remote REANA server.
 """
+# pylint: disable=cyclic-import
 import os
 import shutil
 import json

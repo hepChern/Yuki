@@ -6,6 +6,7 @@ that extends VJob functionality with image building, environment management,
 and workflow execution capabilities. A image can be determined uniquely by its
 build configuration and dependencies.
 """
+# pylint: disable=cyclic-import
 import os
 
 from CelebiChrono.utils import csys

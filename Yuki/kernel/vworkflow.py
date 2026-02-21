@@ -7,6 +7,7 @@ This module defines the abstract VWorkflow class which:
 - Waits for input/dependency workflows to finish.
 - Provides hooks for backend execution and status synchronization implemented by subclasses.
 """
+# pylint: disable=cyclic-import
 
 import os
 import time
@@ -22,7 +23,7 @@ from Yuki.utils import snakefile
 
 CHERN_CACHE = ChernCache.instance()
 
-class VWorkflow(ABC):
+class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
     """Abstract base class representing a workflow.
 
     Parameters:
@@ -89,15 +90,14 @@ class VWorkflow(ABC):
         if mode == "dry":
             from .dry_workflow import DryWorkflow
             return DryWorkflow(project_uuid, jobs, uuid)
-        else:
-            from .reana_workflow import ReanaWorkflow
-            return ReanaWorkflow(project_uuid, jobs, uuid)
+        from .reana_workflow import ReanaWorkflow
+        return ReanaWorkflow(project_uuid, jobs, uuid)
 
     def get_name(self):
         """Get a human-readable name for the workflow."""
         return f"w-{self.project_uuid[:8]}-{self.uuid[:8]}"
 
-    def run(self):
+    def run(self):  # pylint: disable=too-many-branches
         """Common execution flow for workflows.
 
         High level steps:
@@ -191,7 +191,7 @@ class VWorkflow(ABC):
     def _sync_external_job_status(self, job):
         pass
 
-    def _wait_for_dependencies(self):
+    def _wait_for_dependencies(self):  # pylint: disable=too-many-branches
         """Waits for all input-dependency workflows to reach a terminal 'finished' state.
 
         Notes:
