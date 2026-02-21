@@ -7,8 +7,8 @@ through the REANA workflow management system.
 import os
 import time
 import json
-from .vworkflow import VWorkflow
 from CelebiChrono.utils import metadata
+from .vworkflow import VWorkflow
 
 # Try to import reana_client, but it might not be available
 try:
@@ -42,7 +42,6 @@ class ReanaWorkflow(VWorkflow):
                     continue
                 job.set_status("failed")
             raise
-        
 
         try:
             self.logger("Upload file")
@@ -172,7 +171,7 @@ class ReanaWorkflow(VWorkflow):
         """Write a line to the YAML file."""
         self.yaml_file.writeline(line)  # pylint: disable=no-member
 
-    def upload_file(self):
+    def upload_file(self):  # pylint: disable=too-many-locals
         """Upload files to REANA workflow."""
         if not REANA_AVAILABLE:
             raise ImportError("reana_client is not available")
@@ -182,7 +181,8 @@ class ReanaWorkflow(VWorkflow):
             files = job.files()
             total_files = len(files)
             for f_idx, name in enumerate(files):
-                self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading file {f_idx+1}/{total_files}: {name}")
+                self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading file "
+                            f"{f_idx+1}/{total_files}: {name}")
                 with open(os.path.join(job.path, "contents", name[8:]), "rb") as f:
                     client.upload_file(
                         self.get_name(),
@@ -194,8 +194,10 @@ class ReanaWorkflow(VWorkflow):
                 filelist = os.listdir(os.path.join(job.path, "rawdata"))
                 total_raw = len(filelist)
                 for f_idx, filename in enumerate(filelist):
-                    with open(os.path.join(job.path, "rawdata", filename), "rb") as f:
-                        self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading rawdata {f_idx+1}/{total_raw}: {filename}")
+                    rawdata_path = os.path.join(job.path, "rawdata", filename)
+                    with open(rawdata_path, "rb") as f:
+                        self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading rawdata "
+                                    f"{f_idx+1}/{total_raw}: {filename}")
                         client.upload_file(
                             self.get_name(),
                             f,
@@ -206,8 +208,10 @@ class ReanaWorkflow(VWorkflow):
                 if job.use_eos() and job.machine_id == self.machine_id:
                     continue
                 impression = job.path.split("/")[-1]
-                # self.logger(f"Downloading the files from impression {impression}")
-                path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, impression, job.machine_id)
+                # self.logger(f"Downloading the files from impression "
+                #             f"{impression}")
+                path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                                    self.project_uuid, impression, job.machine_id)
                 if not os.path.exists(os.path.join(path, "stageout")):
                     workflow = ReanaWorkflow(self.project_uuid, [], job.workflow_id())
                     workflow.download_outputs(impression)
@@ -217,8 +221,10 @@ class ReanaWorkflow(VWorkflow):
                 filelist = os.listdir(os.path.join(path, "stageout"))
                 total_input = len(filelist)
                 for f_idx, filename in enumerate(filelist):
-                    with open(os.path.join(path, "stageout", filename), "rb") as f:
-                        self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading input {f_idx+1}/{total_input}: {filename}")
+                    file_path = os.path.join(path, "stageout", filename)
+                    with open(file_path, "rb") as f:
+                        self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading input "
+                                    f"{f_idx+1}/{total_input}: {filename}")
                         client.upload_file(
                             self.get_name(),
                             f,
@@ -278,7 +284,8 @@ class ReanaWorkflow(VWorkflow):
             raise ImportError("reana_client is not available")
         self.set_environment(self.machine_id)
         if impression:
-            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, impression, self.machine_id)
+            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                                self.project_uuid, impression, self.machine_id)
             try: # try to download the files
                 if not os.path.exists(os.path.join(path, "stageout.downloaded")):
                     files = client.list_files(
@@ -300,7 +307,8 @@ class ReanaWorkflow(VWorkflow):
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
-                    with open(os.path.join(path, "stageout.downloaded"), "w", encoding='utf-8') as f:
+                    finish_file = os.path.join(path, "stageout.downloaded")
+                    with open(finish_file, "w", encoding='utf-8') as f:
                         pass
             except Exception as e:
                 self.logger(f"Failed to download stageout: {e}")
@@ -337,7 +345,8 @@ class ReanaWorkflow(VWorkflow):
             raise ImportError("reana_client is not available")
         self.set_environment(self.machine_id)
         if impression:
-            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, impression, self.machine_id)
+            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                                self.project_uuid, impression, self.machine_id)
             try:
                 if not os.path.exists(os.path.join(path, "stageout.downloaded")):
                     files = client.list_files(
@@ -359,7 +368,8 @@ class ReanaWorkflow(VWorkflow):
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
-                    with open(os.path.join(path, "stageout.downloaded"), "w", encoding='utf-8') as f:
+                    finish_file = os.path.join(path, "stageout.downloaded")
+                    with open(finish_file, "w", encoding='utf-8') as f:
                         pass
             except Exception as e:
                 self.logger(f"Failed to download stageout: {e}")
@@ -371,7 +381,8 @@ class ReanaWorkflow(VWorkflow):
             raise ImportError("reana_client is not available")
         self.set_environment(self.machine_id)
         if impression:
-            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, impression, self.machine_id)
+            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                                self.project_uuid, impression, self.machine_id)
             try:
                 if not os.path.exists(os.path.join(path, "logs.downloaded")):
                     files = client.list_files(

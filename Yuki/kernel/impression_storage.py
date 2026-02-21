@@ -1,10 +1,15 @@
-import os
+"""Impression storage management for Yuki kernel.
+
+This module provides the ImpressionStorage class for managing workflow operations
+and status tracking for individual impressions across different execution runners.
+"""
 from CelebiChrono.utils.metadata import ConfigFile
 from .vjob import VJob
 from .vworkflow import VWorkflow
 from ..server.config import config
 
 class ImpressionStorage:
+    """Storage manager for impression workflow operations and status tracking."""
     def __init__(self, project_uuid, impression):
         self.project_uuid = project_uuid
         self.impression = impression

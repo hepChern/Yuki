@@ -8,8 +8,8 @@ submitting to a remote REANA server.
 import os
 import shutil
 import json
-from .vworkflow import VWorkflow
 from CelebiChrono.utils import metadata
+from .vworkflow import VWorkflow
 
 
 class DryWorkflow(VWorkflow):
@@ -86,15 +86,17 @@ class DryWorkflow(VWorkflow):
         }
 
         # Write workflow info
-        self.logger(f"[LOCAL] Writing workflow info to {os.path.join(self.local_exec_path, 'workflow_info.json')}")
-        with open(os.path.join(self.local_exec_path, "workflow_info.json"), "w", encoding='utf-8') as f:
+        self.logger(f"[LOCAL] Writing workflow info to "
+                     f"{os.path.join(self.local_exec_path, 'workflow_info.json')}")
+        with open(os.path.join(self.local_exec_path, "workflow_info.json"),
+                  "w", encoding='utf-8') as f:
             json.dump(workflow_info, f, indent=2)
 
-    def copy_files_local(self):
+    def copy_files_local(self):  # pylint: disable=too-many-locals
         """Copy all files to local execution directory."""
         total_jobs = len(self.jobs)
         for j_idx, job in enumerate(self.jobs):
-            job_dir = os.path.join(self.local_exec_path, f"imp{job.short_uuid()}")
+            # job_dir = os.path.join(self.local_exec_path, f"imp{job.short_uuid()}")
 
             # Copy job files
             files = job.files()
@@ -105,7 +107,8 @@ class DryWorkflow(VWorkflow):
                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                 if os.path.exists(src_path):
                     shutil.copy2(src_path, dst_path)
-                    self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Copied file {f_idx+1}/{total_files}: {name}")
+                    self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Copied file "
+                                 f"{f_idx+1}/{total_files}: {name}")
 
             # Handle rawdata environment
             if job.environment() == "rawdata":
@@ -123,7 +126,8 @@ class DryWorkflow(VWorkflow):
                         )
                         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                         shutil.copy2(src_path, dst_path)
-                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Copied rawdata {f_idx+1}/{total_raw}: {filename}")
+                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Copied rawdata "
+                                     f"{f_idx+1}/{total_raw}: {filename}")
 
             # Handle input jobs (copy from dependency workflows)
             elif job.is_input:
@@ -151,7 +155,8 @@ class DryWorkflow(VWorkflow):
                         )
                         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                         shutil.copy2(src_path, dst_path)
-                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Copied input {f_idx+1}/{total_input}: {filename}")
+                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Copied input "
+                                     f"{f_idx+1}/{total_input}: {filename}")
 
         # Copy Snakefile
         shutil.copy2(
@@ -207,7 +212,9 @@ class DryWorkflow(VWorkflow):
                     )
                 }
             }
-            self.logger(f"[LOCAL] Workflow status: {status}, Progress: {results['progress']['completed']}/{results['progress']['total']}")
+            self.logger(f"[LOCAL] Workflow status: {status}, "
+                         f"Progress: {results['progress']['completed']}/"
+                         f"{results['progress']['total']}")
 
             path = os.path.join(self.path, "results.json")
             results_file = metadata.ConfigFile(path)
@@ -263,7 +270,8 @@ class DryWorkflow(VWorkflow):
                     self.logger(f"[LOCAL] [{i+1}/{total_files}] Collected: {filename}")
 
                 # Mark as downloaded
-                with open(os.path.join(os.path.dirname(dst_path), "stageout.downloaded"), "w", encoding='utf-8') as f:
+                with open(os.path.join(os.path.dirname(dst_path),
+                                        "stageout.downloaded"), "w", encoding='utf-8') as _:
                     pass
 
     def download_outputs(self, impression=None):
@@ -300,11 +308,11 @@ class DryWorkflow(VWorkflow):
                     self.logger(f"[LOCAL] [{i+1}/{total_logs}] Collected log: {filename}")
 
                 # Mark as downloaded
-                with open(os.path.join(os.path.dirname(dst_path), "logs.downloaded"), "w", encoding='utf-8') as f:
+                with open(os.path.join(os.path.dirname(dst_path),
+                                        "logs.downloaded"), "w", encoding='utf-8') as _:
                     pass
 
     def ping(self):
         """Ping local system."""
         self.logger("[LOCAL] Local workflow system is available")
         return True
-

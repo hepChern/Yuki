@@ -10,7 +10,6 @@ This module defines the abstract VWorkflow class which:
 
 import os
 import time
-import json
 from abc import ABC, abstractmethod
 from PIL import Image, ImageDraw, ImageFont
 
@@ -52,7 +51,8 @@ class VWorkflow(ABC):
             # load the jobs from the config file
             jobs_info = self.config_file.read_variable("jobs_info", {})
             for job_uuid, info in jobs_info.items():
-                job_path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, job_uuid)
+                job_path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                                         self.project_uuid, job_uuid)
                 job = VJob(job_path, self.machine_id)
                 job.is_input = info.get("is_input", False)
                 self.jobs.append(job)
@@ -78,9 +78,12 @@ class VWorkflow(ABC):
         - Otherwise determine mode from stored configuration of the workflow runner.
         """
         if not mode:
-            workflow_path = os.path.join(os.environ["HOME"], ".Yuki", "Workflows", uuid)
-            runner_id = metadata.ConfigFile(os.path.join(workflow_path, "config.json")).read_variable("machine_id", "")
-            config = metadata.ConfigFile(os.path.join(os.environ["HOME"], ".Yuki", "config.json"))
+            workflow_path = os.path.join(os.environ["HOME"], ".Yuki",
+                                          "Workflows", uuid)
+            runner_id = metadata.ConfigFile(
+                os.path.join(workflow_path, "config.json")).read_variable("machine_id", "")
+            config = metadata.ConfigFile(os.path.join(os.environ["HOME"],
+                                                   ".Yuki", "config.json"))
             backend_types = config.read_variable("backend_types", {})
             mode = backend_types.get(runner_id, "reana")
         if mode == "dry":
@@ -117,7 +120,8 @@ class VWorkflow(ABC):
         # Set all the jobs to be the waiting status
         total_jobs = len(self.jobs)
         for i, job in enumerate(self.jobs):
-            self.logger(f"[{i+1}/{total_jobs}] job: {job}, is input: {job.is_input}, job status: {job.status()}, job type: {job.job_type()}")
+            self.logger(f"[{i+1}/{total_jobs}] job: {job}, is input: {job.is_input}, "
+                         f"job status: {job.status()}, job type: {job.job_type()}")
 
         # Save the jobs info to the config file
         jobs_info = {}
@@ -193,19 +197,23 @@ class VWorkflow(ABC):
         Notes:
         - Polls the statuses of workflows referred to by input jobs.
         - Uses a bounded number of retries to avoid infinite wait.
-        - If dependencies do not finish within the retry window, resets job states and returns False.
+        - If dependencies do not finish within the retry window, resets job states
+          and returns False.
         """
         # First, check whether the dependencies are satisfied
         for i_tries in range(60):
             self.logger(f"Checking finished (Attempt {i_tries+1}/60)")
             all_finished = True
             workflow_list = []
-            input_jobs = [j for j in self.jobs if j.is_input and j.status() not in ("archived", "finished") and j.job_type() != "algorithm"]
+            input_jobs = [j for j in self.jobs if j.is_input
+                           and j.status() not in ("archived", "finished")
+                           and j.job_type() != "algorithm"]
             total_inputs = len(input_jobs)
 
             for i, job in enumerate(input_jobs):
                 workflow = VWorkflow.create(self.project_uuid, [], job.workflow_id())
-                self.logger(f"[{i+1}/{total_inputs}] Checking dependency: Job {job.uuid} workflow {workflow.uuid}")
+                self.logger(f"[{i+1}/{total_inputs}] Checking dependency: Job {job.uuid} "
+                             f"workflow {workflow.uuid}")
                 if workflow and workflow not in workflow_list:
                     workflow_list.append(workflow)
                 # FIXME: may check if some of the dependence fail
@@ -258,7 +266,7 @@ class VWorkflow(ABC):
 
         return True
 
-    def construct_snake_file(self):
+    def construct_snake_file(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Construct the Snakemake Snakefile describing rules for all jobs.
 
         Each job becomes a rule 'step<short_uuid>' that:
@@ -266,10 +274,12 @@ class VWorkflow(ABC):
         - References a container image and resources.
         - Provides a shell command combining the job's commands.
         """
-        config = metadata.ConfigFile(os.path.join(os.environ["HOME"], ".Yuki", "config.json"))
+        config = metadata.ConfigFile(os.path.join(os.environ["HOME"],
+                                                   ".Yuki", "config.json"))
         use_kerberos = config.read_variable("use_kerberos", {}).get(self.machine_id, False)
         for job in self.jobs:
-            self.logger(f"Job in the workflow: {job}, is input: {job.is_input}, job type: {job.job_type()}")
+            self.logger(f"Job in the workflow: {job}, is input: {job.is_input}, "
+                         f"job type: {job.job_type()}")
 
         self.snakefile_path = os.path.join(self.path, "Snakefile")
         snake_file = snakefile.SnakeFile(os.path.join(self.path, "Snakefile"))
@@ -360,7 +370,8 @@ class VWorkflow(ABC):
                 # Unknown job type, skip or handle
                 self.logger(f"Unknown job type {job.object_type()} for job {job}, skipping")
                 continue
-            self.logger(f"[{i+1}/{total_jobs}] Get the step at time {time.time() - start_time:.4f}s")
+            self.logger(f"[{i+1}/{total_jobs}] Get the step at time "
+                         f"{time.time() - start_time:.4f}s")
 
             snake_file.addline("\n", 0)
             snake_file.addline(f"rule step{job.short_uuid()}:", 0)
@@ -381,7 +392,8 @@ class VWorkflow(ABC):
                     self.machine_id
                 )
                 self.dependencies[f"step{job.short_uuid()}"].append(f"step{dep_job.short_uuid()}")
-            self.logger(f"[{i+1}/{total_jobs}] Added inputs and dependencies at time {time.time() - start_time:.4f}s")
+            self.logger(f"[{i+1}/{total_jobs}] Added inputs and dependencies at time "
+                         f"{time.time() - start_time:.4f}s")
 
             snake_file.addline("output:", 1)
             snake_file.addline(f'"{job.short_uuid()}.done"', 2)
@@ -399,10 +411,12 @@ class VWorkflow(ABC):
                 snake_file.addline(f'kubernetes_memory_limit="{snakemake_rule["memory"]}"', 2)
             snake_file.addline("shell:", 1)
             snake_file.addline(f'"{" && ".join(snakemake_rule["commands"])}"', 2)
-            self.logger(f"[{i+1}/{total_jobs}] Added shell and resources at time {time.time() - start_time:.4f}s")
+            self.logger(f"[{i+1}/{total_jobs}] Added shell and resources at time "
+                         f"{time.time() - start_time:.4f}s")
 
             self.steps.append(step)
-            self.logger(f"[{i+1}/{total_jobs}] Appended step at time {time.time() - start_time:.4f}s")
+            self.logger(f"[{i+1}/{total_jobs}] Appended step at time "
+                         f"{time.time() - start_time:.4f}s")
 
         snake_file.write()
         self.logger(f"Snakefile written to {self.snakefile_path}")
@@ -454,7 +468,8 @@ class VWorkflow(ABC):
             # Otherwise, expand dependencies first
             stack.append((job, True))  # mark job to add after deps
             for dep in job.dependencies():
-                dep_path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, dep)
+                dep_path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                                         self.project_uuid, dep)
                 dep_job = VJob(dep_path, None)
                 if dep_job.path not in visited:
                     stack.append((dep_job, False))
@@ -486,9 +501,9 @@ class VWorkflow(ABC):
         results_file = metadata.ConfigFile(path)
         results = results_file.read_variable("results", {})
         results["status"] = status
-        results_file.write_variable("results", results) 
-                
-    def watermark(self, impression=None):
+        results_file.write_variable("results", results)
+
+    def watermark(self, impression=None):  # pylint: disable=too-many-locals
         """Add watermark to PNG images for a given impression.
 
         Procedure:
@@ -500,9 +515,12 @@ class VWorkflow(ABC):
         """
         self.logger(f"Watermarking impression: {impression}")
         if impression:
-            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, impression, self.machine_id)
+            path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                                 self.project_uuid, impression, self.machine_id)
             if not os.path.exists(os.path.join(path, "stageout.downloaded")):
-                return False
+                self.logger(f"Stageout not downloaded for impression {impression}, "
+                             f"skipping watermarking")
+                return
             outputs_path = os.path.join(path, "stageout")
             self.logger(f"Outputs path: {outputs_path}")
             watermark_path = os.path.join(path, "watermarks")
@@ -548,13 +566,13 @@ class VWorkflow(ABC):
                 draw.text((x, y), text, font=font, fill=fill_color)
 
                 # 4. Save the resulting image.
-                image.save(os.path.join(watermark_path, f"imp{impression[:8]}_{filename}"), format="PNG")
+                image.save(os.path.join(watermark_path,
+                                         f"imp{impression[:8]}_{filename}"), format="PNG")
                 self.logger(f"[{i+1}/{total_files}] Saved watermarked image: {filename}")
 
     @abstractmethod
     def update_workflow_status(self):
         """Update workflow status - must be implemented by subclass."""
-        pass
 
     def kill(self):
         """Kill the workflow execution - must be implemented by subclass.
@@ -563,5 +581,3 @@ class VWorkflow(ABC):
         - NotImplementedError if subclass does not implement termination behavior.
         """
         # ...existing code...
-
-

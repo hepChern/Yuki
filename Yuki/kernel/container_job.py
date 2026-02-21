@@ -6,11 +6,11 @@ that extends VJob functionality with container-specific operations like
 environment management, command execution, and input/output handling.
 """
 import os
+import time
 from CelebiChrono.utils import csys
 from CelebiChrono.utils import metadata
 from .vjob import VJob
 from .image_job import ImageJob
-import time
 
 class ContainerJob(VJob):
     """
@@ -55,7 +55,8 @@ class ContainerJob(VJob):
         # print("Predecessors, ", self.predecessors())
         for pred_job in predecessors:
             if pred_job.job_type() == "algorithm":
-                print(f"    >>>> >>>> Image retrieval time after finding predecessor: {time.time() - start_time}")
+                print(f"    >>>> >>>> Image retrieval time after finding predecessor: "
+                       f"{time.time() - start_time}")
                 self._image = ImageJob(pred_job.path, self.machine_id)
                 return self._image
         return None
@@ -84,8 +85,8 @@ class ContainerJob(VJob):
             config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
             eos_mount_points = metadata.ConfigFile(config_path).read_variable("eos_mount_point", {})
             eos_path = eos_mount_points.get(request_machine_id, "/eos/user/unknown")
-            commands.append("mkdir -p " + eos_path + f"/{self.project_uuid}/{self.impression()}/")
-            commands.append("cp -r stageout/* " + eos_path + f"/{self.project_uuid}/{self.impression()}/")
+            commands.append(f"mkdir -p {eos_path}/{self.project_uuid}/{self.impression()}/")
+            commands.append(f"cp -r stageout/* {eos_path}/{self.project_uuid}/{self.impression()}/")
         commands.append("cd ..")
         commands.append(f"touch {self.short_uuid()}.done")
 
@@ -181,8 +182,8 @@ class ContainerJob(VJob):
             config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
             eos_mount_points = metadata.ConfigFile(config_path).read_variable("eos_mount_point", {})
             eos_path = eos_mount_points.get(request_machine_id, "/eos/user/unknown")
-            commands.append("mkdir -p " + eos_path + f"/{self.project_uuid}/{self.impression()}/")
-            commands.append("cp -r stageout/* " + eos_path + f"/{self.project_uuid}/{self.impression()}/")
+            commands.append(f"mkdir -p {eos_path}/{self.project_uuid}/{self.impression()}/")
+            commands.append(f"cp -r stageout/* {eos_path}/{self.project_uuid}/{self.impression()}/")
         commands.append("cd ..")
         commands.append(f"touch {self.short_uuid()}.done")
 
@@ -222,7 +223,8 @@ class ContainerJob(VJob):
         # Link to input impressions
         start_time = time.time()
         alias_list, alias_map = self.inputs()
-        print(f"    >>>> >>>> Symlink creation time after inputs retrieval: {time.time() - start_time}")
+        print(f"    >>>> >>>> Symlink creation time after inputs retrieval: "
+               f"{time.time() - start_time}")
         print("The alias_list is:", alias_list)
         for alias in alias_list:
             impression = alias_map[alias]
@@ -243,7 +245,7 @@ class ContainerJob(VJob):
         raw_commands = self.image().yaml_file.read_variable("commands", [])
         processed_commands = []
 
-        for i, command in enumerate(raw_commands):
+        for _, command in enumerate(raw_commands):
             command = self._substitute_parameters(command)
             command = self._substitute_inputs(command)
             command = self._substitute_paths(command)
@@ -351,15 +353,26 @@ class ContainerJob(VJob):
         return inputs
 
     def setup_commands(self):
+        """Generate commands to set up container environment from EOS storage.
+
+        Returns:
+            list: Commands to create directories and copy data from EOS
+        """
         config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
         eos_mount_points = metadata.ConfigFile(config_path).read_variable("eos_mount_point", {})
         eos_path = eos_mount_points.get(self.machine_id, "/eos/user/unknown")
         commands = []
         commands.append(f"mkdir -p imp{self.short_uuid()}/stageout")
-        commands.append(f"cp -r {eos_path}/{self.project_uuid}/{self.impression()}/* imp{self.short_uuid()}/stageout/")
+        commands.append(f"cp -r {eos_path}/{self.project_uuid}/{self.impression()}/* "
+                         f"imp{self.short_uuid()}/stageout/")
         return commands
 
     def finalize_commands(self):
+        """Generate commands to clean up container environment.
+
+        Returns:
+            list: Commands to remove temporary directories
+        """
         commands = []
         commands.append(f"rm -rf imp{self.short_uuid()}/stageout")
         return commands

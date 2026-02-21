@@ -20,7 +20,7 @@ class ImageJob(VJob):
     dependency management, and workflow step generation for image-based jobs.
     """
 
-    def __init__(self, path, machine_id):
+    def __init__(self, path, machine_id):  # pylint: disable=useless-parent-delegation
         """
         Initialize a ImageJob instance.
 
@@ -133,7 +133,7 @@ class ImageJob(VJob):
         commands.extend(self._cleanup_commands())
         return commands
 
-    def step(self, request_machine):
+    def step(self, _request_machine):
         """
         Generate a step configuration for REANA workflow execution.
 
@@ -149,7 +149,7 @@ class ImageJob(VJob):
             "name": f"step{self.short_uuid()}"
         }
 
-    def snakemake_rule(self, request_machine):
+    def snakemake_rule(self, _request_machine):
         """
         Generate a Snakemake rule configuration for workflow execution.
 
