@@ -15,6 +15,7 @@ logger = getLogger("YukiLogger")
 
 @bp.route('/upload', methods=['POST'])
 def upload_file():
+    """Upload a tar file and extract it to the target directory."""
     project_uuid = request.form["project_uuid"]
     tarname = request.form["tarname"]
 
@@ -73,7 +74,8 @@ def export(project_uuid, impression, filename):
     if os.path.exists(os.path.join(job_path, "rawdata")):
         full_path = os.path.join(job_path, "rawdata", filename)
         if os.path.exists(full_path):
-            return send_from_directory(os.path.join(job_path, "rawdata"), filename, as_attachment=True)
+            return send_from_directory(
+                os.path.join(job_path, "rawdata"), filename, as_attachment=True)
 
     runners = config_file.read_variable("runners", [])
     runners_id = config_file.read_variable("runners_id", {})

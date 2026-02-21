@@ -10,8 +10,8 @@ from ..kernel.vworkflow import VWorkflow
 
 def create_celery_app():
     """Create and configure Celery application."""
-    celeryapp = Celery('yuki-server', broker='amqp://localhost')
-    celeryapp.conf.update(
+    app = Celery('yuki-server', broker='amqp://localhost')
+    app.conf.update(
         result_backend='rpc://',
         task_serializer='json',
         accept_content=['json'],
@@ -19,7 +19,7 @@ def create_celery_app():
         timezone='UTC',
         enable_utc=True,
     )
-    return celeryapp
+    return app
 
 
 # Create celery app instance

@@ -170,7 +170,7 @@ class ReanaWorkflow(VWorkflow):
 
     def writeline(self, line):
         """Write a line to the YAML file."""
-        self.yaml_file.writeline(line)
+        self.yaml_file.writeline(line)  # pylint: disable=no-member
 
     def upload_file(self):
         """Upload files to REANA workflow."""

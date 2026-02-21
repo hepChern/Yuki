@@ -1,3 +1,6 @@
+"""
+Workflow management routes for starting, stopping, and monitoring workflows.
+"""
 from flask import Blueprint
 from Yuki.kernel.impression_storage import ImpressionStorage
 

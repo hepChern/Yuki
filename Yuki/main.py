@@ -1,9 +1,5 @@
 """ """
 import click
-import os
-from .kernel.container_job import ContainerJob
-from .kernel.image_job import ImageJob
-from .kernel.vjob import VJob
 
 from .server_main import server_start
 from .server_main import stop as server_stop
@@ -35,5 +31,6 @@ def status():
 
 # Main
 def main():
-    cli()
+    """Main entry point for Yuki CLI."""
+    cli()  # pylint: disable=no-value-for-parameter
 

@@ -18,7 +18,7 @@ UUID_RE = re.compile(r'^[0-9a-f]{32}$')
 
 
 @bp.route('/export-imp-stageout', methods=['POST'])
-def export_impressions():
+def export_impressions():  # pylint: disable=too-many-locals
     """Export stageout results from multiple impressions as a tar.gz."""
     data = request.get_json()
     project_uuid = data.get("project_uuid")
@@ -38,7 +38,7 @@ def export_impressions():
                 if not os.path.isdir(stageout_dir):
                     continue
                 runner_id = entry
-                for root, dirs, files in os.walk(stageout_dir):
+                for root, _, files in os.walk(stageout_dir):
                     for fname in files:
                         full_path = os.path.join(root, fname)
                         rel = os.path.relpath(full_path, stageout_dir)

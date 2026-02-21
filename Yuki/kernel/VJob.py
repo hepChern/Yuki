@@ -6,11 +6,11 @@ that can include VVolume, ImageJob, ContainerJob and other related entities.
 """
 import os
 import time
-from abc import ABC, abstractmethod
+from abc import ABC
 
 from CelebiChrono.utils import metadata
 
-class VJob(ABC):
+class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """Abstract base class for virtual job objects, including VVolume, ImageJob, ContainerJob."""
 
     def __init__(self, path, machine_id):
@@ -60,14 +60,12 @@ class VJob(ABC):
             # Create the appropriate subclass instance
             if job_type == "algorithm":
                 return object.__new__(ImageJob)
-            elif job_type == "task":
+            if job_type == "task":
                 return object.__new__(ContainerJob)
-            else:
-                # Default to ContainerJob for unknown types
-                return object.__new__(ContainerJob)
-        else:
-            # Normal instantiation for subclasses
-            return object.__new__(cls)
+            # Default to ContainerJob for unknown types
+            return object.__new__(ContainerJob)
+        # Normal instantiation for subclasses
+        return object.__new__(cls)
 
     def __str__(self):
         """Define the behavior of print(vobject)."""
@@ -144,6 +142,7 @@ class VJob(ABC):
         return self._use_eos
 
     def use_kerberos(self):
+        """Check if the job is set to use Kerberos authentication."""
         if self._use_kerberos is not None:
             return self._use_kerberos
         config = metadata.ConfigFile(os.path.join(os.environ["HOME"], ".Yuki", "config.json"))
@@ -205,7 +204,8 @@ class VJob(ABC):
                 os.makedirs(log_dir)
             with open(os.path.join(log_dir, "celebi.stdout"), "w", encoding='utf-8') as f:
                 f.write(logs)
-            config_file = metadata.ConfigFile(os.path.join(self.path, self.machine_id, "status.json"))
+            config_file = metadata.ConfigFile(
+                os.path.join(self.path, self.machine_id, "status.json"))
             # print(matched_step)
             start_time = matched_step.get("started_at", "")
             end_time = matched_step.get("finished_at", "")
@@ -224,7 +224,8 @@ class VJob(ABC):
             duration = int(end_epoch - start_epoch)
             config_file.write_variable("duration", duration)
 
-    def _update_job_status(self, config_file, current_status, step_status, full_workflow_status, logger=None):
+    def _update_job_status(self, config_file, current_status, step_status,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-branches
+                           full_workflow_status, logger=None):
         """Update job status based on current status, step status, and workflow status."""
         if logger:
             logger(f"Job {self.short_uuid()} new status: {step_status}")

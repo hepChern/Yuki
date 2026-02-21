@@ -4,7 +4,7 @@ Status and monitoring routes.
 import json
 import os
 import time
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, url_for
 from werkzeug.utils import secure_filename
 from CelebiChrono.utils.metadata import ConfigFile
 from CelebiChrono.kernel.chern_cache import ChernCache
@@ -28,7 +28,7 @@ def setjobstatus(project_uuid, impression_name, job_status):
 
 
 @bp.route("/status/<project_uuid>/<impression_name>", methods=['GET'])
-def status(project_uuid, impression_name):
+def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
     """Get status for an impression."""
     job_path = config.get_job_path(project_uuid, impression_name)
     config_file = config.get_config_file()
@@ -166,8 +166,8 @@ def process_directory(job_path, runner_id, base_dir, file_infos_dict, max_previe
         ext = os.path.splitext(filename)[1].lower()
         is_image = ext in ('.png', '.jpg', '.jpeg', '.gif')
         is_text = ext in ('.txt', '.log', '.stdout')
-        watermarked = (base_dir == 'watermarks')
-        is_log = (base_dir == 'logs')
+        watermarked = base_dir == 'watermarks'
+        is_log = base_dir == 'logs'
 
         file_info = {
             'name': filename,
@@ -272,7 +272,7 @@ def impview(project_uuid, impression_name):
                            files=final_file_infos)
 
 
-def process_directory2(job_path, runner_id, sub_dir, file_infos_dict,
+def process_directory2(job_path, runner_id, sub_dir, file_infos_dict,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
                        max_chars, project_uuid, imp_id):
     """
     Scans sub-directories and generates URLs for images (plots) and text files.
@@ -324,12 +324,13 @@ def process_directory2(job_path, runner_id, sub_dir, file_infos_dict,
 
 @bp.route("/test/<project_uuid>", methods=['GET'])
 def test(project_uuid):
+    """Test endpoint for project tree visualization."""
     base_path = os.path.join(os.path.expanduser("~"), ".Yuki", "Bookkeep", project_uuid)
 
     if not os.path.exists(base_path):
         return "Project metadata not found", 404
 
-    def build_tree_data(path, is_root=False):
+    def build_tree_data(path, is_root=False):  # pylint: disable=too-many-locals
         folder_name = os.path.basename(path)
         display_name = folder_name[:8] if is_root else folder_name
 
@@ -470,7 +471,7 @@ def workflows(project_uuid):
 
 @bp.route("/homekeep/<project_uuid>", methods=['GET'])
 def homekeep(project_uuid):
-    # Get the list of workflows
+    """Trigger homekeep for all workflows in a project."""
     workflows_path = os.path.join(
         os.environ["HOME"],
         ".Yuki",

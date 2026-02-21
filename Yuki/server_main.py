@@ -1,7 +1,6 @@
 """
 Main entry point and daemon management for Yuki server.
 """
-import os
 import subprocess
 from multiprocessing import Process
 from CelebiChrono.utils.pretty import colorize
@@ -43,9 +42,9 @@ def stop():
     if status() == "stop":
         return
     with open(config.daemon_path + "/server.pid", 'r', encoding='utf-8') as f:
-        subprocess.call("kill {}".format(f.read()), shell=True)
+        subprocess.call(f"kill {f.read()}", shell=True)
     with open(config.daemon_path + "/runner.pid", 'r', encoding='utf-8') as f:
-        subprocess.call("kill {}".format(f.read()), shell=True)
+        subprocess.call(f"kill {f.read()}", shell=True)
 
 
 def status():

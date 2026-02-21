@@ -9,8 +9,8 @@ from ...kernel.vjob import VJob
 from ...kernel.container_job import ContainerJob
 from ..config import config
 from ..tasks import task_exec_impression
-import shutil
-import json
+import shutil  # pylint: disable=wrong-import-order
+import json  # pylint: disable=wrong-import-order
 
 bp = Blueprint('execution', __name__)
 logger = getLogger("YukiLogger")
@@ -84,7 +84,6 @@ def purge():
     if request.method == 'POST':
         contents = request.files["impressions"].read().decode()
         project_uuid = request.form['project_uuid']
-        start_jobs = []
         print("contents:", contents.split(" "))
 
         for impression in contents.split(" "):

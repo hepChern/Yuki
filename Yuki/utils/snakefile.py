@@ -1,6 +1,8 @@
-import os
+"""
+Snakefile utility class for generating Snakemake workflow files.
+"""
 
-class SnakeFile(object):
+class SnakeFile:
     """ Helper class to write a snakefile
     """
 
@@ -12,8 +14,10 @@ class SnakeFile(object):
         self.contents = ""
 
     def addline(self, string, index):
+        """Add a line to the snakefile with given indentation level."""
         self.contents += (" "*index*4 + string + "\n")
 
     def write(self):
+        """Write the snakefile contents to disk."""
         with open(self.file_path, "w", encoding='utf-8') as f:
             f.write(self.contents)

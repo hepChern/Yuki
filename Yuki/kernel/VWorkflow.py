@@ -35,7 +35,8 @@ class VWorkflow(ABC):
     def __init__(self, project_uuid, jobs, uuid=None, machine_id=None):
         self.project_uuid = project_uuid
         self.uuid = uuid or csys.generate_uuid()
-        self.path = os.path.join(os.environ["HOME"], ".Yuki", "Workflows", self.project_uuid, self.uuid)
+        self.path = os.path.join(
+            os.environ["HOME"], ".Yuki", "Workflows", self.project_uuid, self.uuid)
         os.makedirs(self.path, exist_ok=True)
 
         self.config_file = metadata.ConfigFile(os.path.join(self.path, "config.json"))
@@ -90,6 +91,7 @@ class VWorkflow(ABC):
             return ReanaWorkflow(project_uuid, jobs, uuid)
 
     def get_name(self):
+        """Get a human-readable name for the workflow."""
         return f"w-{self.project_uuid[:8]}-{self.uuid[:8]}"
 
     def run(self):
@@ -194,8 +196,8 @@ class VWorkflow(ABC):
         - If dependencies do not finish within the retry window, resets job states and returns False.
         """
         # First, check whether the dependencies are satisfied
-        for iTries in range(60):
-            self.logger(f"Checking finished (Attempt {iTries+1}/60)")
+        for i_tries in range(60):
+            self.logger(f"Checking finished (Attempt {i_tries+1}/60)")
             all_finished = True
             workflow_list = []
             input_jobs = [j for j in self.jobs if j.is_input and j.status() not in ("archived", "finished") and j.job_type() != "algorithm"]
@@ -339,6 +341,8 @@ class VWorkflow(ABC):
         for i, job in enumerate(self.jobs):
             start_time = time.time()
             self.logger(f"[{i+1}/{total_jobs}] Processing job: {job}")
+            snakemake_rule = None
+            step = None
             if job.object_type() == "algorithm":
                 # In this case, if the command is compile, we need to compile it
                 image = ImageJob(job.path, job.machine_id)
@@ -347,11 +351,15 @@ class VWorkflow(ABC):
                 step = image.step(self.machine_id)
 
                 # In this case, we also need to run the "touch"
-            if job.object_type() == "task":
+            elif job.object_type() == "task":
                 container = ContainerJob(job.path, job.machine_id)
                 container.is_input = job.is_input
                 snakemake_rule = container.snakemake_rule(self.machine_id)
                 step = container.step(self.machine_id)
+            else:
+                # Unknown job type, skip or handle
+                self.logger(f"Unknown job type {job.object_type()} for job {job}, skipping")
+                continue
             self.logger(f"[{i+1}/{total_jobs}] Get the step at time {time.time() - start_time:.4f}s")
 
             snake_file.addline("\n", 0)
@@ -473,6 +481,7 @@ class VWorkflow(ABC):
         return "unknown"
 
     def set_workflow_status(self, status):
+        """Set the workflow status in the results file."""
         path = os.path.join(self.path, "results.json")
         results_file = metadata.ConfigFile(path)
         results = results_file.read_variable("results", {})
