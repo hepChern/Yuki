@@ -121,7 +121,7 @@ class ContainerJob(VJob):
             print(f"    >>>> >>>> After input substitution time: {time.time() - start_time}")
             command = self._substitute_paths(command)
             print(f"    >>>> >>>> After path substitution time: {time.time() - start_time}")
-            command = f"{{ " + command + f" ; }} >> logs/celebi_user_step{i}.log 2>&1"
+            command = "{ " + command + " ; } >> logs/celebi_user_step{i}.log 2>&1"
             processed_commands.append(command.replace("\"", "\\\""))
 
         return processed_commands
@@ -247,7 +247,7 @@ class ContainerJob(VJob):
             command = self._substitute_parameters(command)
             command = self._substitute_inputs(command)
             command = self._substitute_paths(command)
-            command = f"{{{{ " + command + f" ; }}}} >> logs/celebi_user_step{i}.log 2>&1"
+            command = "{{ " + command + " ; }} >> logs/celebi_user_step{i}.log 2>&1"
             processed_commands.append(command.replace("\"", "\\\""))
 
         return processed_commands

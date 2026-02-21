@@ -10,13 +10,21 @@ import json
 from .vworkflow import VWorkflow
 from CelebiChrono.utils import metadata
 
+# Try to import reana_client, but it might not be available
+try:
+    from reana_client.api import client
+    REANA_AVAILABLE = True
+except ImportError:
+    REANA_AVAILABLE = False
+    client = None
+
 class ReanaWorkflow(VWorkflow):
     """REANA implementation of VWorkflow."""
 
     def __init__(self, project_uuid, jobs, uuid=None):
         """Initialize REANA workflow."""
         super().__init__(project_uuid, jobs, uuid)
-        self.set_enviroment(self.machine_id)
+        self.set_environment(self.machine_id)
         self.access_token = self.get_access_token(self.machine_id)
 
     def _execute_backend(self):
@@ -69,8 +77,9 @@ class ReanaWorkflow(VWorkflow):
 
     def create_workflow(self):
         """Create a workflow using REANA client."""
-        from reana_client.api import client
-        self.set_enviroment(self.machine_id)
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
 
         reana_json = {"workflow": {}}
         reana_json["workflow"]["specification"] = {
@@ -86,7 +95,7 @@ class ReanaWorkflow(VWorkflow):
                 self.get_access_token(self.machine_id)
                 )
 
-    def set_enviroment(self, machine_id):
+    def set_environment(self, machine_id):
         """Set the environment variable for REANA server URL."""
         # Set the environment variable
         path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
@@ -95,7 +104,8 @@ class ReanaWorkflow(VWorkflow):
         url = urls.get(machine_id, "")
         self.logger(f"machine_id = {machine_id}")
         self.logger(f"reana_url = {url}")
-        from reana_client.api import client
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
         from reana_commons.api_client import BaseAPIClient
         os.environ["REANA_SERVER_URL"] = url
         BaseAPIClient("reana-server")
@@ -110,7 +120,8 @@ class ReanaWorkflow(VWorkflow):
 
     def create_reana_workflow(self):
         """Create REANA workflow (deprecated - use create_workflow)."""
-        from reana_client.api import client
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
         reana_json = {
             "workflow": {
                 "specification": {"job_dependencies": self.dependencies, "steps": self.steps},
@@ -122,8 +133,9 @@ class ReanaWorkflow(VWorkflow):
 
     def start_workflow(self):
         """Start the workflow execution."""
-        from reana_client.api import client
-        self.set_enviroment(self.machine_id)
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
         client.start_workflow(
             self.get_name(),
             self.get_access_token(self.machine_id),
@@ -148,7 +160,8 @@ class ReanaWorkflow(VWorkflow):
 
     def kill(self):
         """Kill the workflow execution."""
-        from reana_client.api import client
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
         client.stop_workflow(
             self.get_name(),
             False,
@@ -161,8 +174,9 @@ class ReanaWorkflow(VWorkflow):
 
     def upload_file(self):
         """Upload files to REANA workflow."""
-        from reana_client.api import client
-        self.set_enviroment(self.machine_id)
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
         total_jobs = len(self.jobs)
         for j_idx, job in enumerate(self.jobs):
             files = job.files()
@@ -199,7 +213,7 @@ class ReanaWorkflow(VWorkflow):
                     workflow.download_outputs(impression)
 
                 # Reset the id
-                self.set_enviroment(self.machine_id)
+                self.set_environment(self.machine_id)
                 filelist = os.listdir(os.path.join(path, "stageout"))
                 total_input = len(filelist)
                 for f_idx, filename in enumerate(filelist):
@@ -237,9 +251,10 @@ class ReanaWorkflow(VWorkflow):
     def update_workflow_status(self):
         """Update workflow status from REANA."""
         try:
-            from reana_client.api import client
+            if not REANA_AVAILABLE:
+                raise ImportError("reana_client is not available")
             self.logger(f"Updating status for workflow {self.uuid} on machine {self.machine_id}")
-            self.set_enviroment(self.machine_id)
+            self.set_environment(self.machine_id)
             results = client.get_workflow_status(
                 self.get_name(),
                 self.get_access_token(self.machine_id))
@@ -259,8 +274,9 @@ class ReanaWorkflow(VWorkflow):
     def download(self, impression=None):
         """Download workflow results."""
         # self.logger("Downloading the files")
-        from reana_client.api import client
-        self.set_enviroment(self.machine_id)
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
         if impression:
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, impression, self.machine_id)
             try: # try to download the files
@@ -284,7 +300,8 @@ class ReanaWorkflow(VWorkflow):
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
-                    open(os.path.join(path, "stageout.downloaded"), "w").close()
+                    with open(os.path.join(path, "stageout.downloaded"), "w", encoding='utf-8') as f:
+                        pass
             except Exception as e:
                 self.logger(f"Failed to download stageout: {e}")
 
@@ -308,15 +325,17 @@ class ReanaWorkflow(VWorkflow):
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
-                    open(os.path.join(path, "logs.downloaded"), "w").close()
+                    with open(os.path.join(path, "logs.downloaded"), "w", encoding='utf-8') as f:
+                        pass
             except Exception as e:
                 self.logger(f"Failed to download logs: {e}")
 
     def download_outputs(self, impression=None):
         """Download workflow results."""
         # self.logger("Downloading the files")
-        from reana_client.api import client
-        self.set_enviroment(self.machine_id)
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
         if impression:
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, impression, self.machine_id)
             try:
@@ -340,15 +359,17 @@ class ReanaWorkflow(VWorkflow):
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
-                    open(os.path.join(path, "stageout.downloaded"), "w").close()
+                    with open(os.path.join(path, "stageout.downloaded"), "w", encoding='utf-8') as f:
+                        pass
             except Exception as e:
                 self.logger(f"Failed to download stageout: {e}")
 
     def download_logs(self, impression=None):
         """Download workflow logs."""
         # self.logger("Downloading the files")
-        from reana_client.api import client
-        self.set_enviroment(self.machine_id)
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
         if impression:
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage", self.project_uuid, impression, self.machine_id)
             try:
@@ -371,7 +392,8 @@ class ReanaWorkflow(VWorkflow):
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
-                    open(os.path.join(path, "logs.downloaded"), "w").close()
+                    with open(os.path.join(path, "logs.downloaded"), "w", encoding='utf-8') as f:
+                        pass
             except Exception as e:
                 self.logger(f"Failed to download logs: {e}")
 
@@ -379,8 +401,9 @@ class ReanaWorkflow(VWorkflow):
         """Ping the REANA server."""
         # Ping the server
         # We must import the client here because we need to set the environment variable first
-        from reana_client.api import client
-        self.set_enviroment(self.machine_id)
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
         return client.ping(self.access_token)
 
     def homekeep(self):
@@ -407,8 +430,9 @@ class ReanaWorkflow(VWorkflow):
             print("Downloading", job.uuid)
             self.download(job.uuid)
         # Remove the online workflow
-        from reana_client.api import client
-        self.set_enviroment(self.machine_id)
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
         self.logger("Deleting the online workflow")
         try:
             print("Deleting workflow", self.get_name())
@@ -421,5 +445,5 @@ class ReanaWorkflow(VWorkflow):
             self.logger(f"Failed to delete the online workflow: {e}")
         # Write the workflow homekeep done file
         homekeep_done_path = os.path.join(self.path, "homekeep.done")
-        with open(homekeep_done_path, "w") as f:
+        with open(homekeep_done_path, "w", encoding='utf-8') as f:
             f.write("done")

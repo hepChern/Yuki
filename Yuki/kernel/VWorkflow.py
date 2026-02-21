@@ -65,7 +65,7 @@ class VWorkflow(ABC):
         timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]", time.localtime())
         log_message = f"{timestamp} {message}"
         print(log_message)
-        with open(self.log_path, "a") as f:
+        with open(self.log_path, "a", encoding='utf-8') as f:
             f.write(log_message + "\n")
 
     @staticmethod
@@ -152,7 +152,7 @@ class VWorkflow(ABC):
         try:
             self.logger("Constructing the snakefile")
             self.construct_snake_file()
-        except:
+        except Exception:
             self.logger("Failed to construct the snakefile")
             self.set_workflow_status("failed")
             for job in self.jobs:
@@ -166,7 +166,7 @@ class VWorkflow(ABC):
         try:
             self.logger("Executing backend")
             self._execute_backend()
-        except:
+        except Exception:
             self.logger("Failed to execute backend")
             self.set_workflow_status("failed")
             for job in self.jobs:
@@ -278,7 +278,7 @@ class VWorkflow(ABC):
         snake_file.addline("rule all:", 0)
         snake_file.addline("input:", 1)
         self.dependencies["all"] = []
-        snake_file.addline(f'"finalize.done",', 2)
+        snake_file.addline('"finalize.done",', 2)
         self.dependencies["all"].append("finalize")
 
         setup_commands = []
@@ -301,18 +301,18 @@ class VWorkflow(ABC):
         snake_file.addline("rule setup:", 0)
         snake_file.addline("input:", 1)
         snake_file.addline("output:", 1)
-        snake_file.addline(f'"setup.done",', 2)
+        snake_file.addline('"setup.done",', 2)
         snake_file.addline("container:", 1)
-        snake_file.addline(f'"docker://docker.io/reanahub/reana-env-root6:6.18.04"', 2)
+        snake_file.addline('"docker://docker.io/reanahub/reana-env-root6:6.18.04"', 2)
         snake_file.addline("resources:", 1)
         if setup_commands and use_kerberos:
-            snake_file.addline(f'kerberos=True,', 2)
-        snake_file.addline(f'kubernetes_memory_limit="1Gi"', 2)
+            snake_file.addline('kerberos=True,', 2)
+        snake_file.addline('kubernetes_memory_limit="1Gi"', 2)
         snake_file.addline("shell:", 1)
         if setup_commands:
             snake_file.addline(f'"{" && ".join(setup_commands)} && touch setup.done"', 2)
         else:
-            snake_file.addline(f'"touch setup.done"', 2)
+            snake_file.addline('"touch setup.done"', 2)
         self.dependencies["setup"] = []
 
         snake_file.addline("\n", 0)
@@ -324,16 +324,16 @@ class VWorkflow(ABC):
             self.dependencies["finalize"].append(f"step{job.short_uuid()}")
 
         snake_file.addline("output:", 1)
-        snake_file.addline(f'"finalize.done"', 2)
+        snake_file.addline('"finalize.done"', 2)
         snake_file.addline("container:", 1)
-        snake_file.addline(f'"docker://docker.io/reanahub/reana-env-root6:6.18.04"', 2)
+        snake_file.addline('"docker://docker.io/reanahub/reana-env-root6:6.18.04"', 2)
         snake_file.addline("resources:", 1)
-        snake_file.addline(f'kubernetes_memory_limit="1Gi"', 2)
+        snake_file.addline('kubernetes_memory_limit="1Gi"', 2)
         snake_file.addline("shell:", 1)
         if finalize_commands:
             snake_file.addline(f'"{" && ".join(finalize_commands)} && touch finalize.done"', 2)
         else:
-            snake_file.addline(f'"touch finalize.done"', 2)
+            snake_file.addline('"touch finalize.done"', 2)
 
         total_jobs = len(self.jobs)
         for i, job in enumerate(self.jobs):
@@ -382,11 +382,11 @@ class VWorkflow(ABC):
             snake_file.addline("resources:", 1)
             compute_backend = snakemake_rule["compute_backend"]
             if job.use_eos() and use_kerberos:
-                snake_file.addline(f'kerberos=True,', 2)
+                snake_file.addline('kerberos=True,', 2)
             if compute_backend == "htcondorcern":
                 snake_file.addline(f'compute_backend="{snakemake_rule["compute_backend"]}",', 2)
-                snake_file.addline(f'htcondor_max_runtime="espresso",', 2)
-                snake_file.addline(f'kerberos=True,', 2)
+                snake_file.addline('htcondor_max_runtime="espresso",', 2)
+                snake_file.addline('kerberos=True,', 2)
             else:
                 snake_file.addline(f'kubernetes_memory_limit="{snakemake_rule["memory"]}"', 2)
             snake_file.addline("shell:", 1)
@@ -468,7 +468,7 @@ class VWorkflow(ABC):
             status = results.get("status", "unknown")
             CHERN_CACHE.consult_table[self.uuid] = (status, time.time())
             return status
-        except:
+        except Exception:
             self.logger("Failed to get the status")
         return "unknown"
 
@@ -516,8 +516,8 @@ class VWorkflow(ABC):
                 # Use the same logic for sizing the font (using the original code's approach)
                 font_size = int(min(image.size) / 20)
                 try:
-                    font = ImageFont.truetype("arial.ttf", font_size)
-                except:
+                    font = ImageFont.truetype("arial.tt", font_size)
+                except (IOError, OSError):
                     font = ImageFont.load_default()
 
                 text = f"Imp:{impression}"

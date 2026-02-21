@@ -15,6 +15,5 @@ class SnakeFile(object):
         self.contents += (" "*index*4 + string + "\n")
 
     def write(self):
-        f = open(self.file_path, "w")
-        f.write(self.contents)
-        f.close()
+        with open(self.file_path, "w", encoding='utf-8') as f:
+            f.write(self.contents)

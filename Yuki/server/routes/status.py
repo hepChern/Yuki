@@ -1,18 +1,17 @@
 """
 Status and monitoring routes.
 """
+import json
 import os
 import time
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, request, jsonify
+from werkzeug.utils import secure_filename
 from CelebiChrono.utils.metadata import ConfigFile
+from CelebiChrono.kernel.chern_cache import ChernCache
 from ...kernel.vjob import VJob
 from ...kernel.vworkflow import VWorkflow
 from ..config import config
 from ..tasks import task_update_workflow_status
-from CelebiChrono.kernel.chern_cache import ChernCache
-import json
-from flask import request, jsonify
-from werkzeug.utils import secure_filename
 
 bp = Blueprint('status', __name__)
 
@@ -148,7 +147,6 @@ def process_directory(job_path, runner_id, base_dir, file_infos_dict, max_previe
 
     # Define directory-specific sort priority
     # outputs: chern.stdout first (0), logs: standard sort (1)
-    dir_priority = 0 if base_dir == 'stageout' else 1
 
     # Sort files according to the original logic
     files.sort(
@@ -161,7 +159,8 @@ def process_directory(job_path, runner_id, base_dir, file_infos_dict, max_previe
 
     for filename in files:
         # Prevent 'logs' from overwriting files already found in 'outputs'
-        if filename in file_infos_dict and file_infos_dict[filename].get('source_dir') == 'stageout':
+        if (filename in file_infos_dict and
+            file_infos_dict[filename].get('source_dir') == 'stageout'):
             continue
 
         ext = os.path.splitext(filename)[1].lower()
@@ -181,7 +180,8 @@ def process_directory(job_path, runner_id, base_dir, file_infos_dict, max_previe
         }
 
         if is_text:
-            file_info['content'] = generate_text_preview(job_path, runner_id, base_dir, filename, max_preview_chars)
+            file_info['content'] = generate_text_preview(
+                job_path, runner_id, base_dir, filename, max_preview_chars)
 
         file_infos_dict[filename] = file_info
 
@@ -198,13 +198,18 @@ def generate_text_preview(job_path, runner_id, base_dir, filename, max_chars):
                 head = content[:max_chars]
                 tail = content[-max_chars:]
                 content_preview = (
-                    f'<span class="txt-message">[First {max_chars} characters from head: **begin**]</span>\n'
+                    f'<span class="txt-message">[First {max_chars} characters '
+                    f'from head: **begin**]</span>\n'
                     f'{head}\n'
-                    f'<span class="txt-message">[First {max_chars} characters from head: **end**]</span>\n'
-                    f'<span class="txt-separator">--- Content Omitted (Full file available for download) ---</span>\n' # Added descriptive text
-                    f'<span class="txt-message">[Last {max_chars} characters from tail: **begin**]</span>\n'
+                    f'<span class="txt-message">[First {max_chars} characters '
+                    f'from head: **end**]</span>\n'
+                    f'<span class="txt-separator">--- Content Omitted '
+                    f'(Full file available for download) ---</span>\n'  # Added descriptive text
+                    f'<span class="txt-message">[Last {max_chars} characters '
+                    f'from tail: **begin**]</span>\n'
                     f'{tail}\n'
-                    f'<span class="txt-message">[Last {max_chars} characters from tail: **end**]</span>'
+                    f'<span class="txt-message">[Last {max_chars} characters '
+                    f'from tail: **end**]</span>'
                 )
             else:
                 # Full view for smaller files
@@ -229,20 +234,22 @@ def impview(project_uuid, impression_name):
         # Fallback if VJob/job is not fully configured
         runner_id = "default_runner"
 
-    # Use a dictionary to store file info keyed by filename to avoid duplicates when processing 'logs'
+    # Use a dictionary to store file info keyed by filename
+    # to avoid duplicates when processing 'logs'
     file_infos_dict = {}
 
-    MAX_PREVIEW_CHARS = 1000  # Maximum characters to read for text file previews
+    max_preview_chars = 1000  # Maximum characters to read for text file previews
     # Process 'outputs' and 'logs' directories
-    process_directory(job_path, runner_id, "stageout", file_infos_dict, MAX_PREVIEW_CHARS)
-    process_directory(job_path, runner_id, "logs", file_infos_dict, MAX_PREVIEW_CHARS)
-    process_directory(job_path, runner_id, "watermarks", file_infos_dict, MAX_PREVIEW_CHARS)
+    process_directory(job_path, runner_id, "stageout", file_infos_dict, max_preview_chars)
+    process_directory(job_path, runner_id, "logs", file_infos_dict, max_preview_chars)
+    process_directory(job_path, runner_id, "watermarks", file_infos_dict, max_preview_chars)
 
     print(file_infos_dict)
     # Convert dictionary values to a list for the template
     final_file_infos = list(file_infos_dict.values())
 
-    # NOTE: The provided original code had sorting logic after processing 'outputs' and a different one for 'logs'.
+    # NOTE: The provided original code had sorting logic after processing
+    # 'outputs' and a different one for 'logs'.
     # We will need a final, consistent sort on the combined list before rendering,
     # and the helper function ensures the original logic's file properties are carried over.
 
@@ -264,11 +271,9 @@ def impview(project_uuid, impression_name):
                            runner_id=runner_id,
                            files=final_file_infos)
 
-import os
-import json
-from flask import render_template, url_for
 
-def process_directory2(job_path, runner_id, sub_dir, file_infos_dict, max_chars, project_uuid, imp_id):
+def process_directory2(job_path, runner_id, sub_dir, file_infos_dict,
+                       max_chars, project_uuid, imp_id):
     """
     Scans sub-directories and generates URLs for images (plots) and text files.
     """
@@ -288,9 +293,11 @@ def process_directory2(job_path, runner_id, sub_dir, file_infos_dict, max_chars,
         if os.path.isfile(fpath):
             ext = os.path.splitext(fname)[1].lower()
             # Plot/Image extensions
-            is_image = ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']
+            is_image = ext in ['.png', '.jpg', '.jpeg', '.gif',
+                               '.webp', '.svg']
             # Data/Log extensions
-            is_text = ext in ['.txt', '.md', '.json', '.yaml', '.py', '.log', '.stdout', '.stderr', '.csv']
+            is_text = ext in ['.txt', '.md', '.json', '.yaml', '.py',
+                              '.log', '.stdout', '.stderr', '.csv']
 
             file_url = url_for(target_route,
                                project_uuid=project_uuid,
@@ -301,9 +308,9 @@ def process_directory2(job_path, runner_id, sub_dir, file_infos_dict, max_chars,
             content = ""
             if is_text:
                 try:
-                    with open(fpath, 'r', errors='replace') as f:
+                    with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
                         content = f.read(max_chars)
-                except:
+                except (IOError, OSError):
                     content = "[Error reading text content]"
 
             file_infos_dict[fname] = {
@@ -339,7 +346,7 @@ def test(project_uuid):
         config_path = os.path.join(path, "config.json")
         if os.path.exists(config_path):
             try:
-                with open(config_path, 'r') as f:
+                with open(config_path, 'r', encoding='utf-8') as f:
                     conf = json.load(f)
                     data["object_type"] = conf.get("object_type", "directory")
                     imp_id = conf.get("impression", "")
@@ -357,28 +364,28 @@ def test(project_uuid):
                             try:
                                 job = VJob(job_path, None)
                                 runner_id = job.machine_id
-                            except:
+                            except Exception:
                                 runner_id = "default_runner"
 
                             file_infos_dict = {}
-                            MAX_PREVIEW_CHARS = 1000
+                            max_preview_chars = 1000
 
                             # Gather Plots and Files from all three locations
                             for d in ["stageout", "logs", "watermarks"]:
                                 process_directory2(job_path, runner_id, d, file_infos_dict,
-                                                   MAX_PREVIEW_CHARS, project_uuid, imp_id)
+                                                   max_preview_chars, project_uuid, imp_id)
 
                             # Sort: Plots (images) usually in stageout, so we prioritize that
                             data["impression_data"] = sorted(
                                 file_infos_dict.values(),
                                 key=lambda x: (0 if x['is_image'] else 1, x['name'].lower())
                             )
-            except:
+            except (json.JSONDecodeError, IOError, OSError):
                 pass
 
         readme_path = os.path.join(path, "README.md")
         if os.path.exists(readme_path):
-            with open(readme_path, 'r', errors='replace') as f:
+            with open(readme_path, 'r', encoding='utf-8', errors='replace') as f:
                 data["readme_content"] = f.read()
 
         for item in sorted(os.listdir(path)):
@@ -422,7 +429,7 @@ def bookkeeping():
     os.makedirs(base_save_path)
 
     # 3. Save the manifest itself for reference
-    with open(os.path.join(base_save_path, "manifest.json"), "w") as f:
+    with open(os.path.join(base_save_path, "manifest.json"), "w", encoding='utf-8') as f:
         json.dump(manifest, f, indent=4)
 
     # 4. Save the transmitted files

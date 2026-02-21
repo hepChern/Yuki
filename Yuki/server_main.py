@@ -42,8 +42,10 @@ def stop():
     """Stop the Yuki server."""
     if status() == "stop":
         return
-    subprocess.call("kill {}".format(open(config.daemon_path + "/server.pid").read()), shell=True)
-    subprocess.call("kill {}".format(open(config.daemon_path + "/runner.pid").read()), shell=True)
+    with open(config.daemon_path + "/server.pid", 'r', encoding='utf-8') as f:
+        subprocess.call("kill {}".format(f.read()), shell=True)
+    with open(config.daemon_path + "/runner.pid", 'r', encoding='utf-8') as f:
+        subprocess.call("kill {}".format(f.read()), shell=True)
 
 
 def status():

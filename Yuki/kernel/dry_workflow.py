@@ -87,7 +87,7 @@ class DryWorkflow(VWorkflow):
 
         # Write workflow info
         self.logger(f"[LOCAL] Writing workflow info to {os.path.join(self.local_exec_path, 'workflow_info.json')}")
-        with open(os.path.join(self.local_exec_path, "workflow_info.json"), "w") as f:
+        with open(os.path.join(self.local_exec_path, "workflow_info.json"), "w", encoding='utf-8') as f:
             json.dump(workflow_info, f, indent=2)
 
     def copy_files_local(self):
@@ -158,7 +158,7 @@ class DryWorkflow(VWorkflow):
             self.snakefile_path,
             os.path.join(self.local_exec_path, "Snakefile")
         )
-        self.logger(f"[LOCAL] Copied: Snakefile")
+        self.logger("[LOCAL] Copied: Snakefile")
 
     def update_workflow_status(self):
         """Update workflow status from local execution."""
@@ -169,7 +169,7 @@ class DryWorkflow(VWorkflow):
 
             # Get jobs from json
             workflow_info_json = os.path.join(self.local_exec_path, "workflow_info.json")
-            with open(workflow_info_json, "r") as f:
+            with open(workflow_info_json, "r", encoding='utf-8') as f:
                 workflow_info = json.load(f)
             jobs = []
             for step in workflow_info["workflow"]["specification"]["steps"]:
@@ -263,7 +263,8 @@ class DryWorkflow(VWorkflow):
                     self.logger(f"[LOCAL] [{i+1}/{total_files}] Collected: {filename}")
 
                 # Mark as downloaded
-                open(os.path.join(os.path.dirname(dst_path), "stageout.downloaded"), "w").close()
+                with open(os.path.join(os.path.dirname(dst_path), "stageout.downloaded"), "w", encoding='utf-8') as f:
+                    pass
 
     def download_outputs(self, impression=None):
         """Download outputs from local execution."""
@@ -299,7 +300,8 @@ class DryWorkflow(VWorkflow):
                     self.logger(f"[LOCAL] [{i+1}/{total_logs}] Collected log: {filename}")
 
                 # Mark as downloaded
-                open(os.path.join(os.path.dirname(dst_path), "logs.downloaded"), "w").close()
+                with open(os.path.join(os.path.dirname(dst_path), "logs.downloaded"), "w", encoding='utf-8') as f:
+                    pass
 
     def ping(self):
         """Ping local system."""
