@@ -123,7 +123,7 @@ class ContainerJob(VJob):
             print(f"    >>>> >>>> After input substitution time: {time.time() - start_time}")
             command = self._substitute_paths(command)
             print(f"    >>>> >>>> After path substitution time: {time.time() - start_time}")
-            command = "{ " + command + " ; } >> logs/celebi_user_step{i}.log 2>&1"
+            command = "{ " + command + " ; } >> " + f"logs/celebi_user_step{i}.log 2>&1"
             processed_commands.append(command.replace("\"", "\\\""))
 
         return processed_commands
@@ -246,11 +246,11 @@ class ContainerJob(VJob):
         raw_commands = self.image().yaml_file.read_variable("commands", [])
         processed_commands = []
 
-        for _, command in enumerate(raw_commands):
+        for i, command in enumerate(raw_commands):
             command = self._substitute_parameters(command)
             command = self._substitute_inputs(command)
             command = self._substitute_paths(command)
-            command = "{{ " + command + " ; }} >> logs/celebi_user_step{i}.log 2>&1"
+            command = "{{ " + command + " ; }} >> " + f"logs/celebi_user_step{i}.log 2>&1"
             processed_commands.append(command.replace("\"", "\\\""))
 
         return processed_commands

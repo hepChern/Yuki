@@ -11,6 +11,10 @@ import json
 from CelebiChrono.utils import metadata
 from .vworkflow import VWorkflow
 
+from Yuki.kernel.status_constants import (
+    PRELUDE, ORCHESTRATING, DISSONANCE, CODA, FINAL_NOTE
+    )
+
 # Try to import reana_client, but it might not be available
 try:
     from reana_client.api import client
@@ -30,6 +34,14 @@ class ReanaWorkflow(VWorkflow):
 
     def _execute_backend(self):
         """Execute workflow using REANA backend."""
+
+        for job in self.jobs:
+            if job.is_input:
+                continue
+            if job.job_type() == "algorithm":
+                continue
+            job.set_status(ORCHESTRATING, "Create the workflow at backend")
+
         try:
             self.logger("Creating the workflow")
             self.create_workflow()
@@ -43,6 +55,13 @@ class ReanaWorkflow(VWorkflow):
                     continue
                 job.set_status("failed")
             raise
+
+        for job in self.jobs:
+            if job.is_input:
+                continue
+            if job.job_type() == "algorithm":
+                continue
+            job.set_status(ORCHESTRATING, "Upload the dependencies and the Snakefile")
 
         try:
             self.logger("Upload file")
@@ -58,6 +77,7 @@ class ReanaWorkflow(VWorkflow):
                 job.set_status("failed")
             raise
 
+        job.set_status(ORCHESTRATING, "Start the workflow")
         try:
             self.start_workflow()
         except:

@@ -144,7 +144,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                 continue
             if job.job_type() == "algorithm":
                 continue
-            job.set_status(PRELUDE, "Waiting for workflow execution to start")
+            job.set_status(PRELUDE, "Constructing the workflow: 1/3. waiting for the unfinished dependencies")
 
         # Wait for dependencies
         if not self._wait_for_dependencies():
@@ -156,7 +156,14 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         for i, job in enumerate(active_jobs):
             self.logger(f"[{i+1}/{total_active}] Set workflow id to job {job}")
             job.set_workflow_id(self.uuid)
-            job.set_status(IN_MOVEMENT, "Workflow execution started")
+            job.set_status(PRELUDE, "Constructing the workflow: 2/3. workflow created and assigned")
+
+        for job in self.jobs:
+            if job.is_input:
+                continue
+            if job.job_type() == "algorithm":
+                continue
+            job.set_status(PRELUDE, "Constructing the workflow: 3/3. Constructing the snakefile")
 
         # Prepare and Execute
         self.logger("Constructing")
@@ -211,7 +218,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             all_finished = True
             workflow_list = []
             input_jobs = [j for j in self.jobs if j.is_input
-                           and j.status() not in (FINAL_NOTE, CODA)
+                           and j.status(musical=False) not in (FINAL_NOTE, CODA)
                            and j.job_type() != "algorithm"]
             total_inputs = len(input_jobs)
 
@@ -229,9 +236,9 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             for i, job in enumerate(self.jobs):
                 if not job.is_input:
                     continue
-                if job.status() == FINAL_NOTE:
+                if job.status(musical=True) == FINAL_NOTE:
                     continue
-                if job.status() == CODA:
+                if job.status(musical=True) == CODA:
                     continue
                 if job.job_type() == "algorithm":
                     continue
@@ -248,7 +255,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                         self.logger
                         )
 
-                job_status = job.status()
+                job_status = job.status(musical=True)
                 # self.logger(f"Job {job.short_uuid()} status: {job_status}")
                 if job_status != CODA:
                     all_finished = False
@@ -453,7 +460,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                 if job.machine_id is None:
                     continue
 
-            status = job.status()
+            status = job.status(musical=True)
             obj_type = job.object_type()
 
             # For jobs already in active or terminal states, add immediately

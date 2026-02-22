@@ -6,21 +6,22 @@ between legacy status names and new musical names.
 """
 
 # Musical status names (new system)
-SILENCE = "Silence"          # Initial state, nothing happening
-PRELUDE = "Prelude"          # Preparation phase before execution
-IN_MOVEMENT = "In Movement"  # Active execution phase
-COMPOSING = "Composing"      # Constructing/assembling components
-ORCHESTRATING = "Orchestrating"  # Final preparation before execution
-TUNING = "Tuning"            # Preparing algorithm components
-DISSONANCE = "Dissonance"    # Workflow construction failed - harmony broken before execution
-CODA = "Coda"                # Successful conclusion
-FINAL_NOTE = "Final Note"    # Permanent storage
+SILENCE = "silence"              # Initial state, nothing happening
+PRELUDE = "prelude"              # Preparation phase before execution
+IN_MOVEMENT = "in movement"      # Active execution phase
+COMPOSING = "composing"          # Constructing/assembling components
+ORCHESTRATING = "orchestrating"  # Final preparation before execution
+TUNING = "tuning"                # Preparing algorithm components
+DISSONANCE = "dissonance"        # Workflow construction failed - harmony broken before execution
+CODA = "coda"                    # Successful conclusion
+FINAL_NOTE = "final note"        # Permanent storage
 
 # Legacy status names that remain unchanged
 FAILED = "failed"            # Backend execution failed
 STOPPED = "stopped"          # User-interrupted execution
 DELETED = "deleted"          # Removed from performance
 ARCHIVED = "archived"        # Archived jobs (kept for backward compatibility)
+PENDING = "pending"
 
 # Legacy status names (old system)
 LEGACY_RAW = "raw"
@@ -31,6 +32,7 @@ LEGACY_BUILT = "built"
 LEGACY_READY = "ready"
 LEGACY_FINISHED = "finished"
 LEGACY_SUCCESS = "success"
+LEGACY_CREATED = "created"
 
 # Mapping from legacy names to musical names
 LEGACY_TO_MUSICAL = {
@@ -68,7 +70,7 @@ MUSICAL_TO_LEGACY = {
 VALID_STATUSES = {
     SILENCE, PRELUDE, IN_MOVEMENT, COMPOSING, ORCHESTRATING,
     TUNING, DISSONANCE, CODA, FINAL_NOTE,
-    FAILED, STOPPED, DELETED, ARCHIVED
+    FAILED, STOPPED, DELETED, ARCHIVED, PENDING
 }
 
 # All valid status names in the legacy system

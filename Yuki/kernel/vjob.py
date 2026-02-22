@@ -131,7 +131,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         self._environment = yaml_file.read_variable("environment", "")
         return self._environment
 
-    def status(self, legacy=False):
+    def status(self, musical=False):
         """Get the current status of the job.
 
         Args:
@@ -143,8 +143,8 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
         status = config_file.read_variable("status", SILENCE)
 
-        if legacy:
-            return translate_to_legacy(status)
+        if not musical:
+            return status
         else:
             return translate_to_musical(status)
 
@@ -176,6 +176,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
                              message will be generated based on the status.
         """
         # Validate the status
+        print("Set the job status to ", status)
         if not is_valid_status(status):
             raise ValueError(f"Invalid status: {status}")
 
@@ -183,7 +184,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         musical_status = translate_to_musical(status)
 
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
-        config_file.write_variable("status", musical_status)
+        config_file.write_variable("status", status)
 
         # Store legacy name for backward compatibility
         legacy_status = translate_to_legacy(musical_status)
@@ -224,9 +225,9 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
             detailed_message: Optional detailed status message
         """
         if status == "PENDING":
-            self.set_status(IN_MOVEMENT, detailed_message)
+            self.set_status(PENDING, detailed_message)
         elif status == "SUCCESS":
-            self.set_status(CODA, detailed_message)
+            self.set_status(SUCCESS, detailed_message)
         else:
             # For other statuses, pass through with translation
             self.set_status(status, detailed_message)
@@ -322,9 +323,9 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
                 self.set_status(step_status)
         elif current_musical == IN_MOVEMENT:
             if step_musical == CODA:
-                self.set_status(CODA, "Workflow step completed successfully")
+                self.set_status(step_status, "Workflow step completed successfully")
             elif step_musical == "finished":  # Legacy finished status
-                self.set_status(CODA, "Workflow step finished")
+                self.set_status(stap_status, "Workflow step finished")
             elif step_musical == FAILED:
                 # Execution failure during IN_MOVEMENT
                 self.set_status(FAILED, "Backend execution failed during runtime")
@@ -350,6 +351,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
                 self.set_status("unknown", "Status cannot be determined")
 
     def update_status_from_workflow(self, workflow_path, logger=None):
+        print("workflow_path", workflow_path)
         """Update job status based on workflow status."""
         if self.job_type() == "algorithm":
             return
@@ -369,7 +371,10 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
 
         # Read workflow results
         full_workflow_status = self._read_workflow_results(workflow_path, logger)
+        print("The full_workflow_status got is", full_workflow_status)
         if full_workflow_status is None:
+            return
+        if not is_valid_status(full_workflow_status):
             return
 
         if logger:
