@@ -19,6 +19,11 @@ from CelebiChrono.kernel.chern_cache import ChernCache
 from Yuki.kernel.vjob import VJob
 from Yuki.kernel.container_job import ContainerJob
 from Yuki.kernel.image_job import ImageJob
+from Yuki.kernel.status_constants import (
+    SILENCE, PRELUDE, IN_MOVEMENT, DISSONANCE, FAILED,
+    CODA, FINAL_NOTE,
+    translate_to_musical, get_detailed_status_message
+)
 from Yuki.utils import snakefile
 
 CHERN_CACHE = ChernCache.instance()
@@ -139,7 +144,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                 continue
             if job.job_type() == "algorithm":
                 continue
-            job.set_status("waiting")
+            job.set_status(PRELUDE, "Waiting for workflow execution to start")
 
         # Wait for dependencies
         if not self._wait_for_dependencies():
@@ -151,7 +156,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         for i, job in enumerate(active_jobs):
             self.logger(f"[{i+1}/{total_active}] Set workflow id to job {job}")
             job.set_workflow_id(self.uuid)
-            job.set_status("running")
+            job.set_status(IN_MOVEMENT, "Workflow execution started")
 
         # Prepare and Execute
         self.logger("Constructing")
@@ -166,7 +171,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                     continue
                 if job.job_type() == "algorithm":
                     continue
-                job.set_status("failed")
+                job.set_status(DISSONANCE, "Workflow construction failed: snakefile creation error")
             raise
 
         try:
@@ -180,7 +185,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                     continue
                 if job.job_type() == "algorithm":
                     continue
-                job.set_status("failed")
+                job.set_status(FAILED, "Backend execution failed")
             raise
 
     @abstractmethod
@@ -206,7 +211,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             all_finished = True
             workflow_list = []
             input_jobs = [j for j in self.jobs if j.is_input
-                           and j.status() not in ("archived", "finished")
+                           and j.status() not in (FINAL_NOTE, CODA)
                            and j.job_type() != "algorithm"]
             total_inputs = len(input_jobs)
 
@@ -224,9 +229,9 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             for i, job in enumerate(self.jobs):
                 if not job.is_input:
                     continue
-                if job.status() == "archived":
+                if job.status() == FINAL_NOTE:
                     continue
-                if job.status() == "finished":
+                if job.status() == CODA:
                     continue
                 if job.job_type() == "algorithm":
                     continue
@@ -245,7 +250,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
 
                 job_status = job.status()
                 # self.logger(f"Job {job.short_uuid()} status: {job_status}")
-                if job_status != "finished":
+                if job_status != CODA:
                     all_finished = False
                     # We continue checking other jobs to update their status as well
 
@@ -260,7 +265,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                     continue
                 if job.job_type() == "algorithm":
                     continue
-                job.set_status("raw")
+                job.set_status(SILENCE, "Dependencies not finished, resetting to initial state")
             self.logger("Some dependencies are not finished yet.")
             return False
 
@@ -451,8 +456,10 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             status = job.status()
             obj_type = job.object_type()
 
-            # For terminal jobs, add immediately
-            if status in ("finished", "failed", "pending", "running", "archived"):
+            # For jobs already in active or terminal states, add immediately
+            # Note: job.status() returns musical names, so we check for those
+            musical_status = translate_to_musical(status)
+            if musical_status in (CODA, FAILED, DISSONANCE, IN_MOVEMENT, FINAL_NOTE):
                 if obj_type == "task":
                     job.is_input = True
                 self.jobs.append(job)

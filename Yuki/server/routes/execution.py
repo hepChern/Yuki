@@ -7,6 +7,10 @@ from flask import Blueprint, request
 
 from ...kernel.vjob import VJob
 from ...kernel.container_job import ContainerJob
+from ...kernel.status_constants import (
+    SILENCE, PRELUDE, TUNING, FAILED, DISSONANCE,
+    translate_to_musical
+)
 from ..config import config
 from ..tasks import task_exec_impression
 import shutil  # pylint: disable=wrong-import-order
@@ -39,17 +43,17 @@ def execute():
             print("job", job, job.job_type(), job.status())
 
             if job.job_type() == "task":
-                if job.status() not in ("raw", "failed"):
+                if job.status() not in (SILENCE, FAILED, DISSONANCE):
                     print("job status is not raw or failed")
                     continue
-                job.set_status("waiting")
+                job.set_status(PRELUDE, "Job queued for execution")
                 # Redefine, only aim for write use_eos variable
                 start_job = VJob(job_path, machine)
                 use_eos = use_eos_dict.get(impression, False)
                 start_job.set_use_eos(use_eos)
                 start_jobs.append(job)
             elif job.job_type() == "algorithm":
-                job.set_status("ready")
+                job.set_status(TUNING, "Algorithm job ready for configuration")
                 # if job.environment() == "script":
                 #     continue
                 # start_jobs.append(job)

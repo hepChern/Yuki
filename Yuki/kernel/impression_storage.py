@@ -6,6 +6,7 @@ and status tracking for individual impressions across different execution runner
 from CelebiChrono.utils.metadata import ConfigFile
 from .vjob import VJob
 from .vworkflow import VWorkflow
+from .status_constants import CODA, FAILED, DISSONANCE, translate_to_musical
 from ..server.config import config
 
 class ImpressionStorage:
@@ -44,32 +45,34 @@ class ImpressionStorage:
     def collect(self):
         """Retrieves files or logs from runners."""
         for name, job, workflow in self._get_runner_contexts():
-            if job.status() == "finished":
+            job_status = job.status()
+            if job_status == CODA:
                 print(f"[{name}] Collecting results...")
                 workflow.download(self.impression)
                 # workflow.download_outputs(self.impression)
-            elif job.status() == "failed":
+            elif job_status in (FAILED, DISSONANCE):
                 print(f"[{name}] Collecting logs...")
                 workflow.download_logs(self.impression)
 
     def collect_outputs(self):
         """Retrieves only output files from runners."""
         for name, job, workflow in self._get_runner_contexts():
-            if job.status() == "finished":
+            if job.status() == CODA:
                 print(f"[{name}] Collecting outputs...")
                 workflow.download_outputs(self.impression)
 
     def collect_logs(self):
         """Retrieves only logs from runners."""
         for name, job, workflow in self._get_runner_contexts():
-            if job.status() == "finished" or job.status() == "failed":
+            job_status = job.status()
+            if job_status == CODA or job_status in (FAILED, DISSONANCE):
                 print(f"[{name}] Collecting logs...")
                 workflow.download_logs(self.impression)
 
     def watermark(self):
         """Applies watermarks to the stored results."""
         for name, job, workflow in self._get_runner_contexts():
-            if job.status() == "finished":
+            if job.status() == CODA:
                 print(f"[{name}] Applying watermarks...")
                 workflow.watermark(self.impression)
 

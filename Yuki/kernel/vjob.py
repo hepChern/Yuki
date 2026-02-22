@@ -11,6 +11,14 @@ from abc import ABC
 
 from CelebiChrono.utils import metadata
 
+from .status_constants import (
+    translate_to_musical, translate_to_legacy, is_valid_status,
+    get_detailed_status_message, is_terminal_status,
+    SILENCE, PRELUDE, IN_MOVEMENT, COMPOSING, ORCHESTRATING,
+    TUNING, DISSONANCE, CODA, FINAL_NOTE,
+    FAILED, STOPPED, DELETED, ARCHIVED
+)
+
 class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """Abstract base class for virtual job objects, including VVolume, ImageJob, ContainerJob."""
 
@@ -123,13 +131,22 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         self._environment = yaml_file.read_variable("environment", "")
         return self._environment
 
-    def status(self):
-        """Get the current status of the job."""
+    def status(self, legacy=False):
+        """Get the current status of the job.
+
+        Args:
+            legacy: If True, return legacy status name. If False, return musical status name.
+
+        Returns:
+            Status name (musical by default, legacy if specified)
+        """
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
-        status = config_file.read_variable("status", "raw")
-        if status != "raw":
-            return status
-        return "raw"
+        status = config_file.read_variable("status", SILENCE)
+
+        if legacy:
+            return translate_to_legacy(status)
+        else:
+            return translate_to_musical(status)
 
     def set_use_eos(self, use: bool):
         """Set whether the job should use EOS storage."""
@@ -150,23 +167,69 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         self._use_kerberos = config.read_variable("use_kerberos", {}).get(self.machine_id, False)
         return self._use_kerberos
 
-    def set_status(self, status):
-        """Set the status of the job."""
+    def set_status(self, status, detailed_message=None):
+        """Set the status of the job.
+
+        Args:
+            status: Status name (can be either musical or legacy name)
+            detailed_message: Optional detailed status message. If None, a default
+                             message will be generated based on the status.
+        """
+        # Validate the status
+        if not is_valid_status(status):
+            raise ValueError(f"Invalid status: {status}")
+
+        # Translate to musical name for storage
+        musical_status = translate_to_musical(status)
+
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
-        config_file.write_variable("status", status)
+        config_file.write_variable("status", musical_status)
+
+        # Store legacy name for backward compatibility
+        legacy_status = translate_to_legacy(musical_status)
+        config_file.write_variable("status_legacy", legacy_status)
+
+        # Set detailed status message
+        if detailed_message is None:
+            detailed_message = get_detailed_status_message(musical_status)
+        config_file.write_variable("detailed_status", detailed_message)
+
+    def detailed_status(self):
+        """Get the detailed status message for the job.
+
+        Returns:
+            Detailed status message string, or empty string if not set.
+        """
+        config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
+        return config_file.read_variable("detailed_status", "")
+
+    def set_detailed_status(self, message):
+        """Set the detailed status message for the job.
+
+        Args:
+            message: Detailed status message string
+        """
+        config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
+        config_file.write_variable("detailed_status", message)
 
     def update_data_status(self, status):
         """Update the data status of the job."""
-        config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
-        config_file.write_variable("status", status)
+        self.set_status(status)
 
-    def update_status(self, status):
-        """Update the status based on workflow status."""
-        config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
+    def update_status(self, status, detailed_message=None):
+        """Update the status based on workflow status.
+
+        Args:
+            status: Workflow status (e.g., "PENDING", "SUCCESS")
+            detailed_message: Optional detailed status message
+        """
         if status == "PENDING":
-            config_file.write_variable("status", "running")
-        if status == "SUCCESS":
-            config_file.write_variable("status", "success")
+            self.set_status(IN_MOVEMENT, detailed_message)
+        elif status == "SUCCESS":
+            self.set_status(CODA, detailed_message)
+        else:
+            # For other statuses, pass through with translation
+            self.set_status(status, detailed_message)
 
     def _read_workflow_results(self, workflow_path, logger=None):
         """Read workflow results and return status."""
@@ -210,7 +273,11 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
             # print(matched_step)
             start_time = matched_step.get("started_at", "")
             end_time = matched_step.get("finished_at", "")
-            config_file.write_variable("status", matched_step.get("status", ""))
+
+            # Translate status for machine-specific status file
+            step_status = matched_step.get("status", "")
+            musical_status = translate_to_musical(step_status)
+            config_file.write_variable("status", musical_status)
             config_file.write_variable("started_at", start_time)
             config_file.write_variable("finished_at", end_time)
             # Format of times:
@@ -233,27 +300,54 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         else:
             print("New status:", step_status)
 
-        if current_status == "raw":
+        # Translate current status to musical name for comparison
+        current_musical = translate_to_musical(current_status)
+        step_musical = translate_to_musical(step_status)
+        workflow_musical = translate_to_musical(full_workflow_status)
+
+        # Determine if this is a construction failure vs execution failure
+        # Construction failures happen before execution starts (pre-submit statuses)
+        # Execution failures happen during or after execution
+        is_construction_failure = (
+            step_musical == FAILED and
+            current_musical in (SILENCE, PRELUDE, COMPOSING, ORCHESTRATING, TUNING)
+        )
+        is_execution_failure = (
+            step_musical == FAILED and
+            current_musical == IN_MOVEMENT
+        )
+
+        if current_musical == SILENCE:
             if len(step_status) < 20:
-                config_file.write_variable("status", step_status)
-        elif current_status == "running":
-            if step_status == "success":
-                config_file.write_variable("status", "success")
-            elif step_status == "finished":
-                config_file.write_variable("status", "finished")
-            elif step_status in ("failed", "stopped"):
-                config_file.write_variable("status", "failed")
-            elif full_workflow_status == "failed":
-                config_file.write_variable("status", "failed")
-        elif current_status in ('stopped', 'deleted'):
-            config_file.write_variable("status", "failed")
-        elif current_status in ('finished', 'success', 'failed'):
+                self.set_status(step_status)
+        elif current_musical == IN_MOVEMENT:
+            if step_musical == CODA:
+                self.set_status(CODA, "Workflow step completed successfully")
+            elif step_musical == "finished":  # Legacy finished status
+                self.set_status(CODA, "Workflow step finished")
+            elif step_musical == FAILED:
+                # Execution failure during IN_MOVEMENT
+                self.set_status(FAILED, "Backend execution failed during runtime")
+            elif step_musical == STOPPED:
+                self.set_status(STOPPED, "Job execution was manually stopped")
+            elif workflow_musical == FAILED:
+                self.set_status(FAILED, "Workflow execution failed")
+        elif current_musical in (STOPPED, DELETED):
+            # Job was stopped or deleted, mark as failed for backward compatibility
+            self.set_status(FAILED, f"Job was {current_musical.lower()}")
+        elif current_musical in (CODA, FINAL_NOTE, FAILED, DISSONANCE):
+            # Terminal states, no change
             pass
         else:
+            # Other statuses (PRELUDE, COMPOSING, ORCHESTRATING, TUNING)
             if len(step_status) < 20:
-                config_file.write_variable("status", step_status)
+                if step_musical == FAILED and is_construction_failure:
+                    # Construction failure - use Dissonance
+                    self.set_status(DISSONANCE, "Workflow construction failed")
+                else:
+                    self.set_status(step_status)
             else:
-                config_file.write_variable("status", "unknown")
+                self.set_status("unknown", "Status cannot be determined")
 
     def update_status_from_workflow(self, workflow_path, logger=None):
         """Update job status based on workflow status."""
@@ -261,14 +355,16 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
             return
 
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
-        current_status = config_file.read_variable("status", "raw")
+        current_status = config_file.read_variable("status", SILENCE)
         config_file.write_variable("machine_id", self.machine_id)
         if logger:
             logger(f"Job {self.short_uuid()} current status: {current_status}")
         else:
             print("Current status is: ", current_status)
 
-        if current_status in ('finished', 'success', 'failed'):
+        # Check if current status is terminal (no further updates)
+        current_musical = translate_to_musical(current_status)
+        if is_terminal_status(current_musical):
             return
 
         # Read workflow results

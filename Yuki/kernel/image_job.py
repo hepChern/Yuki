@@ -12,6 +12,7 @@ import os
 from CelebiChrono.utils import csys
 from CelebiChrono.utils import metadata
 from .vjob import VJob
+from .status_constants import COMPOSING, ORCHESTRATING, translate_to_musical
 # from Yuki.kernel.VWorkflow import VWorkflow
 class ImageJob(VJob):
     """
@@ -54,8 +55,8 @@ class ImageJob(VJob):
         for run in dirs:
             if run.startswith("run."):
                 config_file = metadata.ConfigFile(os.path.join(self.path, run, "status.json"))
-                status = config_file.read_variable("status", "submitted")
-                if status == "built":
+                status = config_file.read_variable("status", COMPOSING)
+                if status == ORCHESTRATING:
                     return config_file.read_variable("image_id")
         return ""
 

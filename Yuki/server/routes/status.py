@@ -10,6 +10,10 @@ from CelebiChrono.utils.metadata import ConfigFile
 from CelebiChrono.kernel.chern_cache import ChernCache
 from ...kernel.vjob import VJob
 from ...kernel.vworkflow import VWorkflow
+from ...kernel.status_constants import (
+    translate_to_musical, translate_to_legacy, is_valid_status,
+    CODA, FAILED
+)
 from ..config import config
 from ..tasks import task_update_workflow_status
 
@@ -20,16 +24,47 @@ CHERN_CACHE = ChernCache.instance()
 
 @bp.route('/set-job-status/<project_uuid>/<impression_name>/<job_status>', methods=['GET'])
 def setjobstatus(project_uuid, impression_name, job_status):
-    """Set job status for an impression."""
+    """Set job status for an impression.
+
+    Accepts both legacy and musical status names.
+    """
+    # Validate the status
+    if not is_valid_status(job_status):
+        return jsonify({"error": f"Invalid status: {job_status}"}), 400
+
     job_path = config.get_job_path(project_uuid, impression_name)
     job = VJob(job_path, None)
     job.set_status(job_status)
-    return "ok"
+    return jsonify({
+        "status": "ok",
+        "message": f"Status set to {translate_to_musical(job_status)}",
+        "status_musical": translate_to_musical(job_status),
+        "status_legacy": translate_to_legacy(job_status)
+    })
+
+
+@bp.route('/set-detailed-status/<project_uuid>/<impression_name>/<message>', methods=['GET'])
+def set_detailed_status(project_uuid, impression_name, message):
+    """Set detailed status message for an impression."""
+    job_path = config.get_job_path(project_uuid, impression_name)
+    job = VJob(job_path, None)
+    job.set_detailed_status(message)
+    return jsonify({
+        "status": "ok",
+        "message": "Detailed status set",
+        "detailed_status": message
+    })
 
 
 @bp.route("/status/<project_uuid>/<impression_name>", methods=['GET'])
 def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
-    """Get status for an impression."""
+    """Get status for an impression.
+
+    Returns JSON with musical status name and detailed status message.
+    Optional query parameter: legacy=true to return legacy status name.
+    """
+    legacy = request.args.get('legacy', 'false').lower() == 'true'
+
     job_path = config.get_job_path(project_uuid, impression_name)
     config_file = config.get_config_file()
     runners_list = config_file.read_variable("runners", [])
@@ -39,7 +74,11 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
     object_type = job_config_file.read_variable("object_type", "")
 
     if object_type == "":
-        return "empty"
+        return jsonify({
+            "status": "empty",
+            "detailed_status": "Job object type is empty",
+            "status_legacy": "empty"
+        })
 
     for machine in runners_list:
         machine_id = runners_id[machine]
@@ -63,7 +102,9 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
         job.update_status_from_workflow( # workflow path
                     workflow_path
                 )
-        if workflow_status not in ('finished', 'failed'):
+        # Update workflow status check to use musical names
+        workflow_musical = translate_to_musical(workflow_status)
+        if workflow_musical not in (CODA, FAILED):
             last_update_time = CHERN_CACHE.update_table.get(workflow.uuid, -1)
             print(f"Time difference: {time.time() - last_update_time}")
             if (time.time() - last_update_time) > 5:
@@ -72,16 +113,35 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
                 print("Skipping workflow status update to avoid frequent updates.")
                 task_update_workflow_status.apply_async(args=[project_uuid, workflow.uuid])
 
-        job_status = job.status()
+        job_status = job.status(legacy=legacy)
+        detailed_status = job.detailed_status()
 
         if job_status != "unknown":
-            return job_status
+            return jsonify({
+                "status": job_status,
+                "detailed_status": detailed_status,
+                "status_legacy": translate_to_legacy(job_status) if not legacy else job_status,
+                "status_musical": job_status if not legacy else translate_to_musical(job_status)
+            })
 
         if os.path.exists(job_path):
-            return "deposited"
+            return jsonify({
+                "status": "deposited",
+                "detailed_status": "Data has been deposited",
+                "status_legacy": "deposited",
+                "status_musical": "deposited"
+            })
 
     job = VJob(job_path, None)
-    return job.status()
+    job_status = job.status(legacy=legacy)
+    detailed_status = job.detailed_status()
+
+    return jsonify({
+        "status": job_status,
+        "detailed_status": detailed_status,
+        "status_legacy": translate_to_legacy(job_status) if not legacy else job_status,
+        "status_musical": job_status if not legacy else translate_to_musical(job_status)
+    })
 
 
 @bp.route("/run-status/<project_uuid>/<impression_name>/<machine>", methods=['GET'])

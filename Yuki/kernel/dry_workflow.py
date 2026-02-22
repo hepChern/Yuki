@@ -11,6 +11,7 @@ import shutil
 import json
 from CelebiChrono.utils import metadata
 from .vworkflow import VWorkflow
+from .status_constants import FAILED, DISSONANCE, translate_to_musical
 
 
 class DryWorkflow(VWorkflow):
@@ -43,7 +44,7 @@ class DryWorkflow(VWorkflow):
                     continue
                 if job.job_type() == "algorithm":
                     continue
-                job.set_status("failed")
+                job.set_status(DISSONANCE, "Dry workflow construction failed")
             raise
 
         try:
@@ -57,7 +58,7 @@ class DryWorkflow(VWorkflow):
                     continue
                 if job.job_type() == "algorithm":
                     continue
-                job.set_status("failed")
+                job.set_status(DISSONANCE, "Dry workflow file copy failed")
             raise
 
         # Set status to ready for local execution
@@ -239,7 +240,7 @@ class DryWorkflow(VWorkflow):
                 continue
             if job.job_type() == "algorithm":
                 continue
-            job.set_status("failed")
+            job.set_status(FAILED, "Dry workflow killed by user")
 
     def download(self, impression=None):
         """Download/collect results from local execution."""
