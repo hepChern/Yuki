@@ -104,24 +104,25 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
                 )
         # Update workflow status check to use musical names
         workflow_musical = translate_to_musical(workflow_status)
+        print("The status is:", workflow_musical)
         if workflow_musical not in (CODA, FAILED):
             last_update_time = CHERN_CACHE.update_table.get(workflow.uuid, -1)
             print(f"Time difference: {time.time() - last_update_time}")
             if (time.time() - last_update_time) > 5:
                 CHERN_CACHE.update_table[workflow.uuid] = time.time()
+                task_update_workflow_status.apply_async(args=[project_uuid, workflow.uuid])
             else:
                 print("Skipping workflow status update to avoid frequent updates.")
-                task_update_workflow_status.apply_async(args=[project_uuid, workflow.uuid])
 
-        job_status = job.status(legacy=legacy)
+        job_status = job.status()
         detailed_status = job.detailed_status()
 
         if job_status != "unknown":
             return jsonify({
                 "status": job_status,
                 "detailed_status": detailed_status,
-                "status_legacy": translate_to_legacy(job_status) if not legacy else job_status,
-                "status_musical": job_status if not legacy else translate_to_musical(job_status)
+                "status_legacy": translate_to_legacy(job_status),
+                "status_musical": translate_to_musical(job_status)
             })
 
         if os.path.exists(job_path):
@@ -133,14 +134,14 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
             })
 
     job = VJob(job_path, None)
-    job_status = job.status(legacy=legacy)
+    job_status = job.status()
     detailed_status = job.detailed_status()
 
     return jsonify({
         "status": job_status,
         "detailed_status": detailed_status,
-        "status_legacy": translate_to_legacy(job_status) if not legacy else job_status,
-        "status_musical": job_status if not legacy else translate_to_musical(job_status)
+        "status_legacy": translate_to_legacy(job_status),
+        "status_musical": translate_to_musical(job_status)
     })
 
 
