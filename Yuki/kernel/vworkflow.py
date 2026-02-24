@@ -44,6 +44,7 @@ class VWorkflow(ABC):
         self.steps = []
         self.snakefile_path = os.path.join(self.path, "Snakefile")
         self.log_path = os.path.join(self.path, "workflow.log")
+        self.verbose_logs = os.environ.get("YUKI_VERBOSE_WORKFLOW_LOG", "0") == "1"
 
         if uuid:
             self.start_job = None
@@ -61,8 +62,10 @@ class VWorkflow(ABC):
             self.machine_id = self.start_job[0].machine_id if self.start_job else (machine_id or "")
             self.config_file.write_variable("machine_id", self.machine_id)
 
-    def logger(self, message):
+    def logger(self, message, verbose=False):
         """Log message with timestamp to both console and the workflow log file."""
+        if verbose and not self.verbose_logs:
+            return
         timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]", time.localtime())
         log_message = f"{timestamp} {message}"
         print(log_message)
@@ -120,15 +123,18 @@ class VWorkflow(ABC):
         # Set all the jobs to be the waiting status
         total_jobs = len(self.jobs)
         for i, job in enumerate(self.jobs):
+            job_status = job.status()
+            job_type = job.job_type()
             self.logger(f"[{i+1}/{total_jobs}] job: {job}, is input: {job.is_input}, "
-                         f"job status: {job.status()}, job type: {job.job_type()}")
+                        f"job status: {job_status}, job type: {job_type}", verbose=True)
 
         # Save the jobs info to the config file
         jobs_info = {}
         for job in self.jobs:
+            job_type = job.job_type()
             jobs_info[job.uuid] = {
                 "is_input": job.is_input,
-                "job_type": job.job_type(),
+                "job_type": job_type,
                 "status": job.status(),
                 "workflow_id": job.workflow_id()
             }
@@ -149,7 +155,8 @@ class VWorkflow(ABC):
         active_jobs = [j for j in self.jobs if not j.is_input and j.job_type() != "algorithm"]
         total_active = len(active_jobs)
         for i, job in enumerate(active_jobs):
-            self.logger(f"[{i+1}/{total_active}] Set workflow id to job {job}")
+            if self.verbose_logs or i % 100 == 0 or i + 1 == total_active:
+                self.logger(f"[{i+1}/{total_active}] Set workflow id to job {job}")
             job.set_workflow_id(self.uuid)
             job.set_status("running")
 
@@ -205,15 +212,22 @@ class VWorkflow(ABC):
             self.logger(f"Checking finished (Attempt {i_tries+1}/60)")
             all_finished = True
             workflow_list = []
-            input_jobs = [j for j in self.jobs if j.is_input
-                           and j.status() not in ("archived", "finished")
-                           and j.job_type() != "algorithm"]
+            input_jobs = []
+            for job in self.jobs:
+                if not job.is_input:
+                    continue
+                status = job.status()
+                if status in ("archived", "finished"):
+                    continue
+                if job.job_type() == "algorithm":
+                    continue
+                input_jobs.append(job)
             total_inputs = len(input_jobs)
 
             for i, job in enumerate(input_jobs):
                 workflow = VWorkflow.create(self.project_uuid, [], job.workflow_id())
                 self.logger(f"[{i+1}/{total_inputs}] Checking dependency: Job {job.uuid} "
-                             f"workflow {workflow.uuid}")
+                            f"workflow {workflow.uuid}", verbose=True)
                 if workflow and workflow not in workflow_list:
                     workflow_list.append(workflow)
                 # FIXME: may check if some of the dependence fail
@@ -224,9 +238,10 @@ class VWorkflow(ABC):
             for i, job in enumerate(self.jobs):
                 if not job.is_input:
                     continue
-                if job.status() == "archived":
+                job_status = job.status()
+                if job_status == "archived":
                     continue
-                if job.status() == "finished":
+                if job_status == "finished":
                     continue
                 if job.job_type() == "algorithm":
                     continue
@@ -279,7 +294,7 @@ class VWorkflow(ABC):
         use_kerberos = config.read_variable("use_kerberos", {}).get(self.machine_id, False)
         for job in self.jobs:
             self.logger(f"Job in the workflow: {job}, is input: {job.is_input}, "
-                         f"job type: {job.job_type()}")
+                        f"job type: {job.job_type()}", verbose=True)
 
         self.snakefile_path = os.path.join(self.path, "Snakefile")
         snake_file = snakefile.SnakeFile(os.path.join(self.path, "Snakefile"))
@@ -349,11 +364,12 @@ class VWorkflow(ABC):
 
         total_jobs = len(self.jobs)
         for i, job in enumerate(self.jobs):
-            start_time = time.time()
-            self.logger(f"[{i+1}/{total_jobs}] Processing job: {job}")
+            if self.verbose_logs or i % 50 == 0 or i + 1 == total_jobs:
+                self.logger(f"[{i+1}/{total_jobs}] Processing job: {job}")
             snakemake_rule = None
             step = None
-            if job.object_type() == "algorithm":
+            job_type = job.object_type()
+            if job_type == "algorithm":
                 # In this case, if the command is compile, we need to compile it
                 image = ImageJob(job.path, job.machine_id)
                 image.is_input = job.is_input
@@ -361,17 +377,15 @@ class VWorkflow(ABC):
                 step = image.step(self.machine_id)
 
                 # In this case, we also need to run the "touch"
-            elif job.object_type() == "task":
+            elif job_type == "task":
                 container = ContainerJob(job.path, job.machine_id)
                 container.is_input = job.is_input
                 snakemake_rule = container.snakemake_rule(self.machine_id)
                 step = container.step(self.machine_id)
             else:
                 # Unknown job type, skip or handle
-                self.logger(f"Unknown job type {job.object_type()} for job {job}, skipping")
+                self.logger(f"Unknown job type {job_type} for job {job}, skipping")
                 continue
-            self.logger(f"[{i+1}/{total_jobs}] Get the step at time "
-                         f"{time.time() - start_time:.4f}s")
 
             snake_file.addline("\n", 0)
             snake_file.addline(f"rule step{job.short_uuid()}:", 0)
@@ -381,19 +395,7 @@ class VWorkflow(ABC):
             # Add the dependencies
             self.dependencies[f"step{job.short_uuid()}"] = []
             for dep in job.dependencies():
-                dep_job = VJob(
-                    os.path.join(
-                        os.environ["HOME"],
-                        ".Yuki",
-                        "Storage",
-                        self.project_uuid,
-                        dep
-                    ),
-                    self.machine_id
-                )
-                self.dependencies[f"step{job.short_uuid()}"].append(f"step{dep_job.short_uuid()}")
-            self.logger(f"[{i+1}/{total_jobs}] Added inputs and dependencies at time "
-                         f"{time.time() - start_time:.4f}s")
+                self.dependencies[f"step{job.short_uuid()}"].append(f"step{dep[:7]}")
 
             snake_file.addline("output:", 1)
             snake_file.addline(f'"{job.short_uuid()}.done"', 2)
@@ -411,12 +413,8 @@ class VWorkflow(ABC):
                 snake_file.addline(f'kubernetes_memory_limit="{snakemake_rule["memory"]}"', 2)
             snake_file.addline("shell:", 1)
             snake_file.addline(f'"{" && ".join(snakemake_rule["commands"])}"', 2)
-            self.logger(f"[{i+1}/{total_jobs}] Added shell and resources at time "
-                         f"{time.time() - start_time:.4f}s")
 
             self.steps.append(step)
-            self.logger(f"[{i+1}/{total_jobs}] Appended step at time "
-                         f"{time.time() - start_time:.4f}s")
 
         snake_file.write()
         self.logger(f"Snakefile written to {self.snakefile_path}")
@@ -432,8 +430,23 @@ class VWorkflow(ABC):
         - This avoids recursion and handles DAGs safely.
         """
         visited = set()
+        job_cache = {}
+
+        def get_cached_job(path, machine_id):
+            cached = job_cache.get(path)
+            if cached is None:
+                cached = VJob(path, machine_id)
+                job_cache[path] = cached
+                return cached
+            if machine_id is not None and cached.machine_id is None:
+                cached = VJob(path, machine_id)
+                job_cache[path] = cached
+            return cached
+
         # Initialize stack with all root jobs, marked as not expanded
         stack = [(job, False) for job in root_jobs]
+        for root_job in root_jobs:
+            job_cache[root_job.path] = root_job
 
         while stack:
             job, expanded = stack.pop()
@@ -444,7 +457,7 @@ class VWorkflow(ABC):
 
             # Ensure job has machine_id
             if job.machine_id is None:
-                job = VJob(job.path, self.machine_id)
+                job = get_cached_job(job.path, self.machine_id)
                 if job.machine_id is None:
                     continue
 
@@ -470,7 +483,7 @@ class VWorkflow(ABC):
             for dep in job.dependencies():
                 dep_path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
                                          self.project_uuid, dep)
-                dep_job = VJob(dep_path, None)
+                dep_job = get_cached_job(dep_path, None)
                 if dep_job.path not in visited:
                     stack.append((dep_job, False))
 

@@ -18,61 +18,40 @@ logger = getLogger("YukiLogger")
 @bp.route('/execute', methods=['GET', 'POST'])
 def execute():
     """Execute impressions."""
-    print("# >>> execute")
     if request.method == 'POST':
-        print(request)
         machine = request.form["machine"]
         project_uuid = request.form['project_uuid']
         use_eos_dict = request.form["use_eos"]
         use_eos_dict = json.loads(use_eos_dict)
         contents = request.files["impressions"].read().decode()
+        impressions = [item for item in contents.split(" ") if item]
         start_jobs = []
-        print("use_eos:", use_eos_dict)
-        print("machine:", machine)
-        print("contents:", contents.split(" "))
 
-        for impression in contents.split(" "):
-            print("--------------")
-            print("impression:", impression)
+        for impression in impressions:
             job_path = config.get_job_path(project_uuid, impression)
             job = VJob(job_path, None)
-            print("job", job, job.job_type(), job.status())
+            job_type = job.job_type()
+            job_status = job.status()
 
-            if job.job_type() == "task":
-                if job.status() not in ("raw", "failed"):
-                    print("job status is not raw or failed")
+            if job_type == "task":
+                if job_status not in ("raw", "failed"):
                     continue
                 job.set_status("waiting")
-                # Redefine, only aim for write use_eos variable
                 start_job = VJob(job_path, machine)
                 use_eos = use_eos_dict.get(impression, False)
                 start_job.set_use_eos(use_eos)
-                start_jobs.append(job)
-            elif job.job_type() == "algorithm":
+                start_jobs.append(start_job)
+            elif job_type == "algorithm":
                 job.set_status("ready")
-                # if job.environment() == "script":
-                #     continue
-                # start_jobs.append(job)
 
         if len(start_jobs) == 0:
-            print("no job to run")
-            print("# <<< execute")
             return "no job to run"
 
         contents = " ".join([job.uuid for job in start_jobs])
-
-        print("Asynchronous execution")
-        print("contents", contents)
         task = task_exec_impression.apply_async(args=[project_uuid, contents, machine])
 
-        print("Contents is:", contents)
-        for impression in contents.split(" "):
-            job_path = config.get_job_path(project_uuid, impression)
-            print("Project_uuid is:", project_uuid)
-            print("Job path is:", job_path)
-            job = VJob(job_path, machine)
+        for job in start_jobs:
             job.set_runid(task.id)
-        print("### <<< execute")
         return task.id
 
     return ""  # For GET requests

@@ -19,6 +19,9 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         self._use_kerberos = None
         self._environment = None
         self._workflow = None
+        self._job_type = None
+        self._status = None
+        self._dependencies = None
 
         self.is_input = False
         self.path = path
@@ -44,14 +47,17 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
                 os.path.join(self.path, self.machine_id, "config.json")
                 )
 
+    @staticmethod
+    def _detect_job_type(path):
+        """Read object type with minimal I/O for factory dispatch."""
+        config_file = metadata.ConfigFile(os.path.join(path, "config.json"))
+        return config_file.read_variable("object_type", "")
+
     def __new__(cls, path, machine_id):
         """Factory method to automatically create suitable ImageJob or ContainerJob."""
         # If VJob is being directly instantiated, determine the correct subclass
         if cls is VJob:
-            # Create a temporary instance to read the object type
-            temp_instance = object.__new__(cls)
-            temp_instance.__init__(path, machine_id)
-            job_type = temp_instance.job_type()
+            job_type = VJob._detect_job_type(path)
 
             # Import here to avoid circular imports
             from ..kernel.image_job import ImageJob
@@ -81,12 +87,13 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
 
     def job_type(self):
         """Return the type of the object under a specific path."""
-        # print("job_type", self.config_file.read_variable("object_type", ""))
-        return self.config_file.read_variable("object_type", "")
+        if self._job_type is None:
+            self._job_type = self.config_file.read_variable("object_type", "")
+        return self._job_type
 
     def object_type(self):
         """Return the type of the object under a specific path."""
-        return self.config_file.read_variable("object_type", "")
+        return self.job_type()
 
     def is_zombie(self):
         """Check if this job is a zombie (empty job type)."""
@@ -103,6 +110,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
     def set_workflow_id(self, workflow_uuid):
         """Set the workflow ID for this job."""
         self.run_config_file.write_variable("workflow", workflow_uuid)
+        self._workflow = workflow_uuid
 
     def workflow_id(self):
         """Get the workflow ID for this job."""
@@ -124,15 +132,17 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
 
     def status(self):
         """Get the current status of the job."""
-        config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
-        status = config_file.read_variable("status", "raw")
-        if status != "raw":
-            return status
+        if self._status is None:
+            config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
+            self._status = config_file.read_variable("status", "raw")
+        if self._status != "raw":
+            return self._status
         return "raw"
 
     def set_use_eos(self, use: bool):
         """Set whether the job should use EOS storage."""
         self.run_config_file.write_variable("use_eos", use)
+        self._use_eos = use
 
     def use_eos(self):
         """Check if the job is set to use EOS storage."""
@@ -153,19 +163,23 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         """Set the status of the job."""
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
         config_file.write_variable("status", status)
+        self._status = status
 
     def update_data_status(self, status):
         """Update the data status of the job."""
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
         config_file.write_variable("status", status)
+        self._status = status
 
     def update_status(self, status):
         """Update the status based on workflow status."""
         config_file = metadata.ConfigFile(os.path.join(self.path, "status.json"))
         if status == "PENDING":
             config_file.write_variable("status", "running")
+            self._status = "running"
         if status == "SUCCESS":
             config_file.write_variable("status", "success")
+            self._status = "success"
 
     def _read_workflow_results(self, workflow_path, logger=None):
         """Read workflow results and return status."""
@@ -209,7 +223,9 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
             # print(matched_step)
             start_time = matched_step.get("started_at", "")
             end_time = matched_step.get("finished_at", "")
-            config_file.write_variable("status", matched_step.get("status", ""))
+            new_status = matched_step.get("status", "")
+            config_file.write_variable("status", new_status)
+            self._status = new_status
             config_file.write_variable("started_at", start_time)
             config_file.write_variable("finished_at", end_time)
             # Format of times:
@@ -232,27 +248,31 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         else:
             print("New status:", step_status)
 
+        new_status = None
         if current_status == "raw":
             if len(step_status) < 20:
-                config_file.write_variable("status", step_status)
+                new_status = step_status
         elif current_status == "running":
             if step_status == "success":
-                config_file.write_variable("status", "success")
+                new_status = "success"
             elif step_status == "finished":
-                config_file.write_variable("status", "finished")
+                new_status = "finished"
             elif step_status in ("failed", "stopped"):
-                config_file.write_variable("status", "failed")
+                new_status = "failed"
             elif full_workflow_status == "failed":
-                config_file.write_variable("status", "failed")
+                new_status = "failed"
         elif current_status in ('stopped', 'deleted'):
-            config_file.write_variable("status", "failed")
+            new_status = "failed"
         elif current_status in ('finished', 'success', 'failed'):
             pass
         else:
             if len(step_status) < 20:
-                config_file.write_variable("status", step_status)
+                new_status = step_status
             else:
-                config_file.write_variable("status", "unknown")
+                new_status = "unknown"
+        if new_status is not None:
+            config_file.write_variable("status", new_status)
+            self._status = new_status
 
     def update_status_from_workflow(self, workflow_path, logger=None):
         """Update job status based on workflow status."""
@@ -312,7 +332,9 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
 
     def dependencies(self):
         """Return the predecessor of the object."""
-        return self.config_file.read_variable("dependencies", [])
+        if self._dependencies is None:
+            self._dependencies = self.config_file.read_variable("dependencies", [])
+        return self._dependencies
 
     def files(self):
         """Get list of files in this job."""
