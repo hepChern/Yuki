@@ -45,7 +45,8 @@ class ImpressionStorage:
     def collect(self):
         """Retrieves files or logs from runners."""
         for name, job, workflow in self._get_runner_contexts():
-            job_status = job.status()
+            print(job.status())
+            job_status = job.status(musical=True)
             if job_status == CODA:
                 print(f"[{name}] Collecting results...")
                 workflow.download(self.impression)
@@ -57,14 +58,14 @@ class ImpressionStorage:
     def collect_outputs(self):
         """Retrieves only output files from runners."""
         for name, job, workflow in self._get_runner_contexts():
-            if job.status() == CODA:
+            if job.status(musical=True) == CODA:
                 print(f"[{name}] Collecting outputs...")
                 workflow.download_outputs(self.impression)
 
     def collect_logs(self):
         """Retrieves only logs from runners."""
         for name, job, workflow in self._get_runner_contexts():
-            job_status = job.status()
+            job_status = job.status(musical=True)
             if job_status == CODA or job_status in (FAILED, DISSONANCE):
                 print(f"[{name}] Collecting logs...")
                 workflow.download_logs(self.impression)

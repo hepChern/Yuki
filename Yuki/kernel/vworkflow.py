@@ -219,7 +219,10 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             workflow_list = []
             input_jobs = [j for j in self.jobs if j.is_input
                            and j.status(musical=False) not in (FINAL_NOTE, CODA)
+                           and j.status(musical=True) != "archived"
                            and j.job_type() != "algorithm"]
+            for j in input_jobs:
+                print(j, j.status(musical=True), j.status(musical=False), j.job_type())
             total_inputs = len(input_jobs)
 
             for i, job in enumerate(input_jobs):
@@ -239,6 +242,8 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                 if job.status(musical=True) == FINAL_NOTE:
                     continue
                 if job.status(musical=True) == CODA:
+                    continue
+                if job.status(musical=True) == "archived":
                     continue
                 if job.job_type() == "algorithm":
                     continue
@@ -269,6 +274,8 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         if not all_finished:
             for job in self.jobs:
                 if job.is_input:
+                    continue
+                if job.status(musical=True) == "archived":
                     continue
                 if job.job_type() == "algorithm":
                     continue
