@@ -546,3 +546,16 @@ def homekeep(project_uuid):
         workflow = VWorkflow.create(project_uuid, [], workflow_id)
         workflow.homekeep()
     return "ok"
+
+# The error log folder is like:
+# You can use the VJob.log(index)
+@bp.route("/error-log/<project_uuid>/<impression_name>/<index>", methods=['GET'])
+def error_log(project_uuid, impression_name, index):
+    """Get error log content for a specific impression and log index."""
+    job_path = config.get_job_path(project_uuid, impression_name)
+    job = VJob(job_path, None)
+    log_content = job.log(index)
+    return log_content if log_content else "No log content found"
+
+
+

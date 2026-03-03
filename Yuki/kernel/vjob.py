@@ -398,6 +398,14 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         # Update job status
         self._update_job_status(config_file, current_status, status, full_workflow_status, logger)
 
+    def log(self, index):
+        """Get log content for this job."""
+        log_path = os.path.join(self.path, self.machine_id, "logs", f"celebi_user_step{index}.log")
+        if os.path.exists(log_path):
+            with open(log_path, encoding='utf-8') as f:
+                return f.read()
+        return ""
+
     def error(self):
         """Get error message if any."""
         error_path = self.path + "/error"
