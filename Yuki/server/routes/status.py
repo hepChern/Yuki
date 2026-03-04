@@ -4,7 +4,7 @@ Status and monitoring routes.
 import json
 import os
 import time
-from flask import Blueprint, render_template, request, jsonify, url_for
+from flask import Blueprint, render_template, request, jsonify, url_for, send_from_directory
 from werkzeug.utils import secure_filename
 from CelebiChrono.utils.metadata import ConfigFile
 from CelebiChrono.kernel.chern_cache import ChernCache
@@ -556,6 +556,56 @@ def error_log(project_uuid, impression_name, index):
     job = VJob(job_path, None)
     log_content = job.log(index)
     return log_content if log_content else "No log content found"
+
+
+@bp.route("/engine-log/<project_uuid>/<impression_name>", methods=['GET'])
+def engine_log(project_uuid, impression_name):
+    """Get the engine log for a specific impression.
+
+    Engine logs are stored in the workflow directory as engine_logs.json.
+    The impression_name can be either a job UUID or a workflow UUID.
+    """
+    # First, try to interpret impression_name as a workflow ID directly
+    workflow_id = impression_name
+
+    # Check if the log exists at the workflow path
+    log_path = os.path.join(
+        os.environ["HOME"],
+        ".Yuki",
+        "Workflows",
+        project_uuid,
+        workflow_id,
+        "engine_logs.json"
+    )
+
+    # If not found and impression exists in storage, try to get workflow from job
+    if not os.path.exists(log_path):
+        job_path = config.get_job_path(project_uuid, impression_name)
+        if os.path.exists(job_path):
+            try:
+                job = VJob(job_path, None)
+                # Check if job has machine_id (required for run_config_file)
+                if job.machine_id is not None:
+                    workflow_id = job.workflow_id()
+                    if workflow_id:
+                        log_path = os.path.join(
+                            os.environ["HOME"],
+                            ".Yuki",
+                            "Workflows",
+                            project_uuid,
+                            workflow_id,
+                            "engine_logs.json"
+                        )
+            except (AttributeError, OSError):
+                pass  # Fall through to check if log_path exists
+
+    if not os.path.exists(log_path):
+        return jsonify({"error": "Engine log not found"}), 404
+
+    return send_from_directory(
+        os.path.dirname(log_path),
+        "engine_logs.json"
+    )
 
 
 

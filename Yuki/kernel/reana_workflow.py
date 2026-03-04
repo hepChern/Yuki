@@ -438,6 +438,20 @@ class ReanaWorkflow(VWorkflow):
         self.set_environment(self.machine_id)
         return client.ping(self.access_token)
 
+    def get_workflow_logs(self):
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
+        logpath = os.path.join(self.path, "engine_logs.json")
+        if os.path.exists(logpath):
+            return
+        worrkflow_logs = client.get_workflow_logs(
+                self.get_name(),
+                self.access_token)
+        # Save the logs to a file
+        log_file = metadata.ConfigFile(logpath)
+        log_file.write_variable("logs", worrkflow_logs)
+
     def homekeep(self):
         """Perform homekeeping tasks for the workflow.
         Download all the results for the jobs in the workflow.

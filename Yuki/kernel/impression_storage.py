@@ -70,6 +70,14 @@ class ImpressionStorage:
                 print(f"[{name}] Collecting logs...")
                 workflow.download_logs(self.impression)
 
+        self.collect_engine_logs()
+
+    def collect_engine_logs(self):
+        """Retrieves engine logs from runners."""
+        for name, job, workflow in self._get_runner_contexts():
+            print(f"[{name}] Collecting engine logs...")
+            workflow.get_workflow_logs()
+
     def watermark(self):
         """Applies watermarks to the stored results."""
         for name, job, workflow in self._get_runner_contexts():
