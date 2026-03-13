@@ -8,6 +8,7 @@ environment management, command execution, and input/output handling.
 # pylint: disable=cyclic-import
 import os
 import time
+import textwrap
 from CelebiChrono.utils import csys
 from CelebiChrono.utils import metadata
 from .vjob import VJob
@@ -81,6 +82,11 @@ class ContainerJob(VJob):
         # print("-------------")
         # print("self.is_input", self.is_input)
         # print("self.use_eos()", self.use_eos())
+
+        # Run datalist generator if this is a datalist task
+        if self.environment() == "datalist":
+            commands.append(f"python3 ../imp{self.short_uuid()}/generate_datalist.py")
+
         if (not self.is_input) and self.use_eos():
             # print("Using EOS for stageout")
             config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
@@ -178,6 +184,11 @@ class ContainerJob(VJob):
         commands.extend(self._create_directory_commands())
         commands.extend(self._create_symlink_commands())
         commands.extend(self._process_user_commands())
+
+        # Run datalist generator if this is a datalist task
+        if self.environment() == "datalist":
+            commands.append(f"python3 ../imp{self.short_uuid()}/generate_datalist.py")
+
         if (not self.is_input) and self.use_eos():
             print("Using EOS for stageout")
             config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
@@ -436,3 +447,53 @@ class ContainerJob(VJob):
             return []
         dirs = csys.list_dir(path)
         return dirs
+
+    def _create_datalist_generator(self):
+        """
+        Create the generate_datalist.py script with embedded datalist content.
+
+        The datalist entries are embedded directly in the script since celebi.yaml
+        is not uploaded to the workflow environment.
+
+        Returns:
+            str: Path to the created generator script
+        """
+        datalist = self.yaml_file.read_variable("datalist", [])
+        # Escape the datalist for embedding in Python script
+        datalist_repr = repr(datalist)
+
+        script_content = f'''#!/usr/bin/env python3
+"""Generate dataList.txt from embedded datalist entries."""
+
+# Embedded datalist from celebi.yaml
+DATALIST = {datalist_repr}
+
+# Write dataList.txt
+with open('stageout/dataList.txt', 'w') as f:
+    for path in DATALIST:
+        f.write(path + '\\n')
+
+print(f"Generated dataList.txt with {{len(DATALIST)}} entries")
+'''
+        # Write script to contents directory
+        script_path = os.path.join(self.path, "contents", "generate_datalist.py")
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(script_content)
+        # Make executable
+        os.chmod(script_path, 0o755)
+        return script_path
+
+    def files(self):
+        """
+        Get list of files in this job, including datalist generator if applicable.
+
+        Returns:
+            list: List of file paths
+        """
+        file_list = super().files()
+        if self.environment() == "datalist":
+            # Create the generator script
+            self._create_datalist_generator()
+            # Add it to the file list (format: short_uuid/filename)
+            file_list.append(f"{self.short_uuid()}/generate_datalist.py")
+        return file_list
