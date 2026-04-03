@@ -117,7 +117,10 @@ class ContainerJob(VJob):
 
         print(f"    >>>> >>>> User command processing start time: {time.time() - start_time}")
 
-        raw_commands = self.image().yaml_file.read_variable("commands", [])
+        if self.image():
+            raw_commands = self.image().yaml_file.read_variable("commands", [])
+        else:
+            raw_commands = []
         processed_commands = []
 
         print(raw_commands)
@@ -141,7 +144,10 @@ class ContainerJob(VJob):
         Returns:
             dict: Dictionary containing REANA-specific step metadata
         """
-        environment = self.default_environment() if self.is_input else self.environment()
+        environment = self.default_environment() \
+                if self.is_input \
+                or self.environment() == "datalist" \
+                else self.environment()
         compute_backend = self.compute_backend()
 
         step = {
@@ -254,7 +260,10 @@ class ContainerJob(VJob):
         if self.is_input or self.compute_backend() == "htcondorcern":
             return []
 
-        raw_commands = self.image().yaml_file.read_variable("commands", [])
+        if self.image():
+            raw_commands = self.image().yaml_file.read_variable("commands", [])
+        else:
+            raw_commands = []
         processed_commands = []
 
         for i, command in enumerate(raw_commands):
@@ -326,7 +335,10 @@ class ContainerJob(VJob):
         Returns:
             dict: Dictionary containing step metadata
         """
-        environment = self.default_environment() if self.is_input else self.environment()
+        environment = self.default_environment() \
+                if self.is_input \
+                or self.environment() == "datalist" \
+                else self.environment()
         compute_backend = self.compute_backend()
 
         step = {
