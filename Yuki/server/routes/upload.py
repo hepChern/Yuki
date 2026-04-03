@@ -2,12 +2,14 @@
 File upload and download routes.
 """
 import os
+import uuid
 import tarfile
 from logging import getLogger
 
-from flask import Blueprint, request, send_from_directory
+from flask import Blueprint, request, send_from_directory, jsonify
 
 from ..config import config
+from ..resumable_upload_handler import get_upload_manager
 
 bp = Blueprint('upload', __name__)
 logger = getLogger("YukiLogger")
@@ -127,3 +129,236 @@ def watermarkview(project_uuid, impression, runner_id, filename):
     job_path = config.get_job_path(project_uuid, impression)
     path = os.path.join(job_path, runner_id, "watermarks")
     return send_from_directory(path, filename)
+
+
+# =============================================================================
+# Resumable Upload Endpoints
+# =============================================================================
+
+@bp.route('/upload/create', methods=['POST'])
+def create_resumable_upload():
+    """Create a new resumable upload session.
+
+    Request Body:
+        - file_size: Total size of the file in bytes
+        - file_md5: MD5 hash of the complete file
+        - chunk_size: Size of each chunk in bytes
+        - total_chunks: Total number of chunks
+        - project_uuid: Project identifier
+        - impression_uuid: Impression identifier
+
+    Returns:
+        JSON with upload_id for the new session
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Missing request body"}), 400
+
+        required_fields = ['file_size', 'file_md5', 'chunk_size',
+                          'total_chunks', 'project_uuid', 'impression_uuid']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        # Generate upload ID
+        upload_id = str(uuid.uuid4())
+
+        # Create upload session
+        manager = get_upload_manager(config.storage_path)
+        state = manager.create_upload(
+            upload_id=upload_id,
+            file_size=data['file_size'],
+            file_md5=data['file_md5'],
+            chunk_size=data['chunk_size'],
+            total_chunks=data['total_chunks'],
+            project_uuid=data['project_uuid'],
+            impression_uuid=data['impression_uuid']
+        )
+
+        return jsonify({
+            "upload_id": state.upload_id,
+            "status": "created"
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to create upload: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/upload/chunk/<upload_id>/<int:chunk_index>', methods=['PATCH'])
+def upload_chunk(upload_id, chunk_index):
+    """Upload a single chunk.
+
+    Args:
+        upload_id: Upload session identifier
+        chunk_index: Index of the chunk (0-based)
+
+    Headers:
+        - Content-MD5: MD5 hash of the chunk data
+
+    Returns:
+        200 if chunk stored successfully
+        400 if MD5 verification fails
+        404 if upload session not found
+    """
+    try:
+        manager = get_upload_manager(config.storage_path)
+
+        # Check upload exists
+        state = manager.get_upload(upload_id)
+        if state is None:
+            return jsonify({"error": "Upload not found"}), 404
+
+        # Get chunk MD5 from header
+        chunk_md5 = request.headers.get('Content-MD5')
+        if not chunk_md5:
+            return jsonify({"error": "Missing Content-MD5 header"}), 400
+
+        # Get chunk data
+        chunk_data = request.get_data()
+
+        # Store chunk
+        success = manager.store_chunk(upload_id, chunk_index, chunk_data, chunk_md5)
+
+        if success:
+            return jsonify({
+                "status": "ok",
+                "chunk_index": chunk_index,
+                "received_bytes": len(chunk_data)
+            })
+        else:
+            return jsonify({"error": "Chunk verification failed"}), 400
+
+    except Exception as e:
+        logger.error(f"Failed to store chunk {chunk_index} for upload {upload_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/upload/status/<upload_id>', methods=['GET'])
+def get_upload_status(upload_id):
+    """Get the status of an upload.
+
+    Args:
+        upload_id: Upload session identifier
+
+    Returns:
+        JSON with completed_chunks list and upload completion status
+    """
+    try:
+        manager = get_upload_manager(config.storage_path)
+        state = manager.get_upload(upload_id)
+
+        if state is None:
+            return jsonify({"error": "Upload not found"}), 404
+
+        return jsonify({
+            "upload_id": upload_id,
+            "completed_chunks": list(state.completed_chunks),
+            "total_chunks": state.total_chunks,
+            "is_complete": manager.is_upload_complete(upload_id),
+            "finalized": state.finalized
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get upload status for {upload_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/upload/complete/<upload_id>', methods=['POST'])
+def complete_upload(upload_id):
+    """Finalize an upload and extract the archive.
+
+    Args:
+        upload_id: Upload session identifier
+
+    Request Body:
+        - project_uuid: Project identifier
+        - impression_uuid: Impression identifier
+
+    Returns:
+        200 if upload finalized successfully
+        400 if upload incomplete
+        404 if upload not found
+    """
+    try:
+        data = request.get_json() or {}
+
+        manager = get_upload_manager(config.storage_path)
+
+        # Check upload is complete
+        if not manager.is_upload_complete(upload_id):
+            return jsonify({"error": "Upload incomplete"}), 400
+
+        # Finalize upload
+        project_uuid = data.get('project_uuid')
+        impression_uuid = data.get('impression_uuid')
+
+        extract_path = manager.finalize_upload(upload_id, project_uuid, impression_uuid)
+
+        if extract_path:
+            return jsonify({
+                "status": "completed",
+                "extract_path": extract_path
+            })
+        else:
+            return jsonify({"error": "Failed to finalize upload"}), 500
+
+    except Exception as e:
+        logger.error(f"Failed to complete upload {upload_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/upload/<upload_id>', methods=['DELETE'])
+def cancel_upload(upload_id):
+    """Cancel an upload and clean up resources.
+
+    Args:
+        upload_id: Upload session identifier
+
+    Returns:
+        200 if cancelled successfully
+    """
+    try:
+        manager = get_upload_manager(config.storage_path)
+        manager.cancel_upload(upload_id)
+        return jsonify({"status": "cancelled"})
+
+    except Exception as e:
+        logger.error(f"Failed to cancel upload {upload_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/upload-config/<project_uuid>/<impression_uuid>', methods=['POST'])
+def upload_config(project_uuid, impression_uuid):
+    """Upload config.json for an impression after tar upload.
+
+    This endpoint handles the config.json file upload separately from the
+    main tar.gz archive in resumable uploads.
+
+    Args:
+        project_uuid: Project identifier
+        impression_uuid: Impression identifier
+
+    Returns:
+        200 if config saved successfully
+    """
+    try:
+        target_dir = os.path.join(
+            config.storage_path, project_uuid, impression_uuid
+        )
+        os.makedirs(target_dir, exist_ok=True)
+
+        if 'config' not in request.files:
+            return jsonify({"error": "No config file provided"}), 400
+
+        config_file = request.files['config']
+        config_path = os.path.join(target_dir, "config.json")
+        config_file.save(config_path)
+
+        logger.info(f"Saved config.json for {project_uuid}/{impression_uuid}")
+        return jsonify({"status": "ok"})
+
+    except Exception as e:
+        logger.error(f"Failed to upload config: {e}")
+        return jsonify({"error": str(e)}), 500
