@@ -10,6 +10,7 @@ from flask import Blueprint, request, send_from_directory, jsonify
 
 from ..config import config
 from ..resumable_upload_handler import get_upload_manager
+from CelebiChrono.utils import metadata
 
 bp = Blueprint('upload', __name__)
 logger = getLogger("YukiLogger")
@@ -362,3 +363,37 @@ def upload_config(project_uuid, impression_uuid):
     except Exception as e:
         logger.error(f"Failed to upload config: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/set-impression-status', methods=['POST'])
+def set_impression_status():
+    """Set the status of an impression in Yuki storage."""
+    project_uuid = request.form["project_uuid"]
+    impression = request.form["impression"]
+    status = request.form["status"]
+    status_path = os.path.join(
+        config.storage_path, project_uuid, impression, "status.json"
+    )
+    os.makedirs(os.path.dirname(status_path), exist_ok=True)
+    status_file = metadata.ConfigFile(status_path)
+    status_file.write_variable("status", status)
+    return "OK"
+
+
+@bp.route('/get-impression-info/<project_uuid>/<impression>')
+def get_impression_info(project_uuid, impression):
+    """Get descriptor, md5 and environment from an impression's celebi.yaml."""
+    job_path = config.get_job_path(project_uuid, impression)
+    yaml_path = os.path.join(job_path, "contents", "celebi.yaml")
+    if not os.path.exists(yaml_path):
+        return jsonify({
+            "descriptor": "",
+            "md5": "",
+            "environment": "",
+        })
+    yaml_file = metadata.YamlFile(yaml_path)
+    return jsonify({
+        "descriptor": yaml_file.read_variable("descriptor", ""),
+        "md5": yaml_file.read_variable("uuid", ""),
+        "environment": yaml_file.read_variable("environment", ""),
+    })

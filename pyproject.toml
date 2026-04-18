@@ -46,4 +46,5 @@ Yuki = ["templates/*.html"]
 
 [project.scripts]
 yuki = "Yuki.main:main"
-yukirunner= "Yuki.main:main"
+yukirunner = "Yuki.main:main"
+yuki-create-data = "Yuki.cli.yuki_create_data:main"
