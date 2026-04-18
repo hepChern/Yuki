@@ -58,6 +58,20 @@ yuki server status
 yuki server stop  # or Ctrl-C
 ```
 
+### Docker Development
+```bash
+# Start dev environment with hot-reload
+# Source code is mounted as a volume
+# RabbitMQ starts automatically inside the container
+docker compose up
+
+# Build production image locally
+docker build -f docker/Dockerfile -t yuki:latest .
+
+# Build nightly image
+bash docker/scripts/build-nightly.sh
+```
+
 ### Testing
 ```bash
 # Run all tests
@@ -142,9 +156,17 @@ The project uses absolute imports within the package. Always import from `Yuki` 
 - Flask server runs on port 3315
 - Celery uses RabbitMQ broker on localhost
 
+### Docker Setup (`docker/`)
+- **Dockerfile**: Production image (rootless, builds from source)
+- **Dockerfile.dev**: Development image with volume-mount support
+- **docker-compose.yml**: One-command dev environment (`docker compose up`)
+- **entrypoint.sh / entrypoint.dev.sh**: RabbitMQ + Yuki startup scripts
+- **scripts/build-nightly.sh**: Local nightly image builder
+
 ### CI/CD Pipeline
 - **Pylint**: Runs on push with Python 3.8-3.10
 - **Python Package**: Tests across Python 3.9-3.13 on master branch pushes/PRs
+- **Docker Nightly**: Builds and pushes `ghcr.io` images every night at 02:17 UTC
 - Package building and installation testing automated
 
 ## Common Development Tasks
@@ -167,6 +189,10 @@ The project uses absolute imports within the package. Always import from `Yuki` 
 ## Important Files
 
 - `pyproject.toml`: Build configuration and dependencies
+- `docker-compose.yml`: Local development orchestration
+- `docker/Dockerfile`: Production container image
+- `docker/Dockerfile.dev`: Development container image
+- `.github/workflows/docker-nightly.yml`: Nightly image CI
 - `Yuki/main.py`: CLI entry point with Click commands
 - `Yuki/server/app.py`: Flask application setup
 - `Yuki/kernel/vjob.py`: Job abstraction and factory pattern

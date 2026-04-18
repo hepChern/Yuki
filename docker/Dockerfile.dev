@@ -1,0 +1,31 @@
+# Development image for Yuki
+# Supports volume-mounted source code for live editing
+FROM python:3.10-slim
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        rabbitmq-server \
+        ca-certificates \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install base Python dependencies (editable install will add the rest)
+COPY docker/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install build
+
+# Install celebichrono dependency
+RUN pip install celebichrono
+
+# Copy entrypoint
+COPY docker/entrypoint.dev.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+EXPOSE 3315
+
+# Default to interactive shell for development
+CMD ["/app/entrypoint.sh"]

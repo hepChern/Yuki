@@ -2,7 +2,6 @@
 set -e
 
 export RABBITMQ_ALLOW_INPUT_NON_SENSITIVE_DATA=1
-
 export RABBITMQ_MNESIA_BASE=/tmp/rabbitmq-data
 export RABBITMQ_LOG_BASE=/tmp/rabbitmq-data
 export RABBITMQ_PID_FILE=/tmp/rabbitmq-data/rabbit.pid
@@ -10,7 +9,7 @@ export RABBITMQ_PID_FILE=/tmp/rabbitmq-data/rabbit.pid
 mkdir -p /tmp/rabbitmq-data
 chmod -R 777 /tmp/rabbitmq-data
 
-# Start RabbitMQ in **foreground** (DO NOT detach)
+# Start RabbitMQ in background
 rabbitmq-server &
 
 # Wait until RabbitMQ is ready
@@ -24,10 +23,17 @@ while True:
         break
     except OSError:
         print("Waiting for RabbitMQ...")
-        time.sleep(5)
+        time.sleep(2)
 EOF
 
 echo "RabbitMQ is up and running."
 
+# Ensure Yuki is installed in editable mode from the mounted source
+if [ -f /app/Yuki/pyproject.toml ]; then
+    cd /app/Yuki
+    pip install -e . >/dev/null 2>&1
+    cd /app
+fi
+
 # Start Yuki server
-/root/.local/bin/yuki server start
+exec yuki server start

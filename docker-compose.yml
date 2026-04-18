@@ -1,0 +1,21 @@
+services:
+  yuki:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    container_name: yuki-dev
+    ports:
+      - "3315:3315"
+    volumes:
+      - .:/app/Yuki
+      - yuki-storage:/root/.Yuki
+    environment:
+      - FLASK_ENV=development
+      - CELERY_BROKER_URL=amqp://localhost
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    command: ["/app/entrypoint.sh"]
+
+volumes:
+  yuki-storage:
