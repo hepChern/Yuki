@@ -48,3 +48,4 @@ Yuki = ["templates/*.html"]
 yuki = "Yuki.main:main"
 yukirunner = "Yuki.main:main"
 yuki-create-data = "Yuki.cli.yuki_create_data:main"
+yuki-docker-run = "Yuki.main:docker_run"
