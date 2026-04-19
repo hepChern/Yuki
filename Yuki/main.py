@@ -39,7 +39,7 @@ def status():
 def docker():
     """Docker management commands."""
 
-@click.command('docker-run')
+@docker.command('run')
 @click.argument('image', default='yuki:latest')
 @click.option('--yuki-dir', '-d', envvar='YUKIDIR',
               default='~/.Yuki', show_default=True,
@@ -61,9 +61,6 @@ def docker_run(image, yuki_dir, port):
     ]
     click.echo(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
-
-# Register under `yuki docker run` as well
-docker.add_command(docker_run, name='run')
 
 # Main
 def main():
