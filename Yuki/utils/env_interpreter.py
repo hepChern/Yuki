@@ -32,6 +32,10 @@ class EnvInterpreter:
         if isinstance(entry, str):
             return {"type": "conda", "value": entry}
         if isinstance(entry, dict):
+            if "type" not in entry or "value" not in entry:
+                raise ValueError(
+                    f"conda_env_map dict entry must contain 'type' and 'value' keys, got {entry!r}"
+                )
             return entry
         raise TypeError(
             f"conda_env_map entry must be str or dict, got {type(entry).__name__}"

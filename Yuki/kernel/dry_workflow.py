@@ -65,7 +65,7 @@ class DryWorkflow(VWorkflow):
         self.set_workflow_status("ready_for_local_execution")
         self.logger(f"[LOCAL] Workflow prepared in: {self.local_exec_path}")
         self.logger(f"[LOCAL] Snakefile: {os.path.join(self.local_exec_path, 'Snakefile')}")
-        self.logger("[LOCAL] You can now run: snakemake --cores all")
+        self.logger("[LOCAL] You can now run: snakemake --use-conda --cores all")
 
     def _sync_external_job_status(self, job):
         """Poll local status for external dependency."""
@@ -166,6 +166,40 @@ class DryWorkflow(VWorkflow):
             os.path.join(self.local_exec_path, "Snakefile")
         )
         self.logger("[LOCAL] Copied: Snakefile")
+
+    def _write_environment_directive(self, snake_file, environment, indent=1):
+        """Write a conda environment directive for local dry-run execution."""
+        conda_env = self._resolve_conda_environment(environment)
+        snake_file.addline("conda:", indent)
+        snake_file.addline(f'"{conda_env}"', indent + 1)
+
+    def _resolve_conda_environment(self, environment):
+        """Map a job environment string to a conda environment name.
+
+        The Snakefile runs on the workflow execution host, which may differ
+        from the Yuki Docker container.  Therefore only an environment *name*
+        (or an explicit user-supplied path) is written into the Snakefile so
+        that Snakemake resolves it against the host's active conda installation.
+
+        Resolution order:
+        1. ``conda_env_map`` from ~/.Yuki/config.json (value used verbatim)
+        2. Strip common Docker prefixes and sanitise the image name
+        """
+        if not environment:
+            environment = "docker.io/reanahub/reana-env-root6:6.18.04"
+
+        config = metadata.ConfigFile(
+            os.path.join(os.environ["HOME"], ".Yuki", "config.json"))
+        env_map = config.read_variable("conda_env_map", {})
+        if environment in env_map:
+            return env_map[environment]
+
+        env_name = environment
+        for prefix in ("docker://", "docker.io/"):
+            if env_name.startswith(prefix):
+                env_name = env_name[len(prefix):]
+
+        return env_name.replace("/", "_").replace(":", "_")
 
     def update_workflow_status(self):
         """Update workflow status from local execution."""

@@ -35,7 +35,19 @@ class TestEnvInterpreter(unittest.TestCase):
         """Dict should be returned as-is."""
         entry = {"type": "venv", "value": "/path/to/venv"}
         result = EnvInterpreter.normalize_entry(entry)
-        self.assertIs(result, entry)
+        self.assertEqual(result, entry)
+
+    def test_normalize_entry_dict_missing_keys(self):
+        """Dict missing 'type' or 'value' should raise ValueError."""
+        with self.assertRaises(ValueError):
+            EnvInterpreter.normalize_entry({"type": "conda"})
+        with self.assertRaises(ValueError):
+            EnvInterpreter.normalize_entry({"value": "env"})
+
+    def test_normalize_entry_empty_dict(self):
+        """Empty dict should raise ValueError."""
+        with self.assertRaises(ValueError):
+            EnvInterpreter.normalize_entry({})
 
     def test_normalize_entry_invalid_type(self):
         """Non-string, non-dict should raise TypeError."""
@@ -89,6 +101,15 @@ class TestEnvInterpreter(unittest.TestCase):
         config.write_variable("other_key", "value")
         result = EnvInterpreter.resolve("image", self.config_path)
         self.assertIsNone(result)
+
+    def test_resolve_malformed_dict_raises(self):
+        """Resolve should raise ValueError when config contains a malformed dict entry."""
+        config = metadata.ConfigFile(self.config_path)
+        config.write_variable("conda_env_map", {
+            "docker:bad": {"type": "conda"}  # missing value
+        })
+        with self.assertRaises(ValueError):
+            EnvInterpreter.resolve("docker:bad", self.config_path)
 
     # ------------------------------------------------------------------
     # add_mapping

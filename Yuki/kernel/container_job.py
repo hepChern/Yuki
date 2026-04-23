@@ -117,8 +117,9 @@ class ContainerJob(VJob):
 
         print(f"    >>>> >>>> User command processing start time: {time.time() - start_time}")
 
-        if self.image():
-            raw_commands = self.image().yaml_file.read_variable("commands", [])
+        img = self.image()
+        if img is not None:
+            raw_commands = img.yaml_file.read_variable("commands", [])
         else:
             raw_commands = []
         processed_commands = []
@@ -260,8 +261,9 @@ class ContainerJob(VJob):
         if self.is_input or self.compute_backend() == "htcondorcern":
             return []
 
-        if self.image():
-            raw_commands = self.image().yaml_file.read_variable("commands", [])
+        img = self.image()
+        if img is not None:
+            raw_commands = img.yaml_file.read_variable("commands", [])
         else:
             raw_commands = []
         processed_commands = []

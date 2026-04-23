@@ -102,6 +102,16 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         """Get a human-readable name for the workflow."""
         return f"w-{self.project_uuid[:8]}-{self.uuid[:8]}"
 
+    def _write_environment_directive(self, snake_file, environment, indent=1):
+        """Write the backend-specific environment directive into the Snakefile.
+
+        The default implementation writes a Docker ``container:`` directive
+        suitable for REANA execution. Subclasses (e.g. DryWorkflow) may
+        override this to emit ``conda:``, ``apptainer:``, etc.
+        """
+        snake_file.addline("container:", indent)
+        snake_file.addline(f'"docker://{environment}"', indent + 1)
+
     def run(self):  # pylint: disable=too-many-branches
         """Common execution flow for workflows.
 
@@ -333,8 +343,8 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         snake_file.addline("input:", 1)
         snake_file.addline("output:", 1)
         snake_file.addline('"setup.done",', 2)
-        snake_file.addline("container:", 1)
-        snake_file.addline('"docker://docker.io/reanahub/reana-env-root6:6.18.04"', 2)
+        self._write_environment_directive(
+            snake_file, "docker.io/reanahub/reana-env-root6:6.18.04", 1)
         snake_file.addline("resources:", 1)
         if setup_commands and use_kerberos:
             snake_file.addline('kerberos=True,', 2)
@@ -356,8 +366,8 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
 
         snake_file.addline("output:", 1)
         snake_file.addline('"finalize.done"', 2)
-        snake_file.addline("container:", 1)
-        snake_file.addline('"docker://docker.io/reanahub/reana-env-root6:6.18.04"', 2)
+        self._write_environment_directive(
+            snake_file, "docker.io/reanahub/reana-env-root6:6.18.04", 1)
         snake_file.addline("resources:", 1)
         snake_file.addline('kubernetes_memory_limit="1Gi"', 2)
         snake_file.addline("shell:", 1)
@@ -416,8 +426,8 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
 
             snake_file.addline("output:", 1)
             snake_file.addline(f'"{job.short_uuid()}.done"', 2)
-            snake_file.addline("container:", 1)
-            snake_file.addline(f'"docker://{snakemake_rule["environment"]}"', 2)
+            self._write_environment_directive(
+                snake_file, snakemake_rule["environment"], 1)
             snake_file.addline("resources:", 1)
             compute_backend = snakemake_rule["compute_backend"]
             if job.use_eos() and use_kerberos:
