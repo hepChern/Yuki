@@ -91,6 +91,55 @@ def run_workflow(workflow_uuid, cores):
     subprocess.run(cmd, cwd=exec_dir, check=False)
 
 
+# ------ Environment Map ------ #
+@cli.group()
+def env_map():
+    """Manage conda_env_map environment re-interpretations."""
+
+
+@env_map.command('add')
+@click.argument('source')
+@click.argument('env_type')
+@click.argument('value')
+def env_map_add(source, env_type, value):
+    """Add or update an environment mapping.
+
+    SOURCE is the original environment string (e.g. docker:img).
+    TYPE is the target type (e.g. conda).
+    VALUE is the target environment value (e.g. env.yaml).
+    """
+    config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    from Yuki.utils.env_interpreter import EnvInterpreter
+    EnvInterpreter.add_mapping(config_path, source, env_type, value)
+    click.echo(f"Mapped '{source}' -> {env_type}:{value}")
+
+
+@env_map.command('list')
+def env_map_list():
+    """List all environment mappings."""
+    config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    from Yuki.utils.env_interpreter import EnvInterpreter
+    mappings = EnvInterpreter.list_mappings(config_path)
+    if not mappings:
+        click.echo("No environment mappings configured.")
+        return
+    for source, entry in mappings.items():
+        click.echo(f"{source} -> {entry['type']}:{entry['value']}")
+
+
+@env_map.command('remove')
+@click.argument('source')
+def env_map_remove(source):
+    """Remove an environment mapping.
+
+    SOURCE is the original environment string to unmap.
+    """
+    config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    from Yuki.utils.env_interpreter import EnvInterpreter
+    EnvInterpreter.remove_mapping(config_path, source)
+    click.echo(f"Removed mapping for '{source}'.")
+
+
 # Main
 def main():
     """Main entry point for Yuki CLI."""
