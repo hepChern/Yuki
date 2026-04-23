@@ -10,6 +10,7 @@ import os
 import shutil
 import json
 from CelebiChrono.utils import metadata
+from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
 from .status_constants import FAILED, DISSONANCE, translate_to_musical
 
@@ -176,26 +177,20 @@ class DryWorkflow(VWorkflow):
     def _resolve_conda_environment(self, environment):
         """Map a job environment string to a conda environment name.
 
-        The Snakefile runs on the workflow execution host, which may differ
-        from the Yuki Docker container.  Therefore only an environment *name*
-        (or an explicit user-supplied path) is written into the Snakefile so
-        that Snakemake resolves it against the host's active conda installation.
-
         Resolution order:
-        1. ``conda_env_map`` from ~/.Yuki/config.json (value used verbatim)
+        1. ``conda_env_map`` from ~/.Yuki/config.json (structured or plain)
         2. Strip common Docker prefixes and sanitise the image name
         """
         if not environment:
             environment = "docker.io/reanahub/reana-env-root6:6.18.04"
 
-        config = metadata.ConfigFile(
-            os.path.join(os.environ["HOME"], ".Yuki", "config.json"))
-        env_map = config.read_variable("conda_env_map", {})
-        if environment in env_map:
-            return env_map[environment]
+        config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+        resolved = EnvInterpreter.resolve(environment, config_path)
+        if resolved is not None:
+            return resolved
 
         env_name = environment
-        for prefix in ("docker://", "docker.io/"):
+        for prefix in ("docker://", "docker.io/", "docker:"):
             if env_name.startswith(prefix):
                 env_name = env_name[len(prefix):]
 
