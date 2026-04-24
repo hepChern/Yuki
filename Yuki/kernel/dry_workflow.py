@@ -14,6 +14,8 @@ from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
 from .status_constants import FAILED, DISSONANCE, translate_to_musical
 
+DEFAULT_ENVIRONMENT = "docker.io/reanahub/reana-env-root6:6.18.04"
+
 
 class DryWorkflow(VWorkflow):
     """Local/Dry-run implementation of VWorkflow."""
@@ -169,7 +171,15 @@ class DryWorkflow(VWorkflow):
         self.logger("[LOCAL] Copied: Snakefile")
 
     def _write_environment_directive(self, snake_file, environment, indent=1):
-        """Write a conda environment directive for local dry-run execution."""
+        """Write a conda environment directive for local dry-run execution.
+
+        Skips writing the directive for pure-copy procedures (setup, finalize,
+        rawdata, datalist, script) that do not need a conda environment.
+        """
+        if environment in ("rawdata", "datalist", "script"):
+            return
+        if environment == DEFAULT_ENVIRONMENT:
+            return
         conda_env = self._resolve_conda_environment(environment)
         snake_file.addline("conda:", indent)
         snake_file.addline(f'"{conda_env}"', indent + 1)
@@ -183,7 +193,7 @@ class DryWorkflow(VWorkflow):
         3. Sanitise the image name for use as a conda env name
         """
         if not environment:
-            environment = "docker.io/reanahub/reana-env-root6:6.18.04"
+            environment = DEFAULT_ENVIRONMENT
 
         config_path = os.path.join(
             os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki")),
