@@ -184,7 +184,10 @@ class DryWorkflow(VWorkflow):
         if not environment:
             environment = "docker.io/reanahub/reana-env-root6:6.18.04"
 
-        config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+        config_path = os.path.join(
+            os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki")),
+            "config.json"
+        )
         resolved = EnvInterpreter.resolve(environment, config_path)
         if resolved is not None:
             return resolved

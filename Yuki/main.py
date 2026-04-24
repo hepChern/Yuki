@@ -109,7 +109,8 @@ def env_map_add(source, env_type, value):
     TYPE is the target type (e.g. conda).
     VALUE is the target environment value (e.g. env.yaml).
     """
-    config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    yuki_home = os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
+    config_path = os.path.join(yuki_home, "config.json")
     try:
         EnvInterpreter.add_mapping(config_path, source, env_type, value)
         click.echo(f"Mapped '{source}' -> {env_type}:{value}")
@@ -120,7 +121,8 @@ def env_map_add(source, env_type, value):
 @env_map.command('list')
 def env_map_list():
     """List all environment mappings."""
-    config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    yuki_home = os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
+    config_path = os.path.join(yuki_home, "config.json")
     try:
         mappings = EnvInterpreter.list_mappings(config_path)
     except (ValueError, TypeError) as e:
@@ -139,7 +141,8 @@ def env_map_remove(source):
 
     SOURCE is the original environment string to unmap.
     """
-    config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    yuki_home = os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
+    config_path = os.path.join(yuki_home, "config.json")
     try:
         EnvInterpreter.remove_mapping(config_path, source)
         click.echo(f"Removed mapping for '{source}'.")
