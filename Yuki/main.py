@@ -7,6 +7,7 @@ import click
 from .server_main import server_start
 from .server_main import stop as server_stop
 from .server_main import status as server_status
+from Yuki.utils.env_interpreter import EnvInterpreter
 
 @click.group()
 @click.pass_context
@@ -98,9 +99,9 @@ def env_map():
 
 
 @env_map.command('add')
-@click.argument('source')
-@click.argument('env_type')
-@click.argument('value')
+@click.argument('source', type=str)
+@click.argument('env_type', type=str)
+@click.argument('value', type=str)
 def env_map_add(source, env_type, value):
     """Add or update an environment mapping.
 
@@ -109,17 +110,21 @@ def env_map_add(source, env_type, value):
     VALUE is the target environment value (e.g. env.yaml).
     """
     config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
-    from Yuki.utils.env_interpreter import EnvInterpreter
-    EnvInterpreter.add_mapping(config_path, source, env_type, value)
-    click.echo(f"Mapped '{source}' -> {env_type}:{value}")
+    try:
+        EnvInterpreter.add_mapping(config_path, source, env_type, value)
+        click.echo(f"Mapped '{source}' -> {env_type}:{value}")
+    except (ValueError, TypeError) as e:
+        raise click.ClickException(str(e)) from e
 
 
 @env_map.command('list')
 def env_map_list():
     """List all environment mappings."""
     config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
-    from Yuki.utils.env_interpreter import EnvInterpreter
-    mappings = EnvInterpreter.list_mappings(config_path)
+    try:
+        mappings = EnvInterpreter.list_mappings(config_path)
+    except (ValueError, TypeError) as e:
+        raise click.ClickException(str(e)) from e
     if not mappings:
         click.echo("No environment mappings configured.")
         return
@@ -128,16 +133,18 @@ def env_map_list():
 
 
 @env_map.command('remove')
-@click.argument('source')
+@click.argument('source', type=str)
 def env_map_remove(source):
     """Remove an environment mapping.
 
     SOURCE is the original environment string to unmap.
     """
     config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
-    from Yuki.utils.env_interpreter import EnvInterpreter
-    EnvInterpreter.remove_mapping(config_path, source)
-    click.echo(f"Removed mapping for '{source}'.")
+    try:
+        EnvInterpreter.remove_mapping(config_path, source)
+        click.echo(f"Removed mapping for '{source}'.")
+    except (ValueError, TypeError) as e:
+        raise click.ClickException(str(e)) from e
 
 
 # Main
