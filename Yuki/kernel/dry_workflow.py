@@ -179,7 +179,8 @@ class DryWorkflow(VWorkflow):
 
         Resolution order:
         1. ``conda_env_map`` from ~/.Yuki/config.json (structured or plain)
-        2. Strip common Docker prefixes and sanitise the image name
+        2. Strip common Docker prefixes and try lookup again
+        3. Sanitise the image name for use as a conda env name
         """
         if not environment:
             environment = "docker.io/reanahub/reana-env-root6:6.18.04"
@@ -188,16 +189,26 @@ class DryWorkflow(VWorkflow):
             os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki")),
             "config.json"
         )
+
+        # 1. Exact match
         resolved = EnvInterpreter.resolve(environment, config_path)
         if resolved is not None:
             return resolved
 
-        env_name = environment
+        # 2. Strip Docker prefixes and try again
+        stripped = environment
         for prefix in ("docker://", "docker.io/", "docker:"):
-            if env_name.startswith(prefix):
-                env_name = env_name[len(prefix):]
+            if stripped.startswith(prefix):
+                stripped = stripped[len(prefix):]
+                break
 
-        return env_name.replace("/", "_").replace(":", "_")
+        if stripped != environment:
+            resolved = EnvInterpreter.resolve(stripped, config_path)
+            if resolved is not None:
+                return resolved
+
+        # 3. Fallback: sanitise for use as conda env name
+        return stripped.replace("/", "_").replace(":", "_")
 
     def update_workflow_status(self):
         """Update workflow status from local execution."""
