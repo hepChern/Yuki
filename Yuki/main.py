@@ -66,16 +66,16 @@ def docker_run(image, yuki_dir, port):
 # ------ Run workflow ------ #
 @cli.command('run-workflow')
 @click.argument('workflow_uuid')
-@click.option('--cores', '-c', default='all', show_default=True,
+@click.option('--cores', '-j', default='all', show_default=True,
               help='Number of cores to pass to snakemake.')
 def run_workflow(workflow_uuid, cores):
     """Run a local workflow by its UUID.
 
     For dry-run workflows this changes to the local execution directory
-    (~/.Yuki/LocalWorkflows/<UUID>) and invokes snakemake with the
+    ($YUKIDIR/LocalWorkflows/<UUID>) and invokes snakemake with the
     conda backend enabled.
     """
-    yuki_home = os.path.join(os.environ["HOME"], ".Yuki")
+    yuki_home = os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
 
     exec_dir = os.path.join(yuki_home, "LocalWorkflows", workflow_uuid)
     if not os.path.isdir(exec_dir):
@@ -87,7 +87,7 @@ def run_workflow(workflow_uuid, cores):
         click.echo(f"No Snakefile found in {exec_dir}")
         raise click.ClickException(f"No Snakefile found in {exec_dir}")
 
-    cmd = ["snakemake", "--use-conda", "--cores", cores]
+    cmd = ["snakemake", "--use-conda", "-j", cores]
     click.echo(f"Running in {exec_dir}: {' '.join(cmd)}")
     subprocess.run(cmd, cwd=exec_dir, check=False)
 
