@@ -52,6 +52,7 @@ class SnakemakeMonitor:
         cmd = [
             "snakemake",
             "--use-conda",
+            "--conda-frontend", "conda",
             "-j", str(cores)
         ]
 
