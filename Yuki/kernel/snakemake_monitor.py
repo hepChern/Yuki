@@ -48,12 +48,11 @@ class SnakemakeMonitor:
         # Initial status: IN_MOVEMENT
         self._update_results(IN_MOVEMENT, 0, 0, {})
 
-        # Build snakemake command with JSON report
+        # Build snakemake command
         cmd = [
             "snakemake",
             "--use-conda",
-            "-j", str(cores),
-            "--report", self.snakemake_report
+            "-j", str(cores)
         ]
 
         try:
@@ -91,14 +90,8 @@ class SnakemakeMonitor:
     def _update_progress(self, logger=None):
         """Update progress from snakemake execution."""
         try:
-            # Check for snakemake report
-            if os.path.exists(self.snakemake_report):
-                with open(self.snakemake_report, 'r', encoding='utf-8') as f:
-                    report = json.load(f)
-                    self._process_snakemake_report(report, logger)
-            else:
-                # Count .done marker files as fallback
-                self._count_completed_jobs(logger)
+            # Count .done marker files as progress indicator
+            self._count_completed_jobs(logger)
         except Exception as e:
             if logger:
                 logger(f"[SNAKEMAKE] Error updating progress: {e}")
@@ -191,27 +184,6 @@ class SnakemakeMonitor:
     def _finalize_results(self, logger=None):
         """Finalize results after successful execution."""
         try:
-            # Parse final report if available
-            logs = {}
-            if os.path.exists(self.snakemake_report):
-                with open(self.snakemake_report, 'r', encoding='utf-8') as f:
-                    report = json.load(f)
-                    jobs = report.get("jobs", {})
-                    logs = {
-                        str(job_id): {
-                            "status": job_info.get("status"),
-                            "log": job_info.get("log", ""),
-                            "benchmark": job_info.get("benchmark", {}),
-                        }
-                        for job_id, job_info in jobs.items()
-                    }
-
-            # Read snakemake log
-            snakemake_log_content = ""
-            if os.path.exists(self.snakemake_log):
-                with open(self.snakemake_log, 'r', encoding='utf-8') as f:
-                    snakemake_log_content = f.read()
-
             # Count final job count
             total_jobs = 0
             workflow_info_path = os.path.join(self.local_exec_path, "workflow_info.json")
@@ -221,6 +193,12 @@ class SnakemakeMonitor:
                     steps = workflow_info.get("workflow", {}).get("specification", {}).get("steps", [])
                     total_jobs = len(steps)
 
+            # Read snakemake log
+            snakemake_log_content = ""
+            if os.path.exists(self.snakemake_log):
+                with open(self.snakemake_log, 'r', encoding='utf-8') as f:
+                    snakemake_log_content = f.read()
+
             # Update results with CODA status
             results = {
                 "status": CODA,
@@ -228,17 +206,12 @@ class SnakemakeMonitor:
                     "total": total_jobs,
                     "completed": total_jobs
                 },
-                "logs": logs,
                 "execution_time": self._get_execution_time(),
-                "snakemake_log": snakemake_log_content[:5000]  # First 5000 chars
+                "snakemake_log": snakemake_log_content[-3000:] if snakemake_log_content else ""
             }
 
             results_file = metadata.ConfigFile(self.results_file)
             results_file.write_variable("results", results)
-
-            # Also store detailed logs
-            log_file = metadata.ConfigFile(self.log_file)
-            log_file.write_variable("logs", logs)
 
             if logger:
                 logger(f"[SNAKEMAKE] Execution completed successfully")
