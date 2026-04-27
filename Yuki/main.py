@@ -69,16 +69,20 @@ def docker_run(image, yuki_dir, port):
 @click.option('--cores', '-j', default='all', show_default=True,
               help='Number of cores to pass to snakemake.')
 def run_workflow(workflow_uuid, cores):
-    """Run a local workflow by its UUID with status tracking.
+    """Run a local workflow by its UUID with file staging and status tracking.
 
-    For dry-run workflows this changes to the local execution directory
-    ($YUKIDIR/LocalWorkflows/<UUID>) and invokes snakemake with the
-    conda backend enabled. Status is tracked and written to
-    $YUKIDIR/Workflows/<project>/<uuid>/results.json for integration
-    with the Flask API.
+    For dry-run workflows this:
+    1. Stages in files from Storage to LocalWorkflows using hard links
+    2. Executes snakemake with conda environment support
+    3. Stages out results back to Storage
+    4. Tracks status in the Flask API via results.json
+
+    Files are copied using hard links when on the same filesystem for
+    performance, with automatic fallback to regular copy for cross-filesystem.
     """
     import json
     from Yuki.kernel.snakemake_monitor import SnakemakeMonitor
+    from Yuki.kernel.file_staging import FileStager
 
     yuki_home = os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
 
@@ -117,19 +121,40 @@ def run_workflow(workflow_uuid, cores):
         timestamp = os.popen('date +"%Y-%m-%d %H:%M:%S"').read().strip()
         click.echo(f"[{timestamp}] {msg}")
 
+    logger(f"Workflow UUID: {workflow_uuid}")
+    logger(f"Project UUID: {project_uuid}")
+    logger(f"Workflow path: {workflow_path}")
+    logger(f"Execution path: {local_exec_dir}")
+
+    # Stage in files with hard links
+    logger("[STAGE_IN] Starting file staging...")
+    stager = FileStager(workflow_path, local_exec_dir, project_uuid, logger)
+    if not stager.stage_in():
+        click.echo("File staging failed")
+        raise click.ClickException("File staging failed")
+
     # Initialize monitor and execute snakemake
     monitor = SnakemakeMonitor(workflow_path, local_exec_dir)
-    click.echo(f"Running snakemake in {local_exec_dir}")
-    click.echo(f"Status updates will be written to {workflow_path}/results.json")
+    logger(f"[SNAKEMAKE] Running snakemake with {cores} cores")
 
     exit_code = monitor.execute_snakemake(cores, logger)
 
+    # Stage out results
     if exit_code == 0:
-        click.echo(f"Workflow {workflow_uuid} completed successfully")
-        click.echo(f"View status at: /status/{project_uuid}/<impression>")
+        logger("[STAGE_OUT] Starting result collection...")
+        if not stager.stage_out():
+            logger("Result collection failed (but workflow succeeded)")
+        else:
+            logger("[STAGE_OUT] Results successfully collected")
+
+    # Final status
+    if exit_code == 0:
+        click.echo(f"\n✓ Workflow {workflow_uuid} completed successfully")
+        click.echo(f"  Results stored in: {workflow_path}/results.json")
+        click.echo(f"  Output files in: ~/.Yuki/Storage/{project_uuid}/*/stageout/")
     else:
-        click.echo(f"Workflow {workflow_uuid} failed with exit code {exit_code}")
-        click.echo(f"Check logs at {workflow_path}/log.json")
+        click.echo(f"\n✗ Workflow {workflow_uuid} failed with exit code {exit_code}")
+        click.echo(f"  Check logs at: {workflow_path}/log.json")
 
     return exit_code
 
