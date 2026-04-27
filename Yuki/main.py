@@ -69,27 +69,69 @@ def docker_run(image, yuki_dir, port):
 @click.option('--cores', '-j', default='all', show_default=True,
               help='Number of cores to pass to snakemake.')
 def run_workflow(workflow_uuid, cores):
-    """Run a local workflow by its UUID.
+    """Run a local workflow by its UUID with status tracking.
 
     For dry-run workflows this changes to the local execution directory
     ($YUKIDIR/LocalWorkflows/<UUID>) and invokes snakemake with the
-    conda backend enabled.
+    conda backend enabled. Status is tracked and written to
+    $YUKIDIR/Workflows/<project>/<uuid>/results.json for integration
+    with the Flask API.
     """
+    import json
+    from Yuki.kernel.snakemake_monitor import SnakemakeMonitor
+
     yuki_home = os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
 
-    exec_dir = os.path.join(yuki_home, "LocalWorkflows", workflow_uuid)
-    if not os.path.isdir(exec_dir):
+    local_exec_dir = os.path.join(yuki_home, "LocalWorkflows", workflow_uuid)
+    if not os.path.isdir(local_exec_dir):
         click.echo(f"Workflow {workflow_uuid} not found.")
         raise click.ClickException(f"Workflow {workflow_uuid} not found.")
 
-    snakefile_path = os.path.join(exec_dir, "Snakefile")
+    snakefile_path = os.path.join(local_exec_dir, "Snakefile")
     if not os.path.exists(snakefile_path):
-        click.echo(f"No Snakefile found in {exec_dir}")
-        raise click.ClickException(f"No Snakefile found in {exec_dir}")
+        click.echo(f"No Snakefile found in {local_exec_dir}")
+        raise click.ClickException(f"No Snakefile found in {local_exec_dir}")
 
-    cmd = ["snakemake", "--use-conda", "-j", cores]
-    click.echo(f"Running in {exec_dir}: {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=exec_dir, check=False)
+    # Find the workflow in the Workflows directory to get project_uuid
+    workflows_dir = os.path.join(yuki_home, "Workflows")
+    workflow_path = None
+    project_uuid = None
+
+    if os.path.isdir(workflows_dir):
+        for proj_dir in os.listdir(workflows_dir):
+            proj_path = os.path.join(workflows_dir, proj_dir)
+            if not os.path.isdir(proj_path):
+                continue
+            potential_workflow = os.path.join(proj_path, workflow_uuid)
+            if os.path.isdir(potential_workflow):
+                workflow_path = potential_workflow
+                project_uuid = proj_dir
+                break
+
+    if not workflow_path:
+        click.echo(f"Workflow {workflow_uuid} not found in $YUKIDIR/Workflows/")
+        raise click.ClickException(f"Workflow not found")
+
+    # Create logger function
+    def logger(msg):
+        timestamp = os.popen('date +"%Y-%m-%d %H:%M:%S"').read().strip()
+        click.echo(f"[{timestamp}] {msg}")
+
+    # Initialize monitor and execute snakemake
+    monitor = SnakemakeMonitor(workflow_path, local_exec_dir)
+    click.echo(f"Running snakemake in {local_exec_dir}")
+    click.echo(f"Status updates will be written to {workflow_path}/results.json")
+
+    exit_code = monitor.execute_snakemake(cores, logger)
+
+    if exit_code == 0:
+        click.echo(f"Workflow {workflow_uuid} completed successfully")
+        click.echo(f"View status at: /status/{project_uuid}/<impression>")
+    else:
+        click.echo(f"Workflow {workflow_uuid} failed with exit code {exit_code}")
+        click.echo(f"Check logs at {workflow_path}/log.json")
+
+    return exit_code
 
 
 # ------ Environment Map ------ #
