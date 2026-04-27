@@ -113,7 +113,7 @@ class FileStager:
         """
         Stage input files from Storage to LocalWorkflows.
 
-        Reads workflow_info.json to get job information, then copies all
+        Reads workflow config to get actual job UUIDs, then copies all
         necessary files using hard links.
 
         Returns:
@@ -122,23 +122,25 @@ class FileStager:
         self._log("[FILE_STAGING] Starting stage-in...")
 
         try:
-            # Read workflow_info.json to get job list
-            workflow_info_path = os.path.join(self.local_exec_path, "workflow_info.json")
-            if not os.path.exists(workflow_info_path):
-                self._log("[FILE_STAGING] No workflow_info.json found")
+            # Read workflow config to get actual job UUIDs
+            config_path = os.path.join(self.workflow_path, "config.json")
+            if not os.path.exists(config_path):
+                self._log("[FILE_STAGING] No workflow config.json found")
                 return False
 
-            with open(workflow_info_path, 'r', encoding='utf-8') as f:
-                workflow_info = json.load(f)
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
 
-            steps = workflow_info.get("workflow", {}).get("specification", {}).get("steps", [])
-            total_steps = len(steps)
+            jobs_info = config.get("jobs_info", {})
+            if not jobs_info:
+                self._log("[FILE_STAGING] No jobs_info in workflow config")
+                return False
 
-            for step_idx, step in enumerate(steps):
-                step_name = step.get("name", "")
-                job_uuid = step_name[5:] if step_name.startswith("step_") else step_name
+            total_jobs = len(jobs_info)
+            self._log(f"[FILE_STAGING] Found {total_jobs} jobs in workflow")
 
-                self._log(f"[FILE_STAGING] [{step_idx + 1}/{total_steps}] Processing job: {job_uuid}")
+            for job_idx, (job_uuid, job_data) in enumerate(jobs_info.items()):
+                self._log(f"[FILE_STAGING] [{job_idx + 1}/{total_jobs}] Processing job: {job_uuid}")
 
                 # Copy job files from Storage
                 impression_dir = os.path.join(self.storage_dir, job_uuid)
@@ -176,15 +178,17 @@ class FileStager:
             return True
 
         except Exception as e:
+            import traceback
             self._log(f"[FILE_STAGING] Stage-in failed: {e}")
+            self._log(f"[FILE_STAGING] Traceback: {traceback.format_exc()}")
             return False
 
     def stage_out(self):
         """
         Copy execution results from LocalWorkflows back to Storage.
 
-        Copies stageout and logs from execution directory to the job impressions
-        in Storage.
+        Reads workflow config to get actual job UUIDs, then copies results
+        and logs back to Storage.
 
         Returns:
             True if successful, False otherwise
@@ -192,55 +196,34 @@ class FileStager:
         self._log("[FILE_STAGING] Starting stage-out...")
 
         try:
-            # Read workflow_info.json to get job list
-            workflow_info_path = os.path.join(self.local_exec_path, "workflow_info.json")
-            if not os.path.exists(workflow_info_path):
-                self._log("[FILE_STAGING] No workflow_info.json found")
+            # Read workflow config to get actual job UUIDs
+            config_path = os.path.join(self.workflow_path, "config.json")
+            if not os.path.exists(config_path):
+                self._log("[FILE_STAGING] No workflow config.json found")
                 return False
 
-            with open(workflow_info_path, 'r', encoding='utf-8') as f:
-                workflow_info = json.load(f)
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
 
-            steps = workflow_info.get("workflow", {}).get("specification", {}).get("steps", [])
-            total_steps = len(steps)
+            jobs_info = config.get("jobs_info", {})
+            if not jobs_info:
+                self._log("[FILE_STAGING] No jobs_info in workflow config")
+                return False
 
-            for step_idx, step in enumerate(steps):
-                step_name = step.get("name", "")
-                job_uuid = step_name[5:] if step_name.startswith("step_") else step_name
+            machine_id = config.get("machine_id", "default")
+            self._log(f"[FILE_STAGING] Using machine_id: {machine_id}")
 
-                self._log(f"[FILE_STAGING] [{step_idx + 1}/{total_steps}] Collecting results for: {job_uuid}")
+            total_jobs = len(jobs_info)
+
+            for job_idx, (job_uuid, job_data) in enumerate(jobs_info.items()):
+                self._log(f"[FILE_STAGING] [{job_idx + 1}/{total_jobs}] Collecting results for: {job_uuid}")
 
                 # Get the execution directory for this job
                 exec_job_dir = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}")
                 impression_dir = os.path.join(self.storage_dir, job_uuid)
 
-                # Determine machine_id (use the one from storage if it exists)
-                machine_id = None
-
-                # Try to find an existing machine_id in the impression
-                if os.path.isdir(impression_dir):
-                    for entry in os.listdir(impression_dir):
-                        entry_path = os.path.join(impression_dir, entry)
-                        if os.path.isdir(entry_path) and entry != "contents" and entry != "rawdata":
-                            machine_id = entry
-                            break
-
-                if not machine_id:
-                    # Use the machine_id from workflow config
-                    config_path = os.path.join(self.workflow_path, "config.json")
-                    if os.path.exists(config_path):
-                        try:
-                            with open(config_path, 'r') as f:
-                                config = json.load(f)
-                                machine_id = config.get("machine_id", "default")
-                        except Exception as e:
-                            self._log(f"[FILE_STAGING] Error reading config: {e}")
-                            machine_id = "default"
-                    else:
-                        machine_id = "default"
-
-                self._log(f"[FILE_STAGING] Using machine_id: {machine_id}")
                 self._log(f"[FILE_STAGING] Impression dir: {impression_dir}")
+                self._log(f"[FILE_STAGING] Execution dir: {exec_job_dir}")
 
                 # Copy stageout files back to Storage
                 src_stageout = os.path.join(exec_job_dir, "stageout")
