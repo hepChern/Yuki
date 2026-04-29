@@ -48,7 +48,9 @@ def docker():
 @click.option('--port', '-p', envvar='YUKIPORT',
               default='3315', show_default=True,
               help='Host port to map to container port 3315 (env: YUKIPORT).')
-def docker_run(image, yuki_dir, port):
+@click.option('--dev-dir',
+              help='Mount local Yuki source directory as /app/Yuki:ro for development.')
+def docker_run(image, yuki_dir, port, dev_dir):
     """Run a Yuki Docker container.
 
     IMAGE is the Docker image name (default: yuki:latest).
@@ -58,8 +60,13 @@ def docker_run(image, yuki_dir, port):
         'docker', 'run', '-it', '-d',
         '-v', f'{yuki_dir}:/root/.Yuki',
         '-p', f'{port}:3315',
-        image
     ]
+    if dev_dir:
+        dev_dir = os.path.expanduser(dev_dir)
+        if not os.path.isdir(dev_dir):
+            raise click.ClickException(f"Development directory does not exist: {dev_dir}")
+        cmd.extend(['-v', f'{dev_dir}:/app/Yuki:ro'])
+    cmd.append(image)
     click.echo(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
