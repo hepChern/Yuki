@@ -130,11 +130,11 @@ class DryWorkflow(VWorkflow):
                             filename
                         )
                         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                        shutil.copy2(src_path, dst_path)
-                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Copied rawdata "
+                        link_method = self._link_or_copy_input(src_path, dst_path)
+                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] {link_method} rawdata "
                                      f"{f_idx+1}/{total_raw}: {filename}")
 
-            # Handle input jobs (copy from dependency workflows)
+            # Handle input jobs (link from dependency workflows, fallback to copy)
             elif job.is_input:
                 impression = job.path.split("/")[-1]
                 src_stageout = os.path.join(
@@ -159,8 +159,8 @@ class DryWorkflow(VWorkflow):
                             filename
                         )
                         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                        shutil.copy2(src_path, dst_path)
-                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Copied input "
+                        link_method = self._link_or_copy_input(src_path, dst_path)
+                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] {link_method} input "
                                      f"{f_idx+1}/{total_input}: {filename}")
 
         # Copy Snakefile
@@ -169,6 +169,31 @@ class DryWorkflow(VWorkflow):
             os.path.join(self.local_exec_path, "Snakefile")
         )
         self.logger("[LOCAL] Copied: Snakefile")
+
+    @staticmethod
+    def _link_or_copy_input(src_path, dst_path):
+        """Try symlink (read-only), then hardlink, then copy for input files."""
+        # Try symlink first
+        try:
+            os.symlink(src_path, dst_path)
+            try:
+                os.chmod(dst_path, 0o444, follow_symlinks=False)
+            except (NotImplementedError, OSError):
+                pass
+            return "Symlinked"
+        except OSError:
+            pass
+
+        # Try hardlink
+        try:
+            os.link(src_path, dst_path)
+            return "Hardlinked"
+        except OSError:
+            pass
+
+        # Fall back to copy
+        shutil.copy2(src_path, dst_path)
+        return "Copied"
 
     def _write_environment_directive(self, snake_file, environment, indent=1):
         """Write a conda environment directive for local dry-run execution.
