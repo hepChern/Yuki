@@ -99,11 +99,11 @@ class DryWorkflow(VWorkflow):
 
     def copy_files_local(self):  # pylint: disable=too-many-locals
         """Copy all files to local execution directory."""
+        stage_manifest = []
+
         total_jobs = len(self.jobs)
         for j_idx, job in enumerate(self.jobs):
-            # job_dir = os.path.join(self.local_exec_path, f"imp{job.short_uuid()}")
-
-            # Copy job files
+            # Copy job files (these are small metadata files - safe to copy eagerly)
             files = job.files()
             total_files = len(files)
             for f_idx, name in enumerate(files):
@@ -115,7 +115,7 @@ class DryWorkflow(VWorkflow):
                     self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Copied file "
                                  f"{f_idx+1}/{total_files}: {name}")
 
-            # Handle rawdata environment
+            # Record rawdata files for lazy staging (links resolved at run-workflow time)
             if job.environment() == "rawdata":
                 rawdata_path = os.path.join(job.path, "rawdata")
                 if os.path.exists(rawdata_path):
@@ -123,18 +123,21 @@ class DryWorkflow(VWorkflow):
                     total_raw = len(filelist)
                     for f_idx, filename in enumerate(filelist):
                         src_path = os.path.join(rawdata_path, filename)
-                        dst_path = os.path.join(
-                            self.local_exec_path,
+                        dst_rel = os.path.join(
                             f"imp{job.short_uuid()}",
                             "stageout",
                             filename
                         )
-                        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                        link_method = self._link_or_copy_input(src_path, dst_path)
-                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] {link_method} rawdata "
+                        stage_manifest.append({
+                            "type": "rawdata",
+                            "job_uuid": job.uuid,
+                            "src_path": src_path,
+                            "dst_rel": dst_rel,
+                        })
+                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Queued rawdata "
                                      f"{f_idx+1}/{total_raw}: {filename}")
 
-            # Handle input jobs (link from dependency workflows, fallback to copy)
+            # Record input files for lazy staging (links resolved at run-workflow time)
             elif job.is_input:
                 impression = job.path.split("/")[-1]
                 src_stageout = os.path.join(
@@ -152,16 +155,27 @@ class DryWorkflow(VWorkflow):
                     total_input = len(filelist)
                     for f_idx, filename in enumerate(filelist):
                         src_path = os.path.join(src_stageout, filename)
-                        dst_path = os.path.join(
-                            self.local_exec_path,
+                        dst_rel = os.path.join(
                             f"imp{job.short_uuid()}",
                             "stageout",
                             filename
                         )
-                        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                        link_method = self._link_or_copy_input(src_path, dst_path)
-                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] {link_method} input "
+                        stage_manifest.append({
+                            "type": "input",
+                            "job_uuid": job.uuid,
+                            "machine_id": job.machine_id,
+                            "src_path": src_path,
+                            "dst_rel": dst_rel,
+                        })
+                        self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Queued input "
                                      f"{f_idx+1}/{total_input}: {filename}")
+
+        # Write stage manifest for FileStager to process on the host
+        if stage_manifest:
+            manifest_path = os.path.join(self.local_exec_path, "stage_manifest.json")
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump({"entries": stage_manifest}, f, indent=2)
+            self.logger(f"[LOCAL] Stage manifest written: {len(stage_manifest)} entries")
 
         # Copy Snakefile
         shutil.copy2(
@@ -169,31 +183,6 @@ class DryWorkflow(VWorkflow):
             os.path.join(self.local_exec_path, "Snakefile")
         )
         self.logger("[LOCAL] Copied: Snakefile")
-
-    @staticmethod
-    def _link_or_copy_input(src_path, dst_path):
-        """Try symlink (read-only), then hardlink, then copy for input files."""
-        # Try symlink first
-        try:
-            os.symlink(src_path, dst_path)
-            try:
-                os.chmod(dst_path, 0o444, follow_symlinks=False)
-            except (NotImplementedError, OSError):
-                pass
-            return "Symlinked"
-        except OSError:
-            pass
-
-        # Try hardlink
-        try:
-            os.link(src_path, dst_path)
-            return "Hardlinked"
-        except OSError:
-            pass
-
-        # Fall back to copy
-        shutil.copy2(src_path, dst_path)
-        return "Copied"
 
     def _write_environment_directive(self, snake_file, environment, indent=1):
         """Write a conda environment directive for local dry-run execution.

@@ -35,6 +35,37 @@ class FileStager:
         if self.logger:
             self.logger(message)
 
+    @staticmethod
+    def _link_or_copy(src, dst):
+        """Try symlink (read-only), then hardlink, then copy.
+
+        Symlinks are attempted first because they are the cheapest option,
+        but they only work when source and destination share the same
+        filesystem namespace (i.e. when invoked from the host, not from
+        inside a Docker container whose paths differ from the host).
+        """
+        # Try symlink first
+        try:
+            os.symlink(src, dst)
+            try:
+                os.chmod(dst, 0o444, follow_symlinks=False)
+            except (NotImplementedError, OSError):
+                pass
+            return "Symlinked"
+        except OSError:
+            pass
+
+        # Try hardlink
+        try:
+            os.link(src, dst)
+            return "Hardlinked"
+        except OSError:
+            pass
+
+        # Fall back to copy
+        shutil.copy2(src, dst)
+        return "Copied"
+
     def _copy_with_hardlink(self, src, dst):
         """
         Copy file using hard links if on same filesystem, else regular copy.
@@ -175,6 +206,10 @@ class FileStager:
                                 self._log(f"[FILE_STAGING] Copied {count} input files from {machine_id}")
 
             self._log("[FILE_STAGING] Stage-in completed")
+
+            # Process stage manifest from dry workflow (files deferred to host-side staging)
+            self._process_stage_manifest()
+
             return True
 
         except Exception as e:
@@ -182,6 +217,63 @@ class FileStager:
             self._log(f"[FILE_STAGING] Stage-in failed: {e}")
             self._log(f"[FILE_STAGING] Traceback: {traceback.format_exc()}")
             return False
+
+    def _process_stage_manifest(self):
+        """
+        Process stage_manifest.json created by DryWorkflow.copy_files_local().
+
+        The manifest records files that should be staged on the host (not from
+        inside Docker) so that symlink and hardlink targets resolve correctly.
+        Falls back to reconstructing host-side Storage paths when the Docker-side
+        source path doesn't exist.
+        """
+        manifest_path = os.path.join(self.local_exec_path, "stage_manifest.json")
+        if not os.path.exists(manifest_path):
+            return
+
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+
+            entries = manifest.get("entries", [])
+            if not entries:
+                os.remove(manifest_path)
+                return
+
+            self._log(f"[FILE_STAGING] Processing stage manifest: {len(entries)} entries")
+
+            for entry in entries:
+                dst_path = os.path.join(self.local_exec_path, entry["dst_rel"])
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+
+                # Try the Docker-side source path first (works when HOME matches)
+                src_path = entry["src_path"]
+                if not os.path.exists(src_path):
+                    # Reconstruct from host-side Storage path
+                    basename = os.path.basename(entry["dst_rel"])
+                    if entry["type"] == "rawdata":
+                        src_path = os.path.join(
+                            self.storage_dir, entry["job_uuid"], "rawdata", basename
+                        )
+                    elif entry["type"] == "input":
+                        src_path = os.path.join(
+                            self.storage_dir, entry["job_uuid"],
+                            entry.get("machine_id", ""), "stageout", basename
+                        )
+
+                if os.path.exists(src_path):
+                    method = self._link_or_copy(src_path, dst_path)
+                    self._log(f"[FILE_STAGING] {method}: {os.path.basename(dst_path)}")
+                else:
+                    self._log(f"[FILE_STAGING] Source not found, skipping: {basename}")
+
+            os.remove(manifest_path)
+            self._log("[FILE_STAGING] Stage manifest processed and removed")
+
+        except Exception as e:
+            import traceback
+            self._log(f"[FILE_STAGING] Failed to process stage manifest: {e}")
+            self._log(f"[FILE_STAGING] Traceback: {traceback.format_exc()}")
 
     def stage_out(self):
         """
