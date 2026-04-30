@@ -2,16 +2,17 @@
 File staging utility for local workflow execution.
 
 Handles copying files from Storage to LocalWorkflows (stage in) and
-copying results back (stage out) using hard links when possible.
+copying results back (stage out) using CoW clones when possible.
 """
 import os
+import sys
 import json
 import shutil
 from pathlib import Path
 
 
 class FileStager:
-    """Handle file staging with hard-link optimization."""
+    """Handle file staging with CoW-clone optimization."""
 
     def __init__(self, workflow_path, local_exec_path, project_uuid, logger=None):
         """
@@ -31,20 +32,63 @@ class FileStager:
         self.storage_dir = os.path.join(self.yuki_home, "Storage", project_uuid)
 
     def _log(self, message):
-        """Log a message."""
+        """Log a message (always prints to stdout, also goes to logger if set)."""
+        print(message)
         if self.logger:
             self.logger(message)
 
     @staticmethod
-    def _link_or_copy(src, dst):
-        """Try symlink (read-only), then hardlink, then copy.
+    def _cow_clone(src, dst):
+        """Try Copy-on-Write clone via platform-specific APIs.
 
-        Symlinks are attempted first because they are the cheapest option,
-        but they only work when source and destination share the same
-        filesystem namespace (i.e. when invoked from the host, not from
-        inside a Docker container whose paths differ from the host).
+        Returns True on success, False on failure (caller should clean up dst).
         """
-        # Try symlink first
+        # macOS: clonefile(2) on APFS
+        if sys.platform == "darwin":
+            import ctypes
+            try:
+                libc = ctypes.CDLL("libc.dylib")
+                result = libc.clonefile(src.encode(), dst.encode(), 0)
+                if result == 0:
+                    return True
+            except (OSError, AttributeError):
+                pass
+            return False
+
+        # Linux: FICLONE ioctl (btrfs / XFS reflink)
+        if sys.platform == "linux":
+            import fcntl
+            FICLONE = 0x40049409
+            try:
+                with open(src, 'rb') as s:
+                    with open(dst, 'wb') as d:
+                        fcntl.ioctl(d.fileno(), FICLONE, s.fileno())
+                return True
+            except (OSError, IOError):
+                try:
+                    os.remove(dst)
+                except OSError:
+                    pass
+                return False
+
+        return False
+
+    @staticmethod
+    def _link_or_copy(src, dst):
+        """Try symlink, then CoW clone, then copy. Always sets dst read-only.
+
+        Input files are expected not to change, so the destination is always
+        made read-only regardless of the method.
+        """
+        # If src and dst are already the same file (e.g. already staged by
+        # stage_in), skip silently.
+        try:
+            if os.path.samefile(src, dst):
+                return "Already-staged"
+        except OSError:
+            pass
+
+        # 1. Try symlink (read-only reference to source)
         try:
             os.symlink(src, dst)
             try:
@@ -55,89 +99,68 @@ class FileStager:
         except OSError:
             pass
 
-        # Try hardlink
+        # 2. Try Copy-on-Write clone
+        if FileStager._cow_clone(src, dst):
+            try:
+                os.chmod(dst, 0o444)
+            except OSError:
+                pass
+            return "CoW-cloned"
+
+        # 3. Fall back to regular copy, then make read-only
+        shutil.copy2(src, dst)
         try:
-            os.link(src, dst)
-            return "Hardlinked"
+            os.chmod(dst, 0o444)
         except OSError:
             pass
-
-        # Fall back to copy
-        shutil.copy2(src, dst)
         return "Copied"
 
-    def _copy_with_hardlink(self, src, dst):
-        """
-        Copy file using hard links if on same filesystem, else regular copy.
-
-        Args:
-            src: Source file path
-            dst: Destination file path
+    def _stage_file(self, src, dst):
+        """Stage a single file: CoW clone, fall back to copy.
 
         Returns:
-            True if successful, False otherwise
+            Method string ("CoW-cloned", "Copied") or None on failure.
         """
         try:
-            # Ensure destination directory exists
             os.makedirs(os.path.dirname(dst), exist_ok=True)
 
-            # Check if src and dst are on same filesystem
-            try:
-                src_stat = os.stat(src)
-                dst_stat = os.stat(os.path.dirname(dst))
-                same_filesystem = src_stat.st_dev == dst_stat.st_dev
-            except (OSError, AttributeError):
-                same_filesystem = False
+            if os.path.exists(dst):
+                os.remove(dst)
 
-            # Try hard link if same filesystem
-            if same_filesystem:
-                try:
-                    # Remove destination if it exists
-                    if os.path.exists(dst):
-                        os.remove(dst)
-                    os.link(src, dst)
-                    return True
-                except (OSError, PermissionError):
-                    # Fall back to copy if hard link fails
-                    pass
+            if FileStager._cow_clone(src, dst):
+                return "CoW-cloned"
 
-            # Fall back to regular copy
             shutil.copy2(src, dst)
-            return True
+            return "Copied"
 
         except Exception as e:
-            self._log(f"[FILE_STAGING] Error copying {src} to {dst}: {e}")
-            return False
+            self._log(f"[FILE_STAGING] Error {src} -> {dst}: {e}")
+            return None
 
-    def _copy_directory_with_hardlinks(self, src_dir, dst_dir):
-        """
-        Copy directory tree using hard links where possible.
-
-        Args:
-            src_dir: Source directory
-            dst_dir: Destination directory
+    def _stage_directory(self, src_dir, dst_dir):
+        """Stage a directory tree (CoW clone or copy).
 
         Returns:
-            Number of files copied
+            Number of files staged.
         """
         count = 0
         try:
             for root, dirs, files in os.walk(src_dir):
-                # Create corresponding directories in destination
                 rel_root = os.path.relpath(root, src_dir)
                 dst_root = os.path.join(dst_dir, rel_root) if rel_root != '.' else dst_dir
                 os.makedirs(dst_root, exist_ok=True)
 
-                # Copy files
                 for file in files:
                     src_file = os.path.join(root, file)
                     dst_file = os.path.join(dst_root, file)
-                    if self._copy_with_hardlink(src_file, dst_file):
+                    method = self._stage_file(src_file, dst_file)
+                    if method:
+                        self._log(f"[FILE_STAGING]   {method}: {file}")
                         count += 1
 
             return count
         except Exception as e:
-            self._log(f"[FILE_STAGING] Error copying directory tree: {e}")
+            self._log(f"[FILE_STAGING] Error staging directory: {e}")
             return count
 
     def stage_in(self):
@@ -145,7 +168,7 @@ class FileStager:
         Stage input files from Storage to LocalWorkflows.
 
         Reads workflow config to get actual job UUIDs, then copies all
-        necessary files using hard links.
+        necessary files using CoW clones when possible.
 
         Returns:
             True if successful, False otherwise
@@ -180,14 +203,14 @@ class FileStager:
                     contents_dir = os.path.join(impression_dir, "contents")
                     if os.path.isdir(contents_dir):
                         staging_dir = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}")
-                        count = self._copy_directory_with_hardlinks(contents_dir, staging_dir)
+                        count = self._stage_directory(contents_dir, staging_dir)
                         self._log(f"[FILE_STAGING] Copied {count} job definition files")
 
                     # Copy rawdata if it exists
                     rawdata_dir = os.path.join(impression_dir, "rawdata")
                     if os.path.isdir(rawdata_dir):
                         staging_stageout = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}", "stageout")
-                        count = self._copy_directory_with_hardlinks(rawdata_dir, staging_stageout)
+                        count = self._stage_directory(rawdata_dir, staging_stageout)
                         self._log(f"[FILE_STAGING] Copied {count} rawdata files")
 
                     # Copy input files from previous job stageout
@@ -201,7 +224,7 @@ class FileStager:
                         stageout_dir = os.path.join(machine_path, "stageout")
                         if os.path.isdir(stageout_dir):
                             staging_stageout = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}", "stageout")
-                            count = self._copy_directory_with_hardlinks(stageout_dir, staging_stageout)
+                            count = self._stage_directory(stageout_dir, staging_stageout)
                             if count > 0:
                                 self._log(f"[FILE_STAGING] Copied {count} input files from {machine_id}")
 
@@ -223,7 +246,7 @@ class FileStager:
         Process stage_manifest.json created by DryWorkflow.copy_files_local().
 
         The manifest records files that should be staged on the host (not from
-        inside Docker) so that symlink and hardlink targets resolve correctly.
+        inside Docker) so that symlink targets resolve correctly.
         Falls back to reconstructing host-side Storage paths when the Docker-side
         source path doesn't exist.
         """
@@ -242,12 +265,13 @@ class FileStager:
 
             self._log(f"[FILE_STAGING] Processing stage manifest: {len(entries)} entries")
 
-            for entry in entries:
+            for idx, entry in enumerate(entries):
                 dst_path = os.path.join(self.local_exec_path, entry["dst_rel"])
                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
 
                 # Try the Docker-side source path first (works when HOME matches)
                 src_path = entry["src_path"]
+                resolved_from = "manifest"
                 if not os.path.exists(src_path):
                     # Reconstruct from host-side Storage path
                     basename = os.path.basename(entry["dst_rel"])
@@ -260,12 +284,16 @@ class FileStager:
                             self.storage_dir, entry["job_uuid"],
                             entry.get("machine_id", ""), "stageout", basename
                         )
+                    resolved_from = "storage"
 
                 if os.path.exists(src_path):
                     method = self._link_or_copy(src_path, dst_path)
-                    self._log(f"[FILE_STAGING] {method}: {os.path.basename(dst_path)}")
+                    self._log(f"[FILE_STAGING] [{idx+1}/{len(entries)}] {method}: "
+                              f"{entry['type']}/{os.path.basename(dst_path)} "
+                              f"(resolved via {resolved_from})")
                 else:
-                    self._log(f"[FILE_STAGING] Source not found, skipping: {basename}")
+                    self._log(f"[FILE_STAGING] [{idx+1}/{len(entries)}] SKIP source not found: "
+                              f"{entry.get('type', '?')}/{os.path.basename(dst_path)}")
 
             os.remove(manifest_path)
             self._log("[FILE_STAGING] Stage manifest processed and removed")
@@ -323,7 +351,7 @@ class FileStager:
                     dst_stageout = os.path.join(impression_dir, machine_id, "stageout")
                     self._log(f"[FILE_STAGING] Copying stageout from {src_stageout}")
                     self._log(f"[FILE_STAGING] Copying stageout to {dst_stageout}")
-                    count = self._copy_directory_with_hardlinks(src_stageout, dst_stageout)
+                    count = self._stage_directory(src_stageout, dst_stageout)
                     self._log(f"[FILE_STAGING] Copied {count} output files")
 
                     # Create downloaded marker
@@ -340,7 +368,7 @@ class FileStager:
                 if os.path.isdir(src_logs):
                     dst_logs = os.path.join(impression_dir, machine_id, "logs")
                     self._log(f"[FILE_STAGING] Copying logs to {dst_logs}")
-                    count = self._copy_directory_with_hardlinks(src_logs, dst_logs)
+                    count = self._stage_directory(src_logs, dst_logs)
                     self._log(f"[FILE_STAGING] Copied {count} log files")
 
                     # Create logs downloaded marker
