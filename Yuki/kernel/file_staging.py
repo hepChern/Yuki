@@ -206,27 +206,33 @@ class FileStager:
                         count = self._stage_directory(contents_dir, staging_dir)
                         self._log(f"[FILE_STAGING] Copied {count} job definition files")
 
-                    # Copy rawdata if it exists
-                    rawdata_dir = os.path.join(impression_dir, "rawdata")
-                    if os.path.isdir(rawdata_dir):
-                        staging_stageout = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}", "stageout")
-                        count = self._stage_directory(rawdata_dir, staging_stageout)
-                        self._log(f"[FILE_STAGING] Copied {count} rawdata files")
-
-                    # Copy input files from previous job stageout
-                    # Check all machines for this impression
-                    machines_dir = os.path.join(impression_dir)
-                    for machine_id in os.listdir(machines_dir):
-                        machine_path = os.path.join(machines_dir, machine_id)
-                        if not os.path.isdir(machine_path):
-                            continue
-
-                        stageout_dir = os.path.join(machine_path, "stageout")
-                        if os.path.isdir(stageout_dir):
+                    # If a stage manifest exists, rawdata and stageout files
+                    # are deferred to _process_stage_manifest() for host-side
+                    # symlink/CoW-clone resolution. Skip them here to avoid
+                    # double-staging.
+                    manifest_path = os.path.join(self.local_exec_path, "stage_manifest.json")
+                    if not os.path.exists(manifest_path):
+                        # Copy rawdata if it exists
+                        rawdata_dir = os.path.join(impression_dir, "rawdata")
+                        if os.path.isdir(rawdata_dir):
                             staging_stageout = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}", "stageout")
-                            count = self._stage_directory(stageout_dir, staging_stageout)
-                            if count > 0:
-                                self._log(f"[FILE_STAGING] Copied {count} input files from {machine_id}")
+                            count = self._stage_directory(rawdata_dir, staging_stageout)
+                            self._log(f"[FILE_STAGING] Copied {count} rawdata files")
+
+                        # Copy input files from previous job stageout
+                        # Check all machines for this impression
+                        machines_dir = os.path.join(impression_dir)
+                        for machine_id in os.listdir(machines_dir):
+                            machine_path = os.path.join(machines_dir, machine_id)
+                            if not os.path.isdir(machine_path):
+                                continue
+
+                            stageout_dir = os.path.join(machine_path, "stageout")
+                            if os.path.isdir(stageout_dir):
+                                staging_stageout = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}", "stageout")
+                                count = self._stage_directory(stageout_dir, staging_stageout)
+                                if count > 0:
+                                    self._log(f"[FILE_STAGING] Copied {count} input files from {machine_id}")
 
             self._log("[FILE_STAGING] Stage-in completed")
 

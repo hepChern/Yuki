@@ -107,6 +107,10 @@ class DryWorkflow(VWorkflow):
             files = job.files()
             total_files = len(files)
             for f_idx, name in enumerate(files):
+                # Data files under stageout/ are deferred to the manifest
+                # so that symlink/CoW-clone targets resolve on the host
+                if "/stageout/" in name:
+                    continue
                 src_path = os.path.join(job.path, "contents", name[8:])
                 dst_path = os.path.join(self.local_exec_path, "imp" + name)
                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
