@@ -30,6 +30,7 @@ class FileStager:
         self.logger = logger
         self.yuki_home = os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
         self.storage_dir = os.path.join(self.yuki_home, "Storage", project_uuid)
+        self._staged_in = set()  # paths in LocalWorkflows staged by manifest
 
     def _log(self, message):
         """Log a message (always prints to stdout, also goes to logger if set)."""
@@ -137,8 +138,11 @@ class FileStager:
             self._log(f"[FILE_STAGING] Error {src} -> {dst}: {e}")
             return None
 
-    def _stage_directory(self, src_dir, dst_dir):
+    def _stage_directory(self, src_dir, dst_dir, skip_src_paths=None):
         """Stage a directory tree (CoW clone or copy).
+
+        Args:
+            skip_src_paths: Optional set of source file paths to skip.
 
         Returns:
             Number of files staged.
@@ -152,6 +156,8 @@ class FileStager:
 
                 for file in files:
                     src_file = os.path.join(root, file)
+                    if skip_src_paths and src_file in skip_src_paths:
+                        continue
                     dst_file = os.path.join(dst_root, file)
                     method = self._stage_file(src_file, dst_file)
                     if method:
@@ -294,6 +300,7 @@ class FileStager:
 
                 if os.path.exists(src_path):
                     method = self._link_or_copy(src_path, dst_path)
+                    self._staged_in.add(dst_path)
                     self._log(f"[FILE_STAGING] [{idx+1}/{len(entries)}] {method}: "
                               f"{entry['type']}/{os.path.basename(dst_path)} "
                               f"(resolved via {resolved_from})")
@@ -357,7 +364,8 @@ class FileStager:
                     dst_stageout = os.path.join(impression_dir, machine_id, "stageout")
                     self._log(f"[FILE_STAGING] Copying stageout from {src_stageout}")
                     self._log(f"[FILE_STAGING] Copying stageout to {dst_stageout}")
-                    count = self._stage_directory(src_stageout, dst_stageout)
+                    count = self._stage_directory(src_stageout, dst_stageout,
+                                                  skip_src_paths=self._staged_in)
                     self._log(f"[FILE_STAGING] Copied {count} output files")
 
                     # Create downloaded marker
