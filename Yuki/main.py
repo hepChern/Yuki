@@ -49,7 +49,7 @@ def docker():
               default='3315', show_default=True,
               help='Host port to map to container port 3315 (env: YUKIPORT).')
 @click.option('--dev-dir',
-              help='Mount local Yuki source directory as /app/Yuki:ro for development.')
+              help='Mount local Yuki source directory as /app/Yuki for development.')
 def docker_run(image, yuki_dir, port, dev_dir):
     """Run a Yuki Docker container.
 
@@ -65,10 +65,54 @@ def docker_run(image, yuki_dir, port, dev_dir):
         dev_dir = os.path.expanduser(dev_dir)
         if not os.path.isdir(dev_dir):
             raise click.ClickException(f"Development directory does not exist: {dev_dir}")
-        cmd.extend(['-v', f'{dev_dir}:/app/Yuki:ro'])
+        cmd.extend(['-v', f'{dev_dir}:/mnt/yuki-source:ro'])
     cmd.append(image)
     click.echo(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
+
+
+@docker.command('restart')
+@click.argument('container', required=False)
+def docker_restart(container):
+    """Sync mounted source into a running Yuki container and restart the server.
+
+    If CONTAINER is omitted, uses the first running container with
+    /mnt/yuki-source mounted (or the yuki-dev container name).
+    """
+    if container is None:
+        result = subprocess.run(
+            ['docker', 'ps', '--filter', 'volume=/mnt/yuki-source',
+             '--format', '{{.Names}}'],
+            capture_output=True, text=True
+        )
+        containers = result.stdout.strip().split('\n')
+        containers = [c for c in containers if c]
+        if not containers:
+            result = subprocess.run(
+                ['docker', 'ps', '--filter', 'name=yuki-dev',
+                 '--format', '{{.Names}}'],
+                capture_output=True, text=True
+            )
+            containers = result.stdout.strip().split('\n')
+            containers = [c for c in containers if c]
+        if not containers:
+            raise click.ClickException(
+                "No running Yuki dev container found. "
+                "Specify one: yuki docker restart <container>"
+            )
+        container = containers[0]
+
+    click.echo(f"Syncing source into {container}...")
+    subprocess.run(
+        ['docker', 'exec', container, 'cp', '-r', '/mnt/yuki-source/.', '/app/Yuki/'],
+        check=True
+    )
+    click.echo("Restarting container...")
+    subprocess.run(
+        ['docker', 'restart', container],
+        check=True
+    )
+    click.echo("Done.")
 
 # ------ Run workflow ------ #
 @cli.command('run-workflow')

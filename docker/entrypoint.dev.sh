@@ -28,8 +28,9 @@ EOF
 
 echo "RabbitMQ is up and running."
 
-# Ensure Yuki is installed in editable mode from the mounted source
-if [ -f /app/Yuki/pyproject.toml ]; then
+# Copy mounted source to writable /app/Yuki, then install in editable mode
+if [ -f /mnt/yuki-source/pyproject.toml ]; then
+    cp -r /mnt/yuki-source/. /app/Yuki/
     cd /app/Yuki
     pip install -e . >/dev/null 2>&1
     cd /app
