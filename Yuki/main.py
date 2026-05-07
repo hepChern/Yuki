@@ -210,6 +210,53 @@ def run_workflow(workflow_uuid, cores):
     return exit_code
 
 
+# ------ Impression Import/Export ------ #
+@cli.command('impression-export')
+@click.argument('impressions', nargs=-1, required=True)
+@click.option('--project-uuid', required=True,
+              help='Project UUID that the impressions belong to.')
+@click.option('--output', '-o', required=True,
+              help='Output tar.gz file path.')
+@click.option('--yuki-dir', '-d', envvar='YUKIDIR',
+              default='~/.Yuki', show_default=True,
+              help='Yuki storage directory (env: YUKIDIR).')
+def impression_export(impressions, project_uuid, output, yuki_dir):
+    """Export one or more impressions to a tar.gz archive.
+
+    IMPRESSIONS are one or more 32-character hex impression UUIDs.
+    """
+    from Yuki.kernel.impression_transfer import export_impressions
+
+    yuki_dir = os.path.expanduser(yuki_dir)
+    export_impressions(project_uuid, list(impressions), output,
+                       yuki_dir=yuki_dir)
+    click.echo(f"Exported {len(impressions)} impression(s) to: {output}")
+
+
+@cli.command('impression-import')
+@click.argument('tar_file', type=click.Path(exists=True))
+@click.option('--project-uuid', required=True,
+              help='Target project UUID to import into.')
+@click.option('--yuki-dir', '-d', envvar='YUKIDIR',
+              default='~/.Yuki', show_default=True,
+              help='Yuki storage directory (env: YUKIDIR).')
+def impression_import(tar_file, project_uuid, yuki_dir):
+    """Import impressions from a tar.gz archive.
+
+    TAR_FILE is the path to the tar.gz archive.
+    """
+    from Yuki.kernel.impression_transfer import import_impression
+
+    yuki_dir = os.path.expanduser(yuki_dir)
+    result = import_impression(project_uuid, tar_file, yuki_dir=yuki_dir)
+
+    click.echo(f"Imported {result['count']} impression(s): "
+               f"{', '.join(result['imported'])}")
+    if result['skipped']:
+        for s in result['skipped']:
+            click.echo(f"  Skipped: {s['name']} — {s['reason']}")
+
+
 # ------ Environment Map ------ #
 @cli.group()
 def env_map():
