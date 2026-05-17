@@ -185,7 +185,11 @@ def run_workflow(workflow_uuid, cores):
         raise click.ClickException("File staging failed")
 
     # Initialize monitor and execute snakemake
-    monitor = SnakemakeMonitor(workflow_path, local_exec_dir)
+    monitor = SnakemakeMonitor(
+        workflow_path, local_exec_dir,
+        project_uuid=project_uuid,
+        workflow_uuid=workflow_uuid,
+    )
     logger(f"[SNAKEMAKE] Running snakemake with {cores} cores")
 
     exit_code = monitor.execute_snakemake(cores, logger)
