@@ -238,6 +238,20 @@ class DryWorkflow(VWorkflow):
         # 3. Fallback: sanitise for use as conda env name
         return stripped.replace("/", "_").replace(":", "_")
 
+    def propagate_job_statuses(self, workflow_terminal=False):
+        """Reconcile each VJob's status.json with on-disk markers.
+
+        See spec at docs/superpowers/specs/2026-05-17-dry-workflow-status-propagation-design.md
+        for the full classification table.
+        """
+        from .status_constants import CODA
+
+        for job in self.jobs:
+            short = job.short_uuid()
+            done_path = os.path.join(self.local_exec_path, f"{short}.done")
+            if os.path.exists(done_path):
+                job.set_status(CODA, "Local execution completed")
+
     def update_workflow_status(self):
         """Update workflow status from local execution."""
         try:
