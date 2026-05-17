@@ -240,12 +240,16 @@ class DryWorkflow(VWorkflow):
 
     def propagate_job_statuses(self, workflow_terminal=False):
         """Reconcile each VJob's status.json with on-disk markers."""
-        from .status_constants import CODA, FAILED
+        from .status_constants import (
+            CODA, FAILED, is_terminal_status, translate_to_musical
+        )
 
         for job in self.jobs:
             if job.is_input:
                 continue
             if job.job_type() == "algorithm":
+                continue
+            if is_terminal_status(translate_to_musical(job.status())):
                 continue
 
             short = job.short_uuid()

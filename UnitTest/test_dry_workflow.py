@@ -157,6 +157,23 @@ class TestDryWorkflowPropagation(unittest.TestCase):
         input_job.set_status.assert_not_called()
         algo_job.set_status.assert_not_called()
 
+    def test_propagate_does_not_churn_terminal_status(self):
+        from Yuki.kernel.status_constants import CODA, FINAL_NOTE, FAILED
+        coda_job = self._make_job("a" * 32, status_value=CODA)
+        final_job = self._make_job("b" * 32, status_value=FINAL_NOTE)
+        failed_job = self._make_job("c" * 32, status_value=FAILED)
+        self.workflow.jobs = [coda_job, final_job, failed_job]
+
+        # All have .done so propagate WOULD touch them otherwise.
+        for j in self.workflow.jobs:
+            self._touch_done(j.short_uuid())
+
+        self.workflow.propagate_job_statuses(workflow_terminal=True)
+
+        coda_job.set_status.assert_not_called()
+        final_job.set_status.assert_not_called()
+        failed_job.set_status.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
