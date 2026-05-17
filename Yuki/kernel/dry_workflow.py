@@ -362,6 +362,9 @@ class DryWorkflow(VWorkflow):
             results_file = metadata.ConfigFile(path)
             results_file.write_variable("results", results)
 
+            workflow_terminal = status in ("finished", "failed")
+            self.propagate_job_statuses(workflow_terminal=workflow_terminal)
+
         except Exception as e:
             self.logger(f"[LOCAL] Failed to update workflow status: {e}")
 
