@@ -52,7 +52,7 @@ def registerrunner():
         runner = request.form["runner"]
         runner_url = request.form["url"]
         runner_token = request.form["token"]
-        backend_type = request.form.get("backend_type", "dry")
+        backend_type = request.form.get("backend_type", "native")
         runner_id = csys.generate_uuid()
 
         config_file = config.get_config_file()

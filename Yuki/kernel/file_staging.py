@@ -242,7 +242,7 @@ class FileStager:
 
             self._log("[FILE_STAGING] Stage-in completed")
 
-            # Process stage manifest from dry workflow (files deferred to host-side staging)
+            # Process stage manifest from native workflow (files deferred to host-side staging)
             self._process_stage_manifest()
 
             return True
@@ -255,7 +255,7 @@ class FileStager:
 
     def _process_stage_manifest(self):
         """
-        Process stage_manifest.json created by DryWorkflow.copy_files_local().
+        Process stage_manifest.json created by NativeWorkflow.copy_files_local().
 
         The manifest records files that should be staged on the host (not from
         inside Docker) so that symlink targets resolve correctly.

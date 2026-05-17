@@ -2,7 +2,7 @@
 
 ## Motivation
 
-The dry-run/local workflow backend (`Yuki/kernel/dry_workflow.py`) currently has
+The dry-run/local workflow backend (`Yuki/kernel/native_workflow.py`) currently has
 two visible problems that hurt observability:
 
 1. **Per-job statuses are never updated.** After snakemake executes, individual
@@ -15,7 +15,7 @@ two visible problems that hurt observability:
    propagates it into a place the operator can see at a glance
    (e.g. `detailed_status`).
 
-There is also a structural issue: `DryWorkflow.update_workflow_status()`
+There is also a structural issue: `NativeWorkflow.update_workflow_status()`
 (called by server polling) and `SnakemakeMonitor` (called by the
 `yuki run-workflow` CLI) operate on the same on-disk artifacts but do not share
 status logic. Two divergent implementations of "what is the workflow doing
@@ -23,7 +23,7 @@ right now" is the wrong number.
 
 ## Goals
 
-- After a dry workflow terminates, every non-input non-algorithm `VJob` has a
+- After a native workflow terminates, every non-input non-algorithm `VJob` has a
   status that reflects what snakemake actually did (`CODA` for success,
   `FAILED` for failure or skip-due-to-upstream-failure).
 - For failed jobs, `detailed_status` carries a short tail of the user-command
@@ -35,7 +35,7 @@ right now" is the wrong number.
 
 ## Non-goals
 
-- Making `DryWorkflow.kill()` actually terminate the snakemake process and mark
+- Making `NativeWorkflow.kill()` actually terminate the snakemake process and mark
   running jobs as `STOPPED`. (Tracked separately; out of scope here.)
 - Changing the REANA backend.
 - Refactoring `SnakemakeMonitor` ownership beyond what is necessary to call
@@ -63,7 +63,7 @@ A missing `.done` is ambiguous in two ways and we disambiguate them:
 ### The new method
 
 ```python
-# Yuki/kernel/dry_workflow.py
+# Yuki/kernel/native_workflow.py
 
 def propagate_job_statuses(self, workflow_terminal: bool = False) -> None:
     """Reconcile each VJob's status.json with the on-disk markers.
@@ -108,7 +108,7 @@ Skip jobs whose current status satisfies `is_terminal_status` (`CODA`,
 
 ### Callers
 
-**Server polling path** — `DryWorkflow.update_workflow_status()`:
+**Server polling path** — `NativeWorkflow.update_workflow_status()`:
 
 After the existing block that writes `results` to `results.json`:
 
@@ -125,7 +125,7 @@ Constructor gains `project_uuid` and `workflow_uuid`. `_finalize_results` and
 ```python
 from .vworkflow import VWorkflow
 workflow = VWorkflow.create(self.project_uuid, [],
-                            uuid=self.workflow_uuid, mode="dry")
+                            uuid=self.workflow_uuid, mode="native")
 workflow.propagate_job_statuses(workflow_terminal=True)
 ```
 
@@ -163,18 +163,18 @@ get classified as failed even though they never ran.
 
 ## Files touched
 
-- `Yuki/kernel/dry_workflow.py` — add `propagate_job_statuses`,
+- `Yuki/kernel/native_workflow.py` — add `propagate_job_statuses`,
   `_read_job_log_tail`; hook into `update_workflow_status`.
 - `Yuki/kernel/snakemake_monitor.py` — accept `project_uuid` and
   `workflow_uuid`; add `--keep-going`; call propagation in
   `_finalize_results` and `_handle_failure`.
 - `Yuki/main.py` — pass `project_uuid` and `workflow_uuid` to
   `SnakemakeMonitor`.
-- `UnitTest/test_dry_workflow.py` — new file (see Tests).
+- `UnitTest/test_native_workflow.py` — new file (see Tests).
 
 ## Tests
 
-New file `UnitTest/test_dry_workflow.py`. Each test uses `tmp_path` to build
+New file `UnitTest/test_native_workflow.py`. Each test uses `tmp_path` to build
 a minimal Storage + LocalWorkflows layout and constructs `VJob` instances
 directly without going through the full workflow boot sequence.
 

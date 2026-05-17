@@ -1,4 +1,4 @@
-"""Unit tests for DryWorkflow per-job status propagation."""
+"""Unit tests for NativeWorkflow per-job status propagation."""
 import os
 import shutil
 import tempfile
@@ -6,12 +6,12 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 
-class TestDryWorkflowPropagation(unittest.TestCase):
-    """Test DryWorkflow.propagate_job_statuses and _read_job_log_tail."""
+class TestNativeWorkflowPropagation(unittest.TestCase):
+    """Test NativeWorkflow.propagate_job_statuses and _read_job_log_tail."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
-        # Patch HOME so DryWorkflow rooted file ops land in tmpdir.
+        # Patch HOME so NativeWorkflow rooted file ops land in tmpdir.
         self._home_patcher = patch.dict(os.environ, {"HOME": self.tmpdir})
         self._home_patcher.start()
 
@@ -19,9 +19,9 @@ class TestDryWorkflowPropagation(unittest.TestCase):
         self.project_uuid = "p" * 32
         self.workflow_uuid = "w" * 32
 
-        # Construct DryWorkflow against the temp HOME.
-        from Yuki.kernel.dry_workflow import DryWorkflow
-        self.workflow = DryWorkflow(self.project_uuid, [], None)
+        # Construct NativeWorkflow against the temp HOME.
+        from Yuki.kernel.native_workflow import NativeWorkflow
+        self.workflow = NativeWorkflow(self.project_uuid, [], None)
         # Override generated uuid -> known value so paths are predictable.
         self.workflow.uuid = self.workflow_uuid
         self.workflow.local_exec_path = os.path.join(

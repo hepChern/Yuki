@@ -122,7 +122,7 @@ def docker_restart(container):
 def run_workflow(workflow_uuid, cores):
     """Run a local workflow by its UUID with file staging and status tracking.
 
-    For dry-run workflows this:
+    For native workflows this:
     1. Stages in files from Storage to LocalWorkflows using hard links
     2. Executes snakemake with conda environment support
     3. Stages out results back to Storage

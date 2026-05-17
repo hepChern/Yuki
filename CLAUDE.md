@@ -16,7 +16,7 @@ Yuki is a data analysis management toolkit for high energy physics, serving as t
    - `image_job.py`: Image-based job execution
    - `vworkflow.py`: Virtual workflow management
    - `reana_workflow.py`: REANA workflow integration
-   - `dry_workflow.py`: Dry-run workflow support
+   - `native_workflow.py`: Native/local workflow support
 
 2. **Server Layer** (`Yuki/server/`): Flask web server with Celery
    - `app.py`: Flask application setup and configuration

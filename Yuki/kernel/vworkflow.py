@@ -92,9 +92,10 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                                                    ".Yuki", "config.json"))
             backend_types = config.read_variable("backend_types", {})
             mode = backend_types.get(runner_id, "reana")
-        if mode == "dry":
-            from .dry_workflow import DryWorkflow
-            return DryWorkflow(project_uuid, jobs, uuid)
+        # Accept both "native" (new) and "dry" (legacy/deprecated) for backward compatibility
+        if mode in ("native", "dry"):
+            from .native_workflow import NativeWorkflow
+            return NativeWorkflow(project_uuid, jobs, uuid)
         from .reana_workflow import ReanaWorkflow
         return ReanaWorkflow(project_uuid, jobs, uuid)
 
@@ -106,7 +107,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         """Write the backend-specific environment directive into the Snakefile.
 
         The default implementation writes a Docker ``container:`` directive
-        suitable for REANA execution. Subclasses (e.g. DryWorkflow) may
+        suitable for REANA execution. Subclasses (e.g. NativeWorkflow) may
         override this to emit ``conda:``, ``apptainer:``, etc.
         """
         snake_file.addline("container:", indent)

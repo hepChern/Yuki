@@ -1,7 +1,7 @@
 """
-Dry/Local workflow implementation.
+Native/Local workflow implementation.
 
-This module provides the DryWorkflow class which implements workflow execution
+This module provides the NativeWorkflow class which implements workflow execution
 by copying files to a local directory for manual/local execution instead of
 submitting to a remote REANA server.
 """
@@ -17,8 +17,8 @@ from .status_constants import FAILED, DISSONANCE, CODA, translate_to_musical, is
 DEFAULT_ENVIRONMENT = "docker.io/reanahub/reana-env-root6:6.18.04"
 
 
-class DryWorkflow(VWorkflow):
-    """Local/Dry-run implementation of VWorkflow."""
+class NativeWorkflow(VWorkflow):
+    """Local/Native implementation of VWorkflow."""
 
     def __init__(self, project_uuid, jobs, uuid=None):
         """Initialize local workflow."""
@@ -47,7 +47,7 @@ class DryWorkflow(VWorkflow):
                     continue
                 if job.job_type() == "algorithm":
                     continue
-                job.set_status(DISSONANCE, "Dry workflow construction failed")
+                job.set_status(DISSONANCE, "Native workflow construction failed")
             raise
 
         try:
@@ -61,7 +61,7 @@ class DryWorkflow(VWorkflow):
                     continue
                 if job.job_type() == "algorithm":
                     continue
-                job.set_status(DISSONANCE, "Dry workflow file copy failed")
+                job.set_status(DISSONANCE, "Native workflow file copy failed")
             raise
 
         # Set status to ready for local execution
@@ -189,7 +189,7 @@ class DryWorkflow(VWorkflow):
         self.logger("[LOCAL] Copied: Snakefile")
 
     def _write_environment_directive(self, snake_file, environment, indent=1):
-        """Write a conda environment directive for local dry-run execution.
+        """Write a conda environment directive for local native execution.
 
         Skips writing the directive for pure-copy procedures (setup, finalize,
         rawdata, datalist, script) that do not need a conda environment.
@@ -383,7 +383,7 @@ class DryWorkflow(VWorkflow):
                 continue
             if job.job_type() == "algorithm":
                 continue
-            job.set_status(FAILED, "Dry workflow killed by user")
+            job.set_status(FAILED, "Native workflow killed by user")
 
     def _collect_artifacts(self, impression, artifact_dir, marker_name, label):
         """Collect a job artifact directory from local execution into Storage.
@@ -457,7 +457,7 @@ class DryWorkflow(VWorkflow):
             return
 
         engine_logs = {
-            "backend": "dry",
+            "backend": "native",
             "workflow_uuid": self.uuid,
             "local_exec_path": self.local_exec_path,
         }

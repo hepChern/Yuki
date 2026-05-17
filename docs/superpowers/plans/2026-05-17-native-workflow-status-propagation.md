@@ -2,27 +2,27 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `DryWorkflow` reconcile each `VJob`'s on-disk status with the marker files left by snakemake, and surface failures with a tail of the user log so operators can see what went wrong.
+**Goal:** Make `NativeWorkflow` reconcile each `VJob`'s on-disk status with the marker files left by snakemake, and surface failures with a tail of the user log so operators can see what went wrong.
 
-**Architecture:** Add one method `DryWorkflow.propagate_job_statuses(workflow_terminal: bool)` plus a small helper `_read_job_log_tail`. Both `DryWorkflow.update_workflow_status` (server path) and `SnakemakeMonitor` (CLI path) call it. Also add `--keep-going` to the snakemake invocation so independent failures don't poison unrelated jobs.
+**Architecture:** Add one method `NativeWorkflow.propagate_job_statuses(workflow_terminal: bool)` plus a small helper `_read_job_log_tail`. Both `NativeWorkflow.update_workflow_status` (server path) and `SnakemakeMonitor` (CLI path) call it. Also add `--keep-going` to the snakemake invocation so independent failures don't poison unrelated jobs.
 
 **Tech Stack:** Python 3.9+, `unittest.TestCase`, `unittest.mock`, pytest as runner. No new dependencies.
 
-**Spec:** [`docs/superpowers/specs/2026-05-17-dry-workflow-status-propagation-design.md`](../specs/2026-05-17-dry-workflow-status-propagation-design.md)
+**Spec:** [`docs/superpowers/specs/2026-05-17-native-workflow-status-propagation-design.md`](../specs/2026-05-17-native-workflow-status-propagation-design.md)
 
 ---
 
 ### Task 1: Test scaffolding
 
 **Files:**
-- Create: `UnitTest/test_dry_workflow.py`
+- Create: `UnitTest/test_native_workflow.py`
 
-This task lays down the test file with a working setUp/tearDown that constructs a real `DryWorkflow` against a temp `$HOME`, and a single trivial test that confirms the scaffolding runs. Later tasks add behaviour-driven tests on top of this.
+This task lays down the test file with a working setUp/tearDown that constructs a real `NativeWorkflow` against a temp `$HOME`, and a single trivial test that confirms the scaffolding runs. Later tasks add behaviour-driven tests on top of this.
 
 - [ ] **Step 1: Create the test file with scaffolding**
 
 ```python
-"""Unit tests for DryWorkflow per-job status propagation."""
+"""Unit tests for NativeWorkflow per-job status propagation."""
 import os
 import shutil
 import tempfile
@@ -30,12 +30,12 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 
-class TestDryWorkflowPropagation(unittest.TestCase):
-    """Test DryWorkflow.propagate_job_statuses and _read_job_log_tail."""
+class TestNativeWorkflowPropagation(unittest.TestCase):
+    """Test NativeWorkflow.propagate_job_statuses and _read_job_log_tail."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
-        # Patch HOME so DryWorkflow rooted file ops land in tmpdir.
+        # Patch HOME so NativeWorkflow rooted file ops land in tmpdir.
         self._home_patcher = patch.dict(os.environ, {"HOME": self.tmpdir})
         self._home_patcher.start()
 
@@ -43,9 +43,9 @@ class TestDryWorkflowPropagation(unittest.TestCase):
         self.project_uuid = "p" * 32
         self.workflow_uuid = "w" * 32
 
-        # Construct DryWorkflow against the temp HOME.
-        from Yuki.kernel.dry_workflow import DryWorkflow
-        self.workflow = DryWorkflow(self.project_uuid, [], None)
+        # Construct NativeWorkflow against the temp HOME.
+        from Yuki.kernel.native_workflow import NativeWorkflow
+        self.workflow = NativeWorkflow(self.project_uuid, [], None)
         # Override generated uuid -> known value so paths are predictable.
         self.workflow.uuid = self.workflow_uuid
         self.workflow.local_exec_path = os.path.join(
@@ -102,14 +102,14 @@ if __name__ == "__main__":
 
 - [ ] **Step 2: Run the scaffolding test**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: `test_scaffolding_constructs_workflow PASSED` (1 passed)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add UnitTest/test_dry_workflow.py
-git commit -m "test(dry-workflow): scaffold per-job propagation test suite"
+git add UnitTest/test_native_workflow.py
+git commit -m "test(native-workflow): scaffold per-job propagation test suite"
 ```
 
 ---
@@ -119,12 +119,12 @@ git commit -m "test(dry-workflow): scaffold per-job propagation test suite"
 TDD: write the test first, see it fail, then implement the minimal method.
 
 **Files:**
-- Modify: `Yuki/kernel/dry_workflow.py` (add `propagate_job_statuses`)
-- Modify: `UnitTest/test_dry_workflow.py` (add test)
+- Modify: `Yuki/kernel/native_workflow.py` (add `propagate_job_statuses`)
+- Modify: `UnitTest/test_native_workflow.py` (add test)
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `TestDryWorkflowPropagation` in `UnitTest/test_dry_workflow.py`:
+Append to `TestNativeWorkflowPropagation` in `UnitTest/test_native_workflow.py`:
 
 ```python
     def test_propagate_done_jobs_become_coda(self):
@@ -144,18 +144,18 @@ Append to `TestDryWorkflowPropagation` in `UnitTest/test_dry_workflow.py`:
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py::TestDryWorkflowPropagation::test_propagate_done_jobs_become_coda -v`
-Expected: FAIL with `AttributeError: 'DryWorkflow' object has no attribute 'propagate_job_statuses'`
+Run: `python -m pytest UnitTest/test_native_workflow.py::TestNativeWorkflowPropagation::test_propagate_done_jobs_become_coda -v`
+Expected: FAIL with `AttributeError: 'NativeWorkflow' object has no attribute 'propagate_job_statuses'`
 
 - [ ] **Step 3: Implement minimal method**
 
-In `Yuki/kernel/dry_workflow.py`, add this method to the `DryWorkflow` class (place it after `_resolve_conda_environment` for now; final placement doesn't matter as long as it's a method on the class):
+In `Yuki/kernel/native_workflow.py`, add this method to the `NativeWorkflow` class (place it after `_resolve_conda_environment` for now; final placement doesn't matter as long as it's a method on the class):
 
 ```python
     def propagate_job_statuses(self, workflow_terminal=False):
         """Reconcile each VJob's status.json with on-disk markers.
 
-        See spec at docs/superpowers/specs/2026-05-17-dry-workflow-status-propagation-design.md
+        See spec at docs/superpowers/specs/2026-05-17-native-workflow-status-propagation-design.md
         for the full classification table.
         """
         from .status_constants import CODA
@@ -169,14 +169,14 @@ In `Yuki/kernel/dry_workflow.py`, add this method to the `DryWorkflow` class (pl
 
 - [ ] **Step 4: Run to confirm pass**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: 2 passed (scaffolding + new test).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Yuki/kernel/dry_workflow.py UnitTest/test_dry_workflow.py
-git commit -m "feat(dry-workflow): propagate .done markers to per-job CODA status"
+git add Yuki/kernel/native_workflow.py UnitTest/test_native_workflow.py
+git commit -m "feat(native-workflow): propagate .done markers to per-job CODA status"
 ```
 
 ---
@@ -186,7 +186,7 @@ git commit -m "feat(dry-workflow): propagate .done markers to per-job CODA statu
 The "missing `.done` while workflow is still running" path must NOT mark anything FAILED. Verify the current implementation already preserves this, then add the regression test.
 
 **Files:**
-- Modify: `UnitTest/test_dry_workflow.py` (add test)
+- Modify: `UnitTest/test_native_workflow.py` (add test)
 
 - [ ] **Step 1: Add the test**
 
@@ -203,14 +203,14 @@ The "missing `.done` while workflow is still running" path must NOT mark anythin
 
 - [ ] **Step 2: Run to confirm pass**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: 3 passed.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add UnitTest/test_dry_workflow.py
-git commit -m "test(dry-workflow): in-flight propagation leaves jobs untouched"
+git add UnitTest/test_native_workflow.py
+git commit -m "test(native-workflow): in-flight propagation leaves jobs untouched"
 ```
 
 ---
@@ -218,8 +218,8 @@ git commit -m "test(dry-workflow): in-flight propagation leaves jobs untouched"
 ### Task 4: Terminal-state, missing `.done`, no logs → FAILED with skip message
 
 **Files:**
-- Modify: `Yuki/kernel/dry_workflow.py` (extend `propagate_job_statuses`)
-- Modify: `UnitTest/test_dry_workflow.py` (add test)
+- Modify: `Yuki/kernel/native_workflow.py` (extend `propagate_job_statuses`)
+- Modify: `UnitTest/test_native_workflow.py` (add test)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -240,7 +240,7 @@ git commit -m "test(dry-workflow): in-flight propagation leaves jobs untouched"
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py::TestDryWorkflowPropagation::test_propagate_missing_done_no_logs_becomes_failed_with_skip_message -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py::TestNativeWorkflowPropagation::test_propagate_missing_done_no_logs_becomes_failed_with_skip_message -v`
 Expected: FAIL — `set_status` was not called.
 
 - [ ] **Step 3: Extend the method**
@@ -251,7 +251,7 @@ Replace the body of `propagate_job_statuses` with:
     def propagate_job_statuses(self, workflow_terminal=False):
         """Reconcile each VJob's status.json with on-disk markers.
 
-        See spec at docs/superpowers/specs/2026-05-17-dry-workflow-status-propagation-design.md
+        See spec at docs/superpowers/specs/2026-05-17-native-workflow-status-propagation-design.md
         for the full classification table.
         """
         from .status_constants import CODA, FAILED
@@ -277,14 +277,14 @@ Replace the body of `propagate_job_statuses` with:
 
 - [ ] **Step 4: Run all tests to confirm pass**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: 4 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Yuki/kernel/dry_workflow.py UnitTest/test_dry_workflow.py
-git commit -m "feat(dry-workflow): mark skipped-due-to-upstream jobs as FAILED"
+git add Yuki/kernel/native_workflow.py UnitTest/test_native_workflow.py
+git commit -m "feat(native-workflow): mark skipped-due-to-upstream jobs as FAILED"
 ```
 
 ---
@@ -294,8 +294,8 @@ git commit -m "feat(dry-workflow): mark skipped-due-to-upstream jobs as FAILED"
 Add the log-tail helper used by the next task. Test it directly so its behaviour is locked in.
 
 **Files:**
-- Modify: `Yuki/kernel/dry_workflow.py` (add `_read_job_log_tail`)
-- Modify: `UnitTest/test_dry_workflow.py` (add 2 tests)
+- Modify: `Yuki/kernel/native_workflow.py` (add `_read_job_log_tail`)
+- Modify: `UnitTest/test_native_workflow.py` (add 2 tests)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -320,12 +320,12 @@ Append to the test class:
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
-Expected: 2 new tests FAIL with `AttributeError: 'DryWorkflow' object has no attribute '_read_job_log_tail'`.
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
+Expected: 2 new tests FAIL with `AttributeError: 'NativeWorkflow' object has no attribute '_read_job_log_tail'`.
 
 - [ ] **Step 3: Implement the helper**
 
-In `Yuki/kernel/dry_workflow.py`, add to the `DryWorkflow` class (place adjacent to `propagate_job_statuses`):
+In `Yuki/kernel/native_workflow.py`, add to the `NativeWorkflow` class (place adjacent to `propagate_job_statuses`):
 
 ```python
     def _read_job_log_tail(self, short_uuid, max_chars=500):
@@ -365,14 +365,14 @@ In `Yuki/kernel/dry_workflow.py`, add to the `DryWorkflow` class (place adjacent
 
 - [ ] **Step 4: Run to confirm pass**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: 6 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Yuki/kernel/dry_workflow.py UnitTest/test_dry_workflow.py
-git commit -m "feat(dry-workflow): add _read_job_log_tail helper"
+git add Yuki/kernel/native_workflow.py UnitTest/test_native_workflow.py
+git commit -m "feat(native-workflow): add _read_job_log_tail helper"
 ```
 
 ---
@@ -380,8 +380,8 @@ git commit -m "feat(dry-workflow): add _read_job_log_tail helper"
 ### Task 6: Terminal-state, missing `.done`, logs present → FAILED with log tail
 
 **Files:**
-- Modify: `Yuki/kernel/dry_workflow.py` (extend `propagate_job_statuses`)
-- Modify: `UnitTest/test_dry_workflow.py` (add test)
+- Modify: `Yuki/kernel/native_workflow.py` (extend `propagate_job_statuses`)
+- Modify: `UnitTest/test_native_workflow.py` (add test)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -410,7 +410,7 @@ git commit -m "feat(dry-workflow): add _read_job_log_tail helper"
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py::TestDryWorkflowPropagation::test_propagate_missing_done_terminal_becomes_failed -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py::TestNativeWorkflowPropagation::test_propagate_missing_done_terminal_becomes_failed -v`
 Expected: FAIL — set_status was called with the upstream-failure message instead.
 
 - [ ] **Step 3: Extend propagate_job_statuses**
@@ -434,14 +434,14 @@ Replace the `if not has_logs:` block at the end of the method with this larger b
 
 - [ ] **Step 4: Run to confirm pass**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: 7 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Yuki/kernel/dry_workflow.py UnitTest/test_dry_workflow.py
-git commit -m "feat(dry-workflow): mark failed jobs FAILED with stderr tail"
+git add Yuki/kernel/native_workflow.py UnitTest/test_native_workflow.py
+git commit -m "feat(native-workflow): mark failed jobs FAILED with stderr tail"
 ```
 
 ---
@@ -449,8 +449,8 @@ git commit -m "feat(dry-workflow): mark failed jobs FAILED with stderr tail"
 ### Task 7: Skip `is_input` and `algorithm` jobs
 
 **Files:**
-- Modify: `Yuki/kernel/dry_workflow.py` (extend `propagate_job_statuses`)
-- Modify: `UnitTest/test_dry_workflow.py` (add test)
+- Modify: `Yuki/kernel/native_workflow.py` (extend `propagate_job_statuses`)
+- Modify: `UnitTest/test_native_workflow.py` (add test)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -472,7 +472,7 @@ git commit -m "feat(dry-workflow): mark failed jobs FAILED with stderr tail"
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py::TestDryWorkflowPropagation::test_propagate_skips_input_and_algorithm_jobs -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py::TestNativeWorkflowPropagation::test_propagate_skips_input_and_algorithm_jobs -v`
 Expected: FAIL — `set_status` was called.
 
 - [ ] **Step 3: Add the skip filter**
@@ -528,14 +528,14 @@ The full method now reads:
 
 - [ ] **Step 4: Run to confirm pass**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: 8 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Yuki/kernel/dry_workflow.py UnitTest/test_dry_workflow.py
-git commit -m "feat(dry-workflow): skip input and algorithm jobs in propagation"
+git add Yuki/kernel/native_workflow.py UnitTest/test_native_workflow.py
+git commit -m "feat(native-workflow): skip input and algorithm jobs in propagation"
 ```
 
 ---
@@ -545,8 +545,8 @@ git commit -m "feat(dry-workflow): skip input and algorithm jobs in propagation"
 `is_terminal_status` covers CODA, FINAL_NOTE, FAILED, STOPPED, DELETED. Make sure the method respects it so settled state isn't repeatedly rewritten.
 
 **Files:**
-- Modify: `Yuki/kernel/dry_workflow.py` (add guard)
-- Modify: `UnitTest/test_dry_workflow.py` (add test)
+- Modify: `Yuki/kernel/native_workflow.py` (add guard)
+- Modify: `UnitTest/test_native_workflow.py` (add test)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -571,7 +571,7 @@ git commit -m "feat(dry-workflow): skip input and algorithm jobs in propagation"
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py::TestDryWorkflowPropagation::test_propagate_does_not_churn_terminal_status -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py::TestNativeWorkflowPropagation::test_propagate_does_not_churn_terminal_status -v`
 Expected: FAIL — `set_status` was called with `CODA, "Local execution completed"`.
 
 - [ ] **Step 3: Add the guard**
@@ -620,14 +620,14 @@ Replace the body of `propagate_job_statuses` with the final form below. The chan
 
 - [ ] **Step 4: Run to confirm pass**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: 9 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Yuki/kernel/dry_workflow.py UnitTest/test_dry_workflow.py
-git commit -m "feat(dry-workflow): leave terminal-state jobs untouched in propagation"
+git add Yuki/kernel/native_workflow.py UnitTest/test_native_workflow.py
+git commit -m "feat(native-workflow): leave terminal-state jobs untouched in propagation"
 ```
 
 ---
@@ -637,13 +637,13 @@ git commit -m "feat(dry-workflow): leave terminal-state jobs untouched in propag
 The server-polling path calls `update_workflow_status`. Add the propagation call so per-job status converges every time the API queries the workflow.
 
 **Files:**
-- Modify: `Yuki/kernel/dry_workflow.py` (extend `update_workflow_status`)
+- Modify: `Yuki/kernel/native_workflow.py` (extend `update_workflow_status`)
 
 This is wiring; the behaviour of `propagate_job_statuses` itself is already tested. No new unit test is added — the contract is "call propagate at the end of update_workflow_status with the right terminal flag", which is best verified by a manual smoke test (see Task 12).
 
 - [ ] **Step 1: Modify `update_workflow_status`**
 
-In `Yuki/kernel/dry_workflow.py`, locate the existing `update_workflow_status` method. After the line:
+In `Yuki/kernel/native_workflow.py`, locate the existing `update_workflow_status` method. After the line:
 
 ```python
             results_file.write_variable("results", results)
@@ -676,14 +676,14 @@ So the method's try-block ends with:
 
 - [ ] **Step 2: Run all tests to make sure nothing regresses**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: 9 passed.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Yuki/kernel/dry_workflow.py
-git commit -m "feat(dry-workflow): propagate per-job status from update_workflow_status"
+git add Yuki/kernel/native_workflow.py
+git commit -m "feat(native-workflow): propagate per-job status from update_workflow_status"
 ```
 
 ---
@@ -736,7 +736,7 @@ git commit -m "feat(snakemake-monitor): pass --keep-going so independent failure
 
 ### Task 11: `SnakemakeMonitor` carries UUIDs and calls propagation
 
-Give the CLI-side monitor everything it needs to construct a `DryWorkflow` and call propagation when execution finishes (both success and failure paths).
+Give the CLI-side monitor everything it needs to construct a `NativeWorkflow` and call propagation when execution finishes (both success and failure paths).
 
 **Files:**
 - Modify: `Yuki/kernel/snakemake_monitor.py` (constructor + 2 call sites)
@@ -754,7 +754,7 @@ Replace the existing constructor in `Yuki/kernel/snakemake_monitor.py`:
         Args:
             workflow_path: Path to ~/.Yuki/Workflows/<project>/<uuid>/
             local_exec_path: Path to ~/.Yuki/LocalWorkflows/<uuid>/
-            project_uuid: Project UUID (needed to instantiate DryWorkflow
+            project_uuid: Project UUID (needed to instantiate NativeWorkflow
                           for per-job status propagation). Optional; if
                           omitted, derived from workflow_path layout.
             workflow_uuid: Workflow UUID (same rationale).
@@ -787,7 +787,7 @@ Add this method to `SnakemakeMonitor`:
             from .vworkflow import VWorkflow
             workflow = VWorkflow.create(
                 self.project_uuid, [],
-                uuid=self.workflow_uuid, mode="dry",
+                uuid=self.workflow_uuid, mode="native",
             )
             workflow.propagate_job_statuses(workflow_terminal=True)
         except Exception as e:
@@ -834,7 +834,7 @@ Expected: prints `SnakemakeMonitor` (proves the constructor accepts the new sign
 
 - [ ] **Step 6: Confirm existing tests still pass**
 
-Run: `python -m pytest UnitTest/test_dry_workflow.py -v`
+Run: `python -m pytest UnitTest/test_native_workflow.py -v`
 Expected: 9 passed.
 
 - [ ] **Step 7: Commit**
@@ -877,7 +877,7 @@ Expected: `OK`.
 - [ ] **Step 3: Run the full test suite**
 
 Run: `python -m pytest UnitTest/ -v`
-Expected: all tests in `test_dry_workflow.py` (9) and `test_env_interpreter.py` (19) pass — 28 passed in total. Other test files in `UnitTest/` are empty (`test_server.py`, `test_server_main.py`, `test_server_package.py`, `test_refactored_integration.py`) and remain empty after this change.
+Expected: all tests in `test_native_workflow.py` (9) and `test_env_interpreter.py` (19) pass — 28 passed in total. Other test files in `UnitTest/` are empty (`test_server.py`, `test_server_main.py`, `test_server_package.py`, `test_refactored_integration.py`) and remain empty after this change.
 
 - [ ] **Step 4: Commit**
 

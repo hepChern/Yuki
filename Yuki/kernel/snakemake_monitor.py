@@ -24,7 +24,7 @@ class SnakemakeMonitor:
         Args:
             workflow_path: Path to ~/.Yuki/Workflows/<project>/<uuid>/
             local_exec_path: Path to ~/.Yuki/LocalWorkflows/<uuid>/
-            project_uuid: Project UUID (needed to instantiate DryWorkflow
+            project_uuid: Project UUID (needed to instantiate NativeWorkflow
                           for per-job status propagation). Optional; if
                           omitted, derived from workflow_path layout.
             workflow_uuid: Workflow UUID (same rationale).
@@ -203,7 +203,7 @@ class SnakemakeMonitor:
             from .vworkflow import VWorkflow
             workflow = VWorkflow.create(
                 self.project_uuid, [],
-                uuid=self.workflow_uuid, mode="dry",
+                uuid=self.workflow_uuid, mode="native",
             )
             workflow.propagate_job_statuses(workflow_terminal=True)
         except Exception as e:
