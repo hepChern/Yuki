@@ -107,6 +107,21 @@ class TestDryWorkflowPropagation(unittest.TestCase):
             "Skipped: upstream dependency failed before this job ran",
         )
 
+    def test_read_job_log_tail_returns_empty_when_no_logs(self):
+        # imp<short>/logs/ does not exist.
+        tail = self.workflow._read_job_log_tail("a" * 7)
+        self.assertEqual(tail, "")
+
+    def test_read_job_log_tail_picks_highest_step_index(self):
+        short = "a" * 7
+        self._write_user_log(short, 0, "first step output")
+        self._write_user_log(short, 1, "second step output")
+        self._write_user_log(short, 2, "third step boom: traceback here")
+
+        tail = self.workflow._read_job_log_tail(short)
+        self.assertIn("third step boom", tail)
+        self.assertNotIn("first step", tail)
+
 
 if __name__ == "__main__":
     unittest.main()

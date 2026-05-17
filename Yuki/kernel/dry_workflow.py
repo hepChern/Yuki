@@ -264,6 +264,40 @@ class DryWorkflow(VWorkflow):
                     "Skipped: upstream dependency failed before this job ran",
                 )
 
+    def _read_job_log_tail(self, short_uuid, max_chars=500):
+        """Return tail of the highest-indexed celebi_user_step*.log for a job.
+
+        Returns "" when no logs directory exists or it contains no matching
+        files. The highest step index is the most recent output and is where
+        the failure usually surfaced.
+        """
+        import re
+
+        logs_dir = os.path.join(self.local_exec_path, f"imp{short_uuid}", "logs")
+        if not os.path.isdir(logs_dir):
+            return ""
+
+        pattern = re.compile(r"^celebi_user_step(\d+)\.log$")
+        candidates = []
+        for fname in os.listdir(logs_dir):
+            m = pattern.match(fname)
+            if m:
+                candidates.append((int(m.group(1)), fname))
+
+        if not candidates:
+            return ""
+
+        candidates.sort(reverse=True)
+        latest = candidates[0][1]
+        log_path = os.path.join(logs_dir, latest)
+
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except OSError:
+            return ""
+        return content[-max_chars:]
+
     def update_workflow_status(self):
         """Update workflow status from local execution."""
         try:
