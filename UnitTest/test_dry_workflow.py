@@ -85,6 +85,15 @@ class TestDryWorkflowPropagation(unittest.TestCase):
         job_a.set_status.assert_called_once_with(CODA, "Local execution completed")
         job_b.set_status.assert_called_once_with(CODA, "Local execution completed")
 
+    def test_propagate_in_flight_leaves_jobs_unchanged(self):
+        job = self._make_job("a" * 32, status_value="in movement")
+        self.workflow.jobs = [job]
+        # No .done file written.
+
+        self.workflow.propagate_job_statuses(workflow_terminal=False)
+
+        job.set_status.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
