@@ -122,6 +122,27 @@ class TestDryWorkflowPropagation(unittest.TestCase):
         self.assertIn("third step boom", tail)
         self.assertNotIn("first step", tail)
 
+    def test_propagate_missing_done_terminal_becomes_failed(self):
+        from Yuki.kernel.status_constants import FAILED
+        short = "a" * 7
+        # 32-char uuid whose first 7 chars match `short`.
+        job_uuid = short + "z" * 25
+        job = self._make_job(job_uuid)
+        self.workflow.jobs = [job]
+
+        self._write_user_log(
+            short, 0,
+            "running step\nTraceback (most recent call last):\n  ZeroDivisionError\n",
+        )
+
+        self.workflow.propagate_job_statuses(workflow_terminal=True)
+
+        self.assertEqual(job.set_status.call_count, 1)
+        status_arg, detail_arg = job.set_status.call_args.args
+        self.assertEqual(status_arg, FAILED)
+        self.assertIn("Local execution failed", detail_arg)
+        self.assertIn("ZeroDivisionError", detail_arg)
+
 
 if __name__ == "__main__":
     unittest.main()

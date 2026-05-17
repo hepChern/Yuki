@@ -258,7 +258,14 @@ class DryWorkflow(VWorkflow):
 
             logs_dir = os.path.join(self.local_exec_path, f"imp{short}", "logs")
             has_logs = os.path.isdir(logs_dir) and bool(os.listdir(logs_dir))
-            if not has_logs:
+            if has_logs:
+                tail = self._read_job_log_tail(short)
+                if tail:
+                    detail = f"Local execution failed: {tail}"
+                else:
+                    detail = "Local execution failed"
+                job.set_status(FAILED, detail)
+            else:
                 job.set_status(
                     FAILED,
                     "Skipped: upstream dependency failed before this job ran",
