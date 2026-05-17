@@ -1,0 +1,76 @@
+"""Unit tests for DryWorkflow per-job status propagation."""
+import os
+import shutil
+import tempfile
+import unittest
+from unittest.mock import MagicMock, patch
+
+
+class TestDryWorkflowPropagation(unittest.TestCase):
+    """Test DryWorkflow.propagate_job_statuses and _read_job_log_tail."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        # Patch HOME so DryWorkflow rooted file ops land in tmpdir.
+        self._home_patcher = patch.dict(os.environ, {"HOME": self.tmpdir})
+        self._home_patcher.start()
+
+        # Use fixed-length fake UUIDs (32 chars) for predictable short_uuid.
+        self.project_uuid = "p" * 32
+        self.workflow_uuid = "w" * 32
+
+        # Construct DryWorkflow against the temp HOME.
+        from Yuki.kernel.dry_workflow import DryWorkflow
+        self.workflow = DryWorkflow(self.project_uuid, [], None)
+        # Override generated uuid -> known value so paths are predictable.
+        self.workflow.uuid = self.workflow_uuid
+        self.workflow.local_exec_path = os.path.join(
+            self.tmpdir, ".Yuki", "LocalWorkflows", self.workflow_uuid
+        )
+        os.makedirs(self.workflow.local_exec_path, exist_ok=True)
+        self.workflow.jobs = []
+
+    def tearDown(self):
+        self._home_patcher.stop()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # -- helpers ----------------------------------------------------------
+
+    def _make_job(self, uuid_full, status_value="prelude",
+                  is_input=False, job_type_value="task"):
+        """Build a MagicMock VJob with the methods propagate_job_statuses uses."""
+        job = MagicMock()
+        job.uuid = uuid_full
+        job.is_input = is_input
+        job.path = "/fake/" + uuid_full
+        job.job_type.return_value = job_type_value
+        # status() takes a 'musical' kwarg; we return the same value either way.
+        job.status.return_value = status_value
+        job.short_uuid.return_value = uuid_full[:7]
+        return job
+
+    def _touch_done(self, short_uuid):
+        path = os.path.join(self.workflow.local_exec_path, short_uuid + ".done")
+        with open(path, "w", encoding="utf-8"):
+            pass
+        return path
+
+    def _write_user_log(self, short_uuid, step_index, content):
+        logs_dir = os.path.join(
+            self.workflow.local_exec_path, "imp" + short_uuid, "logs"
+        )
+        os.makedirs(logs_dir, exist_ok=True)
+        path = os.path.join(logs_dir, f"celebi_user_step{step_index}.log")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
+
+    # -- scaffolding sanity check ----------------------------------------
+
+    def test_scaffolding_constructs_workflow(self):
+        self.assertTrue(os.path.isdir(self.workflow.local_exec_path))
+        self.assertEqual(self.workflow.uuid, self.workflow_uuid)
+
+
+if __name__ == "__main__":
+    unittest.main()
