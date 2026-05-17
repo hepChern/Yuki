@@ -12,7 +12,7 @@ import json
 from CelebiChrono.utils import metadata
 from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
-from .status_constants import FAILED, DISSONANCE, translate_to_musical
+from .status_constants import FAILED, DISSONANCE, CODA, translate_to_musical, is_terminal_status
 
 DEFAULT_ENVIRONMENT = "docker.io/reanahub/reana-env-root6:6.18.04"
 
@@ -240,9 +240,6 @@ class DryWorkflow(VWorkflow):
 
     def propagate_job_statuses(self, workflow_terminal=False):
         """Reconcile each VJob's status.json with on-disk markers."""
-        from .status_constants import (
-            CODA, FAILED, is_terminal_status, translate_to_musical
-        )
 
         for job in self.jobs:
             if job.is_input:
