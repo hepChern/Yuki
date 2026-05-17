@@ -53,6 +53,7 @@ class SnakemakeMonitor:
             "snakemake",
             "--use-conda",
             "--conda-frontend", "conda",
+            "--keep-going",
             "-j", str(cores)
         ]
 
