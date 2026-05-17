@@ -16,13 +16,18 @@ from .status_constants import IN_MOVEMENT, CODA, FAILED, translate_to_musical
 class SnakemakeMonitor:
     """Monitor snakemake execution and update workflow status."""
 
-    def __init__(self, workflow_path, local_exec_path):
+    def __init__(self, workflow_path, local_exec_path,
+                 project_uuid=None, workflow_uuid=None):
         """
         Initialize snakemake monitor.
 
         Args:
             workflow_path: Path to ~/.Yuki/Workflows/<project>/<uuid>/
             local_exec_path: Path to ~/.Yuki/LocalWorkflows/<uuid>/
+            project_uuid: Project UUID (needed to instantiate DryWorkflow
+                          for per-job status propagation). Optional; if
+                          omitted, derived from workflow_path layout.
+            workflow_uuid: Workflow UUID (same rationale).
         """
         self.workflow_path = workflow_path
         self.local_exec_path = local_exec_path
@@ -30,6 +35,15 @@ class SnakemakeMonitor:
         self.log_file = os.path.join(workflow_path, "log.json")
         self.snakemake_log = os.path.join(local_exec_path, "snakemake.log")
         self.snakemake_report = os.path.join(local_exec_path, "report.json")
+
+        if workflow_uuid is None:
+            workflow_uuid = os.path.basename(workflow_path.rstrip("/"))
+        if project_uuid is None:
+            project_uuid = os.path.basename(
+                os.path.dirname(workflow_path.rstrip("/"))
+            )
+        self.project_uuid = project_uuid
+        self.workflow_uuid = workflow_uuid
 
     def execute_snakemake(self, cores, logger=None):
         """
@@ -183,6 +197,19 @@ class SnakemakeMonitor:
         except Exception as e:
             print(f"[SNAKEMAKE] Error writing results: {e}")
 
+    def _propagate_per_job_status(self, logger=None):
+        """Reconcile each VJob's status with on-disk markers."""
+        try:
+            from .vworkflow import VWorkflow
+            workflow = VWorkflow.create(
+                self.project_uuid, [],
+                uuid=self.workflow_uuid, mode="dry",
+            )
+            workflow.propagate_job_statuses(workflow_terminal=True)
+        except Exception as e:
+            if logger:
+                logger(f"[SNAKEMAKE] Per-job propagation failed: {e}")
+
     def _finalize_results(self, logger=None):
         """Finalize results after successful execution."""
         try:
@@ -217,6 +244,8 @@ class SnakemakeMonitor:
 
             if logger:
                 logger(f"[SNAKEMAKE] Execution completed successfully")
+
+            self._propagate_per_job_status(logger)
 
         except Exception as e:
             if logger:
@@ -264,6 +293,8 @@ class SnakemakeMonitor:
 
             if logger:
                 logger(f"[SNAKEMAKE] Execution failed: {error_msg}")
+
+            self._propagate_per_job_status(logger)
 
         except Exception as e:
             if logger:
