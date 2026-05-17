@@ -239,14 +239,15 @@ class DryWorkflow(VWorkflow):
         return stripped.replace("/", "_").replace(":", "_")
 
     def propagate_job_statuses(self, workflow_terminal=False):
-        """Reconcile each VJob's status.json with on-disk markers.
-
-        See spec at docs/superpowers/specs/2026-05-17-dry-workflow-status-propagation-design.md
-        for the full classification table.
-        """
+        """Reconcile each VJob's status.json with on-disk markers."""
         from .status_constants import CODA, FAILED
 
         for job in self.jobs:
+            if job.is_input:
+                continue
+            if job.job_type() == "algorithm":
+                continue
+
             short = job.short_uuid()
             done_path = os.path.join(self.local_exec_path, f"{short}.done")
             if os.path.exists(done_path):

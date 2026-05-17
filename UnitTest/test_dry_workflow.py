@@ -143,6 +143,20 @@ class TestDryWorkflowPropagation(unittest.TestCase):
         self.assertIn("Local execution failed", detail_arg)
         self.assertIn("ZeroDivisionError", detail_arg)
 
+    def test_propagate_skips_input_and_algorithm_jobs(self):
+        input_job = self._make_job("a" * 32, is_input=True)
+        algo_job = self._make_job("b" * 32, job_type_value="algorithm")
+        self.workflow.jobs = [input_job, algo_job]
+
+        # Both have .done — propagation would otherwise promote them.
+        self._touch_done(input_job.short_uuid())
+        self._touch_done(algo_job.short_uuid())
+
+        self.workflow.propagate_job_statuses(workflow_terminal=True)
+
+        input_job.set_status.assert_not_called()
+        algo_job.set_status.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
