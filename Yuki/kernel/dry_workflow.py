@@ -244,13 +244,25 @@ class DryWorkflow(VWorkflow):
         See spec at docs/superpowers/specs/2026-05-17-dry-workflow-status-propagation-design.md
         for the full classification table.
         """
-        from .status_constants import CODA
+        from .status_constants import CODA, FAILED
 
         for job in self.jobs:
             short = job.short_uuid()
             done_path = os.path.join(self.local_exec_path, f"{short}.done")
             if os.path.exists(done_path):
                 job.set_status(CODA, "Local execution completed")
+                continue
+
+            if not workflow_terminal:
+                continue
+
+            logs_dir = os.path.join(self.local_exec_path, f"imp{short}", "logs")
+            has_logs = os.path.isdir(logs_dir) and bool(os.listdir(logs_dir))
+            if not has_logs:
+                job.set_status(
+                    FAILED,
+                    "Skipped: upstream dependency failed before this job ran",
+                )
 
     def update_workflow_status(self):
         """Update workflow status from local execution."""

@@ -94,6 +94,19 @@ class TestDryWorkflowPropagation(unittest.TestCase):
 
         job.set_status.assert_not_called()
 
+    def test_propagate_missing_done_no_logs_becomes_failed_with_skip_message(self):
+        from Yuki.kernel.status_constants import FAILED
+        job = self._make_job("a" * 32)
+        self.workflow.jobs = [job]
+        # No .done, no imp<short>/logs/ directory.
+
+        self.workflow.propagate_job_statuses(workflow_terminal=True)
+
+        job.set_status.assert_called_once_with(
+            FAILED,
+            "Skipped: upstream dependency failed before this job ran",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
