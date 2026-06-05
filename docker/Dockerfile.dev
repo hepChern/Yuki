@@ -8,24 +8,41 @@ RUN apt-get update && \
         build-essential \
         rabbitmq-server \
         ca-certificates \
-        git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Install base Python dependencies (editable install will add the rest)
-COPY docker/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install build
+# Python deps
+RUN pip install --user --no-cache-dir click
+RUN pip install --user --no-cache-dir colored
+RUN pip install --user --no-cache-dir diff-match-patch
+RUN pip install --user --no-cache-dir python-daemon
+RUN pip install --user --no-cache-dir ipython
+RUN pip install --user --no-cache-dir PyYAML==5.1
+RUN pip install --user --no-cache-dir requests
+RUN pip install --user --no-cache-dir reana-client
+RUN pip install --user --no-cache-dir flask
+RUN pip install --user --no-cache-dir celery
+RUN pip install --user --no-cache-dir setuptools
+RUN pip install --user --no-cache-dir pillow
+# RUN pip install --user --no-cache-dir -r requirements.txt
+RUN pip install --user build
 
-# Install celebichrono dependency
-RUN pip install celebichrono
+# Copy source and install in editable mode (dev: mounts override at runtime)
+COPY Celebi /app/Celebi
+WORKDIR /app/Celebi
+RUN pip install --user -e .
 
-# Copy entrypoint
-COPY docker/entrypoint.dev.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+# Copy source and install in editable mode (dev: mounts override at runtime)
+COPY . /app/Yuki
+WORKDIR /app/Yuki
+RUN pip install --user -e .
+
+WORKDIR /app
+COPY docker/entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
 EXPOSE 3315
 
-# Default to interactive shell for development
 CMD ["/app/entrypoint.sh"]

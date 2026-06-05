@@ -29,7 +29,7 @@ EOF
 echo "RabbitMQ is up and running."
 
 # Prefer mounted source (dev mode) over installed package
-export PYTHONPATH=/app/Yuki:$PYTHONPATH
+export PYTHONPATH=/app/CelebiChrono:/app/Yuki:$PYTHONPATH
 
 # Start Yuki server
 exec /root/.local/bin/yuki server start

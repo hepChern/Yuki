@@ -2,6 +2,7 @@
 set -e
 
 export RABBITMQ_ALLOW_INPUT_NON_SENSITIVE_DATA=1
+
 export RABBITMQ_MNESIA_BASE=/tmp/rabbitmq-data
 export RABBITMQ_LOG_BASE=/tmp/rabbitmq-data
 export RABBITMQ_PID_FILE=/tmp/rabbitmq-data/rabbit.pid
@@ -28,13 +29,8 @@ EOF
 
 echo "RabbitMQ is up and running."
 
-# Copy mounted source to writable /app/Yuki, then install in editable mode
-if [ -f /mnt/yuki-source/pyproject.toml ]; then
-    cp -r /mnt/yuki-source/. /app/Yuki/
-    cd /app/Yuki
-    pip install -e . >/dev/null 2>&1
-    cd /app
-fi
+# Prefer mounted source (dev mode) over installed package
+export PYTHONPATH=/app/Yuki:/app/CelebiChrono:$PYTHONPATH
 
 # Start Yuki server
-exec yuki server start
+exec /root/.local/bin/yuki server start

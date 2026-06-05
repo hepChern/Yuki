@@ -50,7 +50,9 @@ def docker():
               help='Host port to map to container port 3315 (env: YUKIPORT).')
 @click.option('--dev-dir',
               help='Mount local Yuki source directory as /app/Yuki for development.')
-def docker_run(image, yuki_dir, port, dev_dir):
+@click.option('--celebi-dir',
+              help='Mount local CelebiChrono source directory as /app/CelebiChrono for development.')
+def docker_run(image, yuki_dir, port, dev_dir, celebi_dir):
     """Run a Yuki Docker container.
 
     IMAGE is the Docker image name (default: yuki:latest).
@@ -66,6 +68,11 @@ def docker_run(image, yuki_dir, port, dev_dir):
         if not os.path.isdir(dev_dir):
             raise click.ClickException(f"Development directory does not exist: {dev_dir}")
         cmd.extend(['-v', f'{dev_dir}:/mnt/yuki-source:ro'])
+    if celebi_dir:
+        celebi_dir = os.path.expanduser(celebi_dir)
+        if not os.path.isdir(celebi_dir):
+            raise click.ClickException(f"CelebiChrono directory does not exist: {celebi_dir}")
+        cmd.extend(['-v', f'{celebi_dir}:/app/CelebiChrono'])
     cmd.append(image)
     click.echo(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
