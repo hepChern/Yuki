@@ -309,11 +309,15 @@ def book_reana_stream():
                     "data": result.data,
                 })
             except Exception as e:
-                logger.error("Streaming booking failed: %s", e)
+                import traceback
+                tb = traceback.format_exc()
+                logger.error("Streaming booking failed: %s\n%s", e, tb)
+                error_msg = str(e) if str(e) else repr(e)
                 msg_queue.put({
                     "done": True,
                     "success": False,
-                    "error": str(e),
+                    "error": error_msg,
+                    "traceback": tb,
                 })
             finally:
                 shutil.rmtree(temp_dir, ignore_errors=True)
