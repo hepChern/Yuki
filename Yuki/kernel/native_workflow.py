@@ -194,7 +194,7 @@ class NativeWorkflow(VWorkflow):
         Skips writing the directive for pure-copy procedures (setup, finalize,
         rawdata, datalist, script) that do not need a conda environment.
         """
-        if environment in ("rawdata", "datalist", "script"):
+        if environment in ("rawdata", "datalist", "lhcb_ap_datalist", "script"):
             return
         if environment == DEFAULT_ENVIRONMENT:
             return

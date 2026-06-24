@@ -160,11 +160,23 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         return self._use_eos
 
     def use_kerberos(self):
-        """Check if the job is set to use Kerberos authentication."""
+        """Check if the job is set to use Kerberos authentication.
+
+        Also enables Kerberos automatically if any predecessor task is an
+        LHCb AP data list, since AP datasets are stored on EOS.
+        """
         if self._use_kerberos is not None:
             return self._use_kerberos
         config = metadata.ConfigFile(os.path.join(os.environ["HOME"], ".Yuki", "config.json"))
         self._use_kerberos = config.read_variable("use_kerberos", {}).get(self.machine_id, False)
+        if not self._use_kerberos:
+            try:
+                for pred in self.predecessors():
+                    if pred.environment() == "lhcb_ap_datalist":
+                        self._use_kerberos = True
+                        break
+            except Exception:
+                pass
         return self._use_kerberos
 
     def set_status(self, status, detailed_message=None):

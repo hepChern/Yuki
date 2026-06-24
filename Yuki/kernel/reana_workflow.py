@@ -108,6 +108,18 @@ class ReanaWorkflow(VWorkflow):
                 }
         reana_json["workflow"]["type"] = "snakemake"
         reana_json["workflow"]["file"] = "Snakefile"
+
+        # Collect unique CVMFS repositories from all steps and add them as
+        # workflow-level resources (required by REANA for CVMFS mounting).
+        cvmfs_repos = set()
+        for step in self.steps:
+            for repo in step.get("cvmfs", []):
+                cvmfs_repos.add(repo)
+        if cvmfs_repos:
+            reana_json["workflow"]["resources"] = {
+                "cvmfs": sorted(cvmfs_repos)
+            }
+
         self.logger(f"reana_json: {json.dumps(reana_json, indent=2)}")
         client.create_workflow(
                 reana_json,
@@ -262,10 +274,17 @@ class ReanaWorkflow(VWorkflow):
                 self.get_access_token(self.machine_id)
             )
         yaml_file = metadata.YamlFile(os.path.join(self.path, "reana.yaml"))
-        yaml_file.write_variable("workflow", {
+        workflow_def = {
             "type": "snakemake",
             "file": "Snakefile",
-            })
+        }
+        cvmfs_repos = set()
+        for step in self.steps:
+            for repo in step.get("cvmfs", []):
+                cvmfs_repos.add(repo)
+        if cvmfs_repos:
+            workflow_def["resources"] = {"cvmfs": sorted(cvmfs_repos)}
+        yaml_file.write_variable("workflow", workflow_def)
         with open(os.path.join(self.path, "reana.yaml"), "rb") as f:
             self.logger("Uploading reana.yaml")
             client.upload_file(

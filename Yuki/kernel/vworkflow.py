@@ -431,14 +431,21 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                 snake_file, snakemake_rule["environment"], 1)
             snake_file.addline("resources:", 1)
             compute_backend = snakemake_rule["compute_backend"]
-            if job.use_eos() and use_kerberos:
-                snake_file.addline('kerberos=True,', 2)
+            resource_lines = []
+            if job.use_kerberos():
+                resource_lines.append('kerberos=True')
             if compute_backend == "htcondorcern":
-                snake_file.addline(f'compute_backend="{snakemake_rule["compute_backend"]}",', 2)
-                snake_file.addline('htcondor_max_runtime="espresso",', 2)
-                snake_file.addline('kerberos=True,', 2)
+                resource_lines.append(f'compute_backend="{snakemake_rule["compute_backend"]}"')
+                resource_lines.append('htcondor_max_runtime="espresso"')
+                resource_lines.append('kerberos=True')
             else:
-                snake_file.addline(f'kubernetes_memory_limit="{snakemake_rule["memory"]}"', 2)
+                resource_lines.append(f'kubernetes_memory_limit="{snakemake_rule["memory"]}"')
+            cvmfs_repos = snakemake_rule.get("cvmfs", [])
+            if cvmfs_repos:
+                resource_lines.append(f'cvmfs="{",".join(cvmfs_repos)}"')
+            for i, line in enumerate(resource_lines):
+                suffix = "," if i < len(resource_lines) - 1 else ""
+                snake_file.addline(line + suffix, 2)
             snake_file.addline("shell:", 1)
             snake_file.addline(f'"{" && ".join(snakemake_rule["commands"])}"', 2)
             self.logger(f"[{i+1}/{total_jobs}] Added shell and resources at time "

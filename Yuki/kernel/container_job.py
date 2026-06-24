@@ -1,3 +1,4 @@
+
 """
 Virtual Container module for Yuki kernel.
 
@@ -83,9 +84,15 @@ class ContainerJob(VJob):
         # print("self.is_input", self.is_input)
         # print("self.use_eos()", self.use_eos())
 
-        # Run datalist generator if this is a datalist task
-        if self.environment() == "datalist":
+        # Run datalist generator if this is a datalist task (and not an input)
+        if self.environment() == "datalist" and not self.is_input:
             commands.append(f"python3 ../imp{self.short_uuid()}/generate_datalist.py")
+        # Run LHCb AP datalist generator if this is an LHCb AP datalist task (and not an input)
+        if self.environment() == "lhcb_ap_datalist" and not self.is_input:
+            short = self.short_uuid()
+            commands.append("export APD_USER_TOKEN_FILE=$(pwd)/lbapi_key.json")
+            commands.append("apd-login")
+            commands.append(f"python3 ../imp{short}/generate_lhcb_ap_datalist.py")
 
         if (not self.is_input) and self.use_eos():
             # print("Using EOS for stageout")
@@ -138,6 +145,15 @@ class ContainerJob(VJob):
 
         return processed_commands
 
+    def lhcb_ap_environment(self):
+        """
+        Get the container environment for LHCb AP data list jobs.
+
+        Returns:
+            str: Docker image specification with the LHCb AP tool installed
+        """
+        return "docker://celebichrono/lhcb-apd:0.9.0"
+
     def _create_reana_step_metadata(self):
         """
         Create step metadata for REANA execution.
@@ -145,10 +161,12 @@ class ContainerJob(VJob):
         Returns:
             dict: Dictionary containing REANA-specific step metadata
         """
-        environment = self.default_environment() \
-                if self.is_input \
-                or self.environment() == "datalist" \
-                else self.environment()
+        if self.is_input or self.environment() == "datalist":
+            environment = self.default_environment()
+        elif self.environment() == "lhcb_ap_datalist":
+            environment = self.lhcb_ap_environment()
+        else:
+            environment = self.environment()
         compute_backend = self.compute_backend()
 
         step = {
@@ -156,8 +174,13 @@ class ContainerJob(VJob):
             "name": f"step{self.short_uuid()}"
         }
 
-        if self.use_eos() and self.use_kerberos():
+        if self.use_kerberos():
             step["kerberos"] = True
+
+        cvmfs_repos = self.cvmfs()
+        if cvmfs_repos:
+            step["cvmfs"] = cvmfs_repos
+            step["resources"] = {"cvmfs": cvmfs_repos}
 
         if compute_backend != "unsigned":
             step["compute_backend"] = compute_backend
@@ -192,9 +215,15 @@ class ContainerJob(VJob):
         commands.extend(self._create_symlink_commands())
         commands.extend(self._process_user_commands())
 
-        # Run datalist generator if this is a datalist task
-        if self.environment() == "datalist":
+        # Run datalist generator if this is a datalist task (and not an input)
+        if self.environment() == "datalist" and not self.is_input:
             commands.append(f"python3 ../imp{self.short_uuid()}/generate_datalist.py")
+        # Run LHCb AP datalist generator if this is an LHCb AP datalist task (and not an input)
+        if self.environment() == "lhcb_ap_datalist" and not self.is_input:
+            short = self.short_uuid()
+            commands.append("export APD_USER_TOKEN_FILE=$(pwd)/lbapi_key.json")
+            commands.append("apd-login")
+            commands.append(f"python3 ../imp{short}/generate_lhcb_ap_datalist.py")
 
         if (not self.is_input) and self.use_eos():
             print("Using EOS for stageout")
@@ -209,6 +238,9 @@ class ContainerJob(VJob):
         step = self._create_step_metadata()
         step["commands"] = commands
         step["inputs"] = self._get_step_inputs()
+        cvmfs_repos = self.cvmfs()
+        if cvmfs_repos:
+            step["cvmfs"] = cvmfs_repos
 
         return step
 
@@ -337,10 +369,12 @@ class ContainerJob(VJob):
         Returns:
             dict: Dictionary containing step metadata
         """
-        environment = self.default_environment() \
-                if self.is_input \
-                or self.environment() == "datalist" \
-                else self.environment()
+        if self.is_input or self.environment() == "datalist":
+            environment = self.default_environment()
+        elif self.environment() == "lhcb_ap_datalist":
+            environment = self.lhcb_ap_environment()
+        else:
+            environment = self.environment()
         compute_backend = self.compute_backend()
 
         step = {
@@ -433,6 +467,15 @@ class ContainerJob(VJob):
         """
         return self.yaml_file.read_variable("compute_backend", "unsigned")
 
+    def cvmfs(self):
+        """
+        Get the list of CVMFS repositories required by this job.
+
+        Returns:
+            list: List of CVMFS repository names
+        """
+        return self.yaml_file.read_variable("cvmfs", [])
+
     def parameters(self):
         """
         Read the parameters from the YAML configuration file.
@@ -497,9 +540,72 @@ print(f"Generated dataList.txt with {{len(DATALIST)}} entries")
         os.chmod(script_path, 0o755)
         return script_path
 
+    def _create_lhcb_ap_datalist_generator(self):
+        """
+        Create the generate_lhcb_ap_datalist.py script that queries LHCb AP tool.
+
+        Reads the ap_config from celebi.yaml, reads the apd_token from the
+        deposited config.local.json, creates lbapi_key.json in contents, and
+        generates a Python script that:
+        1. Sets up AP authentication via lbapi_key.json
+        2. Queries datasets using apd.get_analysis_data()
+        3. Filters using the returned datasets() callable
+        4. Writes the resulting paths to stageout/dataList.txt
+
+        Returns:
+            str: Path to the created generator script
+        """
+        ap_config = self.yaml_file.read_variable("ap_config", {})
+        gda = ap_config.get("get_analysis_data", {})
+        ds = ap_config.get("datasets", {})
+
+        # Build the positional and keyword arguments for the script
+        gda_args = repr(gda.get("args", []))
+        gda_kwargs = repr(gda.get("kwargs", {}))
+        ds_kwargs = repr(ds.get("kwargs", {}))
+
+        # Read the APD token from the deposited config.local.json and write
+        # lbapi_key.json inside the job contents.
+        token = ""
+        local_config_path = os.path.join(self.path, "config.local.json")
+        if os.path.exists(local_config_path):
+            local_config = metadata.ConfigFile(local_config_path)
+            token = local_config.read_variable("apd_token", "")
+        key_path = os.path.join(self.path, "contents", "lbapi_key.json")
+        if token:
+            with open(key_path, "w", encoding="utf-8") as f:
+                f.write(f'"{token}"')
+
+        script_content = f'''#!/usr/bin/env python3
+"""Generate dataList.txt by querying the LHCb Analysis Productions tool."""
+
+import apd
+
+# Query datasets from AP
+datasets = apd.get_analysis_data(*{gda_args}, **{gda_kwargs}, metadata_cache=".", data_cache=".")
+paths = datasets(**{ds_kwargs})
+
+# Strip the EOS protocol prefix from paths if present
+prefix = "root://eoslhcb.cern.ch/"
+clean_paths = [p[len(prefix):] if p.startswith(prefix) else p for p in paths]
+
+# Write dataList.txt
+with open("stageout/dataList.txt", "w") as f:
+    for p in clean_paths:
+        f.write(str(p) + "\\n")
+print(f"Generated dataList.txt with {{len(clean_paths)}} entries")
+'''
+        # Write script to contents directory
+        script_path = os.path.join(self.path, "contents", "generate_lhcb_ap_datalist.py")
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(script_content)
+        # Make executable
+        os.chmod(script_path, 0o755)
+        return script_path
+
     def files(self):
         """
-        Get list of files in this job, including datalist generator if applicable.
+        Get list of files in this job, including datalist generators if applicable.
 
         Returns:
             list: List of file paths
@@ -510,4 +616,11 @@ print(f"Generated dataList.txt with {{len(DATALIST)}} entries")
             self._create_datalist_generator()
             # Add it to the file list (format: short_uuid/filename)
             file_list.append(f"{self.short_uuid()}/generate_datalist.py")
+        if self.environment() == "lhcb_ap_datalist":
+            # Create the AP datalist generator script (also writes lbapi_key.json)
+            self._create_lhcb_ap_datalist_generator()
+            # Add them to the file list (format: short_uuid/filename)
+            file_list.append(f"{self.short_uuid()}/generate_lhcb_ap_datalist.py")
+            if os.path.exists(os.path.join(self.path, "contents", "lbapi_key.json")):
+                file_list.append(f"{self.short_uuid()}/lbapi_key.json")
         return file_list

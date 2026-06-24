@@ -37,6 +37,14 @@ def upload_file():
         os.path.join(target_dir, config_file)
     )
 
+    # Save config.local.json if provided; Yuki uses it for per-task local
+    # settings such as the APD token.
+    local_config_file = request.files.get("config.local.json")
+    if local_config_file:
+        local_config_file.save(
+            os.path.join(target_dir, "config.local.json")
+        )
+
     return "Successful"
 
 # @bp.route('/upload', methods=['GET', 'POST'])
