@@ -11,6 +11,3 @@
   - Emit `cvmfs="..."` in Snakefile rule resources.
   - Add workflow-level `resources.cvmfs` to the uploaded `reana.yaml`.
 + Bump version to 1.0.0b2.
-
-## v0.0.4
-+ Initial release of Yuki server and workflow engine.
