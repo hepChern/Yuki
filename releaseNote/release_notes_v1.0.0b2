@@ -1,0 +1,16 @@
+## v1.0.0b2
++ Add runtime support for `lhcb_ap_datalist` tasks.
+  - Generate `lbapi_key.json` from the deposited `config.local.json` APD token.
+  - Use `docker://celebichrono/lhcb-apd:0.9.0` container for AP tasks.
+  - Run `apd-login` before the AP dataset query.
+  - Strip `root://eoslhcb.cern.ch/` prefix from returned paths.
++ Auto-enable Kerberos for any task that has an `lhcb_ap_datalist` predecessor.
++ Treat finished `lhcb_ap_datalist` tasks as inputs when used by downstream tasks to avoid re-running.
++ Add CVMFS repository support.
+  - Read `cvmfs` list from `celebi.yaml`.
+  - Emit `cvmfs="..."` in Snakefile rule resources.
+  - Add workflow-level `resources.cvmfs` to the uploaded `reana.yaml`.
++ Bump version to 1.0.0b2.
+
+## v0.0.4
++ Initial release of Yuki server and workflow engine.
