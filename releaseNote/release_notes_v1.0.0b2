@@ -10,4 +10,7 @@
   - Read `cvmfs` list from `celebi.yaml`.
   - Emit `cvmfs="..."` in Snakefile rule resources.
   - Add workflow-level `resources.cvmfs` to the uploaded `reana.yaml`.
++ Add runner management endpoints.
+  - `PATCH /update-runner/<runner>` to update runner settings.
+  - `GET /runners-config` to return full runner configurations.
 + Bump version to 1.0.0b2.
