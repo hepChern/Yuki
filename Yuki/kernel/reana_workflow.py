@@ -462,6 +462,26 @@ class ReanaWorkflow(VWorkflow):
             return size.get("raw", 0) or 0
         return size or 0
 
+    def _list_files(self, impression, kind, attempts=3):
+        """Call REANA list_files with bounded retry for transient TLS/connection
+        failures (e.g. SSL UNEXPECTED_EOF_WHILE_READING, seen intermittently
+        against reana.cern.ch). Returns the file list, or re-raises the last
+        error if every attempt fails."""
+        target = "imp" + impression[0:7] + "/" + kind
+        last = None
+        for i in range(attempts):
+            try:
+                return client.list_files(
+                    self.get_name(), self.get_access_token(self.machine_id), target)
+            except Exception as e:  # transient TLS/connection -> retry
+                last = e
+                self.logger(
+                    f"list_files {target} attempt {i + 1}/{attempts} failed "
+                    f"[{type(e).__name__}]: {e!r}")
+                if i + 1 < attempts:
+                    time.sleep(0.5 * (i + 1))
+        raise last
+
     def list_runner_files(self, impression, kind="stageout"):
         """List files in the runner workspace under imp<short>/<kind> without
         downloading. Returns [{"name": <relative-to-kind>, "size": int}]."""
@@ -470,18 +490,11 @@ class ReanaWorkflow(VWorkflow):
         self.set_environment(self.machine_id)
         prefix = "imp" + impression[0:7] + "/" + kind + "/"
         try:
-            files = client.list_files(
-                self.get_name(),
-                self.get_access_token(self.machine_id),
-                "imp" + impression[0:7] + "/" + kind,
-            )
+            files = self._list_files(impression, kind)
         except Exception as e:
-            import traceback
             self.logger(
-                f"Failed to list runner files for imp{impression[0:7]}/{kind} "
-                f"[{type(e).__name__}]: {e!r}"
-            )
-            self.logger(traceback.format_exc())
+                f"Giving up listing imp{impression[0:7]}/{kind} after retries "
+                f"[{type(e).__name__}]: {e!r}")
             return []
         result = []
         for f in files:
@@ -501,18 +514,11 @@ class ReanaWorkflow(VWorkflow):
                             self.project_uuid, impression, self.machine_id)
         prefix = "imp" + impression[0:7] + "/" + kind + "/"
         try:
-            files = client.list_files(
-                self.get_name(),
-                self.get_access_token(self.machine_id),
-                "imp" + impression[0:7] + "/" + kind,
-            )
+            files = self._list_files(impression, kind)
         except Exception as e:
-            import traceback
             self.logger(
-                f"Failed to list runner files for imp{impression[0:7]}/{kind} "
-                f"[{type(e).__name__}]: {e!r}"
-            )
-            self.logger(traceback.format_exc())
+                f"Giving up listing imp{impression[0:7]}/{kind} after retries "
+                f"[{type(e).__name__}]: {e!r}")
             return
         os.makedirs(os.path.join(path, kind), exist_ok=True)
         for f in files:

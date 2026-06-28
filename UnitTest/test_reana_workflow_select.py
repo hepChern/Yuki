@@ -50,6 +50,42 @@ def test_list_runner_files_normalizes_reana_size_dict():
     assert all(isinstance(f["size"], int) for f in out)
 
 
+def test_list_runner_files_retries_transient_then_succeeds():
+    """A transient list_files failure (e.g. SSL EOF) is retried; on recovery
+    the files are returned rather than degrading to an empty listing."""
+    wf = _make_wf()
+    fake = [{"name": "imp1234567/stageout/mass.png",
+             "size": {"raw": 5, "human_readable": "5 B"}}]
+    calls = {"n": 0}
+
+    def flaky(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("[SSL: UNEXPECTED_EOF_WHILE_READING]")
+        return fake
+
+    with mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
+         mock.patch.object(reana_workflow, "client") as cli, \
+         mock.patch.object(reana_workflow.time, "sleep", lambda *_a: None):
+        cli.list_files.side_effect = flaky
+        out = wf.list_runner_files("1234567abc", "stageout")
+    assert calls["n"] == 2                       # failed once, retried, succeeded
+    assert out == [{"name": "mass.png", "size": 5}]
+
+
+def test_list_runner_files_returns_empty_when_all_retries_fail():
+    """If every attempt fails (runner unreachable), degrade to [] instead of
+    raising, so status can still render the Storage-only view."""
+    wf = _make_wf()
+    with mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
+         mock.patch.object(reana_workflow, "client") as cli, \
+         mock.patch.object(reana_workflow.time, "sleep", lambda *_a: None):
+        cli.list_files.side_effect = RuntimeError("[SSL: UNEXPECTED_EOF_WHILE_READING]")
+        out = wf.list_runner_files("1234567abc", "stageout")
+    assert out == []
+    assert cli.list_files.call_count == 3        # bounded retry, then give up
+
+
 def test_download_selected_only_matching_and_skips_existing(tmp_path):
     wf = _make_wf()
     home = tmp_path
