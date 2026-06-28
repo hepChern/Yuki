@@ -46,3 +46,37 @@ def test_all_includes_data(tmp_path):
     _layout(tmp_path)
     names = _run(_booker(), tmp_path, "all")
     assert any(n.endswith("stageout/ntuple.root") for n in names)
+
+
+def test_book_project_default_uploads_plots(tmp_path):
+    """Regression: a default book (plots+logs, no legacy --stageout) must run
+    the output-upload step and upload plots from Yuki storage. The old
+    `if stageout:` gate skipped the upload for every mode except 'all'."""
+    b = _booker()
+    b.server_url = "http://reana"
+    # Stub the REANA-facing / project-walking collaborators so the test isolates
+    # the upload gate; only _upload_stageout_files should drive reana upload_file.
+    b._setup_env = lambda: None
+    b._get_workflow = lambda name: None                       # force create path
+    b._create_workflow = lambda name, project_path="": {"workflow_id": "wf-1"}
+    b._download_workspace_file = lambda *a, **k: None
+    b._clear_old_folders = lambda *a, **k: False
+    b._build_repo_metadata = lambda project_path: {
+        "objects": [{"impression": "imp-abc", "path": "t"}]}
+    b._upload_files = lambda *a, **k: None
+    b._upload_repo_yaml = lambda *a, **k: None
+
+    _layout(tmp_path)
+    proj = tmp_path / "proj"
+    (proj / ".celebi").mkdir(parents=True)
+    (proj / ".celebi" / "config.json").write_text('{"project_uuid": "proj-1"}')
+
+    uploaded = []
+    with mock.patch.dict(os.environ, {"YUKIDIR": str(tmp_path / ".Yuki")}), \
+         mock.patch.object(reana_booker, "reana_client") as rc:
+        rc.upload_file.side_effect = lambda **kw: uploaded.append(kw["file_name"])
+        b.book_project(str(proj), "test")          # default upload_mode -> plots+logs
+
+    assert any(n.endswith("stageout/mass.png") for n in uploaded)   # plot uploaded
+    assert any(n.endswith("logs/celebi.stdout") for n in uploaded)  # logs uploaded
+    assert not any(n.endswith("ntuple.root") for n in uploaded)     # data excluded

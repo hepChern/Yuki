@@ -94,14 +94,17 @@ class ReanaBooker:
             pass
 
     def book_project(self, project_path: str, project_name: str,
-                     stageout: bool = False, upload_mode: str = "plots+logs") -> Message:
+                     upload_mode: str = "plots+logs") -> Message:
         """Book a project to REANA.
 
         Args:
             project_path: Path to the extracted project directory.
             project_name: Name of the project.
-            stageout: If True, also upload stageout files from Yuki storage
-                to [reana_workspace]/impression_data/[impression_id]/stageout.
+            upload_mode: Selection spec for which outputs to upload from Yuki
+                storage to [reana_workspace]/impression_data/[impression_id]/.
+                One of plots+logs (default), plots, data, data+logs, logs, all,
+                or a glob. The legacy "stageout-or-nothing" toggle is gone:
+                the upload step always runs and upload_mode decides what.
 
         Returns:
             Message: Collected progress messages. If a progress_callback
@@ -190,13 +193,14 @@ class ReanaBooker:
             msg.data["server_url"] = self.server_url
             return msg
 
-        # Upload stageout files if requested
-        if stageout:
-            try:
-                self._upload_stageout_files(workflow_id, project_path, new_metadata, upload_mode=upload_mode)
-            except Exception as e:
-                logger.warning("Stageout upload failed: %s", e)
-                self._notify(f"Stageout upload warning: {e}\n", "warning")
+        # Upload selected outputs (plots/data/logs per upload_mode) from Yuki
+        # storage. This always runs; upload_mode decides what gets uploaded.
+        try:
+            self._upload_stageout_files(workflow_id, project_path, new_metadata,
+                                        upload_mode=upload_mode)
+        except Exception as e:
+            logger.warning("Stageout upload failed: %s", e)
+            self._notify(f"Stageout upload warning: {e}\n", "warning")
 
         msg = Message()
         msg.messages = self._progress_messages[:]
