@@ -298,7 +298,7 @@ class TestReanaBooker(unittest.TestCase):
                 ]
             }
 
-            self.booker._upload_stageout_files("workflow-123", tmpdir, repo_metadata)
+            self.booker._upload_stageout_files("workflow-123", tmpdir, repo_metadata, upload_mode="all")
 
         calls = mock_upload_file.call_args_list
         uploaded_files = [c.kwargs.get("file_name", "") for c in calls]

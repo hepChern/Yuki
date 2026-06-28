@@ -15,6 +15,8 @@ from reana_commons.api_client import BaseAPIClient
 from CelebiChrono.utils.message import Message
 from CelebiChrono.utils import metadata
 
+from . import file_types
+
 logger = getLogger("YukiLogger")
 
 
@@ -92,7 +94,7 @@ class ReanaBooker:
             pass
 
     def book_project(self, project_path: str, project_name: str,
-                     stageout: bool = False) -> Message:
+                     stageout: bool = False, upload_mode: str = "plots+logs") -> Message:
         """Book a project to REANA.
 
         Args:
@@ -191,7 +193,7 @@ class ReanaBooker:
         # Upload stageout files if requested
         if stageout:
             try:
-                self._upload_stageout_files(workflow_id, project_path, new_metadata)
+                self._upload_stageout_files(workflow_id, project_path, new_metadata, upload_mode=upload_mode)
             except Exception as e:
                 logger.warning("Stageout upload failed: %s", e)
                 self._notify(f"Stageout upload warning: {e}\n", "warning")
@@ -477,7 +479,7 @@ class ReanaBooker:
             logger.warning("Failed to upload reana_repo.yaml: %s", e)
 
     def _upload_stageout_files(self, workflow_id: str, project_path: str,
-                                repo_metadata: dict):
+                                repo_metadata: dict, upload_mode: str = "plots+logs"):
         """Upload stageout files from Yuki storage to REANA workspace.
 
         Looks up stageout files in ~/.Yuki/Storage/{project_uuid}/
@@ -488,6 +490,7 @@ class ReanaBooker:
             workflow_id: REANA workflow ID.
             project_path: Path to the extracted project directory.
             repo_metadata: Project metadata dict with impression UUIDs.
+            upload_mode: Selection spec for what to upload (plots/data/all/logs).
         """
         # Read project UUID from project's config
         project_config_path = os.path.join(project_path, ".celebi", "config.json")
@@ -539,6 +542,20 @@ class ReanaBooker:
         )
         total_uploaded = 0
 
+        tokens = set(upload_mode.split("+"))
+        include_logs = "logs" in tokens or "all" in tokens
+        if "all" in tokens:
+            stageout_spec = "all"
+        elif "data" in tokens and "plots" in tokens:
+            stageout_spec = "all"
+        elif "data" in tokens:
+            stageout_spec = "data"
+        elif "plots" in tokens:
+            stageout_spec = "plots"
+        else:
+            stageout_spec = None     # logs-only mode uploads no stageout
+        stage_pred = file_types.make_predicate(stageout_spec) if stageout_spec else (lambda n: False)
+
         for impression_id in impressions:
             impression_dir = os.path.join(storage_base, impression_id)
             if not os.path.isdir(impression_dir):
@@ -554,6 +571,8 @@ class ReanaBooker:
                 # Walk and upload all files in this stageout directory
                 for root, _dirs, files in os.walk(stageout_dir):
                     for filename in files:
+                        if not stage_pred(filename):
+                            continue
                         file_path = os.path.join(root, filename)
                         rel_path = os.path.relpath(file_path, stageout_dir)
                         upload_name = (
@@ -576,6 +595,25 @@ class ReanaBooker:
                                 "Failed to upload stageout file %s: %s",
                                 upload_name, e
                             )
+
+                if include_logs:
+                    logs_dir = os.path.join(impression_dir, runner_id, "logs")
+                    if os.path.isdir(logs_dir):
+                        for root, _dirs, files in os.walk(logs_dir):
+                            for filename in files:
+                                file_path = os.path.join(root, filename)
+                                rel_path = os.path.relpath(file_path, logs_dir)
+                                upload_name = (
+                                    f"impression_data/{impression_id}/logs/{rel_path}")
+                                try:
+                                    with open(file_path, "rb") as f:
+                                        content = f.read()
+                                    reana_client.upload_file(
+                                        workflow=workflow_id, file_=content,
+                                        file_name=upload_name, access_token=self.access_token)
+                                    total_uploaded += 1
+                                except Exception as e:
+                                    logger.warning("Failed to upload log %s: %s", upload_name, e)
 
         if total_uploaded:
             self._notify(
