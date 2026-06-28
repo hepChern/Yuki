@@ -4,16 +4,20 @@ This module provides the ImpressionStorage class for managing workflow operation
 and status tracking for individual impressions across different execution runners.
 """
 import os
+import json
 from CelebiChrono.utils.metadata import ConfigFile
 from . import file_types
 from .vjob import VJob
 from .vworkflow import VWorkflow
 from .status_constants import CODA, FAILED, DISSONANCE, translate_to_musical
-from ..server.config import config
 
 class ImpressionStorage:
     """Storage manager for impression workflow operations and status tracking."""
     def __init__(self, project_uuid, impression):
+        # Imported lazily: Yuki.server.config pulls in the server package, whose
+        # routes import this module — a module-level import here would create a
+        # circular import (impression_storage -> server -> routes -> impression_storage).
+        from ..server.config import config
         self.project_uuid = project_uuid
         self.impression = impression
         self.job_path = config.get_job_path(project_uuid, impression)
