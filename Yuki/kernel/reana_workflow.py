@@ -449,6 +449,19 @@ class ReanaWorkflow(VWorkflow):
             except Exception as e:
                 self.logger(f"Failed to download logs: {e}")
 
+    @staticmethod
+    def _size_bytes(size):
+        """Normalize a REANA file size to int bytes.
+
+        REANA's list_files reports size as {"raw": <int>, "human_readable":
+        <str>}; the native runner and older REANA report a bare int. Flatten
+        to int so the file_status JSON contract (size: int) always holds and
+        the client's _human_size() never receives a dict.
+        """
+        if isinstance(size, dict):
+            return size.get("raw", 0) or 0
+        return size or 0
+
     def list_runner_files(self, impression, kind="stageout"):
         """List files in the runner workspace under imp<short>/<kind> without
         downloading. Returns [{"name": <relative-to-kind>, "size": int}]."""
@@ -475,7 +488,7 @@ class ReanaWorkflow(VWorkflow):
             name = f["name"]
             rel = name[len(prefix):] if name.startswith(prefix) else os.path.basename(name)
             if rel:
-                result.append({"name": rel, "size": f.get("size", 0)})
+                result.append({"name": rel, "size": self._size_bytes(f.get("size", 0))})
         return result
 
     def download_selected(self, impression, predicate, kind="stageout"):
