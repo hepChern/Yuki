@@ -463,7 +463,12 @@ class ReanaWorkflow(VWorkflow):
                 "imp" + impression[0:7] + "/" + kind,
             )
         except Exception as e:
-            self.logger(f"Failed to list runner files: {e}")
+            import traceback
+            self.logger(
+                f"Failed to list runner files for imp{impression[0:7]}/{kind} "
+                f"[{type(e).__name__}]: {e!r}"
+            )
+            self.logger(traceback.format_exc())
             return []
         result = []
         for f in files:
@@ -489,7 +494,12 @@ class ReanaWorkflow(VWorkflow):
                 "imp" + impression[0:7] + "/" + kind,
             )
         except Exception as e:
-            self.logger(f"Failed to list runner files: {e}")
+            import traceback
+            self.logger(
+                f"Failed to list runner files for imp{impression[0:7]}/{kind} "
+                f"[{type(e).__name__}]: {e!r}"
+            )
+            self.logger(traceback.format_exc())
             return
         os.makedirs(os.path.join(path, kind), exist_ok=True)
         for f in files:
