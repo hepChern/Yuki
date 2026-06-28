@@ -69,16 +69,22 @@ class ImpressionStorage:
                 workflow.download_selected(self.impression, predicate, kind)
 
     def file_status(self, kind="stageout"):
-        """Merge runner listing with downloaded Storage state for <kind>."""
+        """Merge runner listing with downloaded Storage state for <kind>.
+
+        The runner listing of a finished job is immutable, so it is cached to
+        <machine>/<kind>.filelist.json after the first successful live fetch and
+        served from there afterwards — sparing a slow, sometimes flaky REANA
+        list_files on every status. See _runner_files for the policy.
+        """
         result = []
-        for name, _job, workflow in self._get_runner_contexts():
+        for name, job, workflow in self._get_runner_contexts():
             machine_id = self.runners_id.get(name)
-            storage_dir = os.path.join(self.job_path, machine_id, kind)
+            machine_dir = os.path.join(self.job_path, machine_id)
+            storage_dir = os.path.join(machine_dir, kind)
             downloaded = set(os.listdir(storage_dir)) if os.path.isdir(storage_dir) else set()
-            try:
-                runner_files = workflow.list_runner_files(self.impression, kind)
-            except Exception:
-                runner_files = []
+
+            runner_files = self._runner_files(job, workflow, kind, machine_dir)
+
             seen = set()
             for rf in runner_files:
                 seen.add(rf["name"])
@@ -99,6 +105,44 @@ class ImpressionStorage:
                     "in_yuki": True,
                 })
         return result
+
+    def _runner_files(self, job, workflow, kind, machine_dir):
+        """Return the runner file listing for <kind>, served from a cache for a
+        finished job to avoid a REANA round-trip on every status.
+
+        Cached to <machine_dir>/<kind>.filelist.json keyed by the job's workflow
+        id (a re-run invalidates it). The cache is only written once the job is
+        finished and the live listing is non-empty, so a transient runner
+        failure (empty result) is never persisted. A running job is always
+        listed live, since its file set is still changing.
+        """
+        finished = job.status(musical=True) == CODA
+        workflow_id = job.workflow_id()
+        cache_path = os.path.join(machine_dir, kind + ".filelist.json")
+
+        if finished and os.path.isfile(cache_path):
+            try:
+                with open(cache_path, encoding="utf-8") as fh:
+                    cached = json.load(fh)
+                if cached.get("workflow_id") == workflow_id:
+                    return cached.get("files", [])
+            except (OSError, ValueError):
+                pass   # unreadable/corrupt cache -> fall through to a live fetch
+
+        try:
+            runner_files = workflow.list_runner_files(self.impression, kind)
+        except Exception:
+            runner_files = []
+
+        if finished and runner_files:
+            try:
+                os.makedirs(machine_dir, exist_ok=True)
+                with open(cache_path, "w", encoding="utf-8") as fh:
+                    json.dump({"workflow_id": workflow_id, "files": runner_files}, fh)
+            except OSError:
+                pass   # best-effort cache; status still works without it
+
+        return runner_files
 
     def collect_outputs(self):
         """Retrieves only output files from runners."""
