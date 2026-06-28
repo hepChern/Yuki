@@ -48,6 +48,26 @@ def test_all_includes_data(tmp_path):
     assert any(n.endswith("stageout/ntuple.root") for n in names)
 
 
+def test_filelist_manifest_uploaded(tmp_path):
+    """The runner file manifest (stageout.filelist.json from status/collect) is
+    uploaded alongside the selected files, so the booked record lists every
+    output even when the large data is not uploaded (default plots+logs)."""
+    base = _layout(tmp_path)
+    (base / "stageout.filelist.json").write_text(
+        '{"workflow_id": "wf-1", "files": ['
+        '{"name": "mass.png", "size": 3}, {"name": "ntuple.root", "size": 99}]}')
+    names = _run(_booker(), tmp_path, "plots+logs")
+    assert "impression_data/imp-abc/stageout.filelist.json" in names   # manifest uploaded
+    assert not any(n.endswith("ntuple.root") for n in names)           # data itself excluded
+
+
+def test_filelist_absent_is_skipped(tmp_path):
+    """No manifest in storage -> nothing extra uploaded, booking still works."""
+    _layout(tmp_path)                                      # no .filelist.json written
+    names = _run(_booker(), tmp_path, "plots+logs")
+    assert not any(n.endswith("stageout.filelist.json") for n in names)
+
+
 def test_book_project_default_uploads_plots(tmp_path):
     """Regression: a default book (plots+logs, no legacy --stageout) must run
     the output-upload step and upload plots from Yuki storage. The old

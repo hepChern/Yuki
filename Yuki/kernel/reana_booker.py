@@ -568,7 +568,27 @@ class ReanaBooker:
             # Each impression may have multiple runner subdirectories:
             # Storage/{project_uuid}/{impression_uuid}/{runner_uuid}/stageout/
             for runner_id in os.listdir(impression_dir):
-                stageout_dir = os.path.join(impression_dir, runner_id, "stageout")
+                runner_dir = os.path.join(impression_dir, runner_id)
+
+                # Upload the runner file manifest (filelist) produced by status/
+                # collect, independent of upload_mode, so the booked record lists
+                # every output even when the large data was not uploaded.
+                filelist_path = os.path.join(runner_dir, "stageout.filelist.json")
+                if os.path.isfile(filelist_path):
+                    manifest_name = (
+                        f"impression_data/{impression_id}/stageout.filelist.json")
+                    try:
+                        with open(filelist_path, "rb") as f:
+                            reana_client.upload_file(
+                                workflow=workflow_id, file_=f.read(),
+                                file_name=manifest_name,
+                                access_token=self.access_token)
+                        total_uploaded += 1
+                    except Exception as e:
+                        logger.warning("Failed to upload filelist %s: %s",
+                                       manifest_name, e)
+
+                stageout_dir = os.path.join(runner_dir, "stageout")
                 if not os.path.isdir(stageout_dir):
                     continue
 
