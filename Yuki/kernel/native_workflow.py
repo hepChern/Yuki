@@ -13,6 +13,7 @@ from CelebiChrono.utils import metadata
 from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
 from .status_constants import FAILED, DISSONANCE, CODA, translate_to_musical, is_terminal_status
+from . import file_types
 
 DEFAULT_ENVIRONMENT = "docker.io/reanahub/reana-env-root6:6.18.04"
 
@@ -415,6 +416,8 @@ class NativeWorkflow(VWorkflow):
         for i, filename in enumerate(filelist):
             src_file = os.path.join(src_path, filename)
             dst_file = os.path.join(dst_path, filename)
+            if os.path.exists(dst_file):
+                continue
             shutil.copy2(src_file, dst_file)
             self.logger(f"[LOCAL] [{i+1}/{total_files}] Collected {label}: {filename}")
 
@@ -449,6 +452,39 @@ class NativeWorkflow(VWorkflow):
             self._collect_artifacts(
                 impression, "logs", "logs.downloaded", "log"
             )
+
+    def list_runner_files(self, impression, kind="stageout"):
+        """List files in the local execution dir under imp<short>/<kind>."""
+        src_path = os.path.join(
+            self.local_exec_path, f"imp{impression[0:7]}", kind)
+        if not os.path.isdir(src_path):
+            return []
+        result = []
+        for filename in os.listdir(src_path):
+            full = os.path.join(src_path, filename)
+            size = os.path.getsize(full) if os.path.isfile(full) else 0
+            result.append({"name": filename, "size": size})
+        return result
+
+    def download_selected(self, impression, predicate, kind="stageout"):
+        """Copy only matching, not-yet-present files into Storage. No marker."""
+        src_path = os.path.join(
+            self.local_exec_path, f"imp{impression[0:7]}", kind)
+        if not os.path.isdir(src_path):
+            self.logger(f"[LOCAL] No {kind} found at: {src_path}")
+            return
+        dst_path = os.path.join(
+            os.environ["HOME"], ".Yuki", "Storage",
+            self.project_uuid, impression, self.machine_id, kind)
+        os.makedirs(dst_path, exist_ok=True)
+        for filename in os.listdir(src_path):
+            if not predicate(filename):
+                continue
+            dst_file = os.path.join(dst_path, filename)
+            if os.path.exists(dst_file):
+                continue
+            shutil.copy2(os.path.join(src_path, filename), dst_file)
+            self.logger(f"[LOCAL] Collected selected {kind}: {filename}")
 
     def get_workflow_logs(self):
         """Persist local engine logs in the same workflow-level location as REANA."""
