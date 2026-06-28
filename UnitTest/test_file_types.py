@@ -26,3 +26,9 @@ def test_make_predicate_glob_and_name():
     name = file_types.make_predicate("mass.png")
     assert glob("ntuple.root") and not glob("mass.png")
     assert name("mass.png") and not name("other.png")
+
+
+def test_is_plot_covers_legacy_image_set():
+    # The old status.py inline set: png/jpg/jpeg/gif must still classify as plot.
+    for ext in (".png", ".jpg", ".jpeg", ".gif"):
+        assert file_types.is_plot("x" + ext) is True
