@@ -10,6 +10,7 @@ import time
 import json
 from CelebiChrono.utils import metadata
 from .vworkflow import VWorkflow
+from . import file_types
 
 from Yuki.kernel.status_constants import (
     PRELUDE, ORCHESTRATING, DISSONANCE, CODA, FINAL_NOTE
@@ -447,6 +448,67 @@ class ReanaWorkflow(VWorkflow):
                         pass
             except Exception as e:
                 self.logger(f"Failed to download logs: {e}")
+
+    def list_runner_files(self, impression, kind="stageout"):
+        """List files in the runner workspace under imp<short>/<kind> without
+        downloading. Returns [{"name": <relative-to-kind>, "size": int}]."""
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
+        prefix = "imp" + impression[0:7] + "/" + kind + "/"
+        try:
+            files = client.list_files(
+                self.get_name(),
+                self.get_access_token(self.machine_id),
+                "imp" + impression[0:7] + "/" + kind,
+            )
+        except Exception as e:
+            self.logger(f"Failed to list runner files: {e}")
+            return []
+        result = []
+        for f in files:
+            name = f["name"]
+            rel = name[len(prefix):] if name.startswith(prefix) else os.path.basename(name)
+            if rel:
+                result.append({"name": rel, "size": f.get("size", 0)})
+        return result
+
+    def download_selected(self, impression, predicate, kind="stageout"):
+        """Download only remote files whose basename satisfies predicate and
+        that are not already in Storage. Does not write the dir marker."""
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
+        path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                            self.project_uuid, impression, self.machine_id)
+        prefix = "imp" + impression[0:7] + "/" + kind + "/"
+        try:
+            files = client.list_files(
+                self.get_name(),
+                self.get_access_token(self.machine_id),
+                "imp" + impression[0:7] + "/" + kind,
+            )
+        except Exception as e:
+            self.logger(f"Failed to list runner files: {e}")
+            return
+        os.makedirs(os.path.join(path, kind), exist_ok=True)
+        for f in files:
+            name = f["name"]
+            rel = name[len(prefix):] if name.startswith(prefix) else os.path.basename(name)
+            if not rel or not predicate(os.path.basename(rel)):
+                continue
+            dest = os.path.join(path, kind, rel)
+            if os.path.exists(dest):
+                continue
+            try:
+                output = client.download_file(
+                    self.get_name(), name, self.get_access_token(self.machine_id))
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "wb") as fh:
+                    fh.write(output[0])
+                self.logger(f"Downloaded selected {kind}: {rel}")
+            except Exception as e:
+                self.logger(f"Failed to download {rel}: {e}")
 
     def ping(self):
         """Ping the REANA server."""
