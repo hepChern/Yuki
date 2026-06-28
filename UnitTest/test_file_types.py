@@ -32,3 +32,11 @@ def test_is_plot_covers_legacy_image_set():
     # The old status.py inline set: png/jpg/jpeg/gif must still classify as plot.
     for ext in (".png", ".jpg", ".jpeg", ".gif"):
         assert file_types.is_plot("x" + ext) is True
+
+
+def test_is_inline_image_excludes_pdf_and_eps():
+    for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"):
+        assert file_types.is_inline_image("x" + ext) is True
+    for ext in (".pdf", ".eps"):
+        assert file_types.is_inline_image("x" + ext) is False
+        assert file_types.is_plot("x" + ext) is True   # still a plot, just not inline

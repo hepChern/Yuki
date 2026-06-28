@@ -7,10 +7,19 @@ import os
 
 PLOT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".svg", ".webp", ".eps"}
 
+INLINE_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
 
 def is_plot(filename):
     """True when the file's extension marks it as a plot/image."""
     return os.path.splitext(filename)[1].lower() in PLOT_EXTENSIONS
+
+
+def is_inline_image(filename):
+    """True when a browser can render the file inline as an <img> (raster or
+    SVG). Narrower than is_plot: excludes .pdf/.eps, which are plots but not
+    inline-renderable images."""
+    return os.path.splitext(filename)[1].lower() in INLINE_IMAGE_EXTENSIONS
 
 
 def classify(filename):
