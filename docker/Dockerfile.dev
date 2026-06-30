@@ -26,6 +26,7 @@ RUN pip install --user --no-cache-dir flask
 RUN pip install --user --no-cache-dir celery
 RUN pip install --user --no-cache-dir setuptools
 RUN pip install --user --no-cache-dir pillow
+RUN pip install --user --no-cache-dir paramiko
 # RUN pip install --user --no-cache-dir -r requirements.txt
 RUN pip install --user build
 

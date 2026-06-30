@@ -29,7 +29,8 @@ dependencies = [
     "reana-client",
     "flask",
     "celery",
-    "pillow"
+    "pillow",
+    "paramiko"
 ]
 
 [project.urls]

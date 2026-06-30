@@ -96,6 +96,9 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         if mode in ("native", "dry"):
             from .native_workflow import NativeWorkflow
             return NativeWorkflow(project_uuid, jobs, uuid)
+        if mode == "ssh":
+            from .ssh_workflow import SshWorkflow
+            return SshWorkflow(project_uuid, jobs, uuid)
         from .reana_workflow import ReanaWorkflow
         return ReanaWorkflow(project_uuid, jobs, uuid)
 
