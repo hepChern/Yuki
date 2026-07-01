@@ -192,21 +192,44 @@ class TestSshWorkflow(unittest.TestCase):
         self.assertIn("yuki_run.sh", cmd)
 
     @patch("paramiko.SSHClient")
+    def test_update_workflow_status_without_local_workflow_info(self, mock_ssh_cls):
+        """SSH status update must work without local workflow_info.json.
+
+        workflow_info.json is uploaded to the remote host by
+        _create_remote_structure; it is not written locally. The status update
+        should derive the job list from self.jobs (loaded from local
+        config.json jobs_info) instead of requiring the remote-only file.
+        """
+        from Yuki.kernel.status_constants import CODA
+        mock_ssh_cls.return_value = self.mock_client
+
+        job = self._make_job("a" * 32)
+        self.workflow.jobs = [job]
+        # Ensure the local workflow directory exists (setUp already creates it).
+        os.makedirs(self.workflow.path, exist_ok=True)
+
+        done_path = f"{self.workflow.remote_exec_path}/{job.short_uuid()}.done"
+        self.mock_sftp.files[done_path] = b""
+        self.mock_sftp.dirs.add(self.workflow.remote_exec_path)
+
+        self.workflow.update_workflow_status()
+
+        results_path = os.path.join(self.workflow.path, "results.json")
+        self.assertTrue(os.path.exists(results_path))
+        results = json.load(open(results_path, encoding="utf-8"))
+        self.assertEqual(results["results"]["status"], "finished")
+        job.set_status.assert_called_with("finished", "Remote execution completed")
+
+    @patch("paramiko.SSHClient")
     def test_update_workflow_status_reports_finished_when_done_files_exist(self, mock_ssh_cls):
         mock_ssh_cls.return_value = self.mock_client
         self.mock_sftp.dirs.add(self.workflow.remote_exec_path)
         short = "a" * 7
         self.mock_sftp.files[f"{self.workflow.remote_exec_path}/{short}.done"] = b""
 
+        job = self._make_job("a" * 32)
+        self.workflow.jobs = [job]
         os.makedirs(self.workflow.path, exist_ok=True)
-        with open(os.path.join(self.workflow.path, "workflow_info.json"), "w", encoding="utf-8") as f:
-            json.dump({
-                "workflow": {
-                    "specification": {
-                        "steps": [{"name": f"step{short}"}]
-                    }
-                }
-            }, f)
 
         self.workflow.update_workflow_status()
 
@@ -216,8 +239,9 @@ class TestSshWorkflow(unittest.TestCase):
         self.assertEqual(results["results"]["progress"]["completed"], 1)
 
     @patch("paramiko.SSHClient")
-    def test_propagate_done_jobs_become_coda(self, mock_ssh_cls):
-        from Yuki.kernel.status_constants import CODA
+    def test_propagate_done_jobs_become_finished(self, mock_ssh_cls):
+        """Completed jobs should be stored with the legacy status 'finished'
+        so the client can display [coda][finished]."""
         mock_ssh_cls.return_value = self.mock_client
         self.mock_sftp.dirs.add(self.workflow.remote_exec_path)
 
@@ -227,7 +251,7 @@ class TestSshWorkflow(unittest.TestCase):
 
         self.workflow.propagate_job_statuses(workflow_terminal=False)
 
-        job.set_status.assert_called_once_with(CODA, "Remote execution completed")
+        job.set_status.assert_called_once_with("finished", "Remote execution completed")
 
     @patch("paramiko.SSHClient")
     def test_download_outputs_pulls_remote_stageout_files(self, mock_ssh_cls):
@@ -279,6 +303,68 @@ class TestSshWorkflow(unittest.TestCase):
         self.mock_client.connect.side_effect = OSError("Connection refused")
 
         self.assertFalse(self.workflow.ping())
+
+    def _prepare_snakefile(self):
+        """Create a local Snakefile so _upload_files_remote has one to upload."""
+        os.makedirs(self.workflow.path, exist_ok=True)
+        snakefile_path = os.path.join(self.workflow.path, "Snakefile")
+        with open(snakefile_path, "w", encoding="utf-8") as f:
+            f.write("rule all:\n    shell: 'true'\n")
+        self.workflow.snakefile_path = snakefile_path
+
+    @patch("paramiko.SSHClient")
+    def test_upload_files_remote_uploads_input_stageout_files(self, mock_ssh_cls):
+        """Input-job data in local Storage must be copied to the remote stageout.
+
+        Downstream jobs resolve their inputs through a ``gen -> ../imp<short>``
+        symlink, so the producer's ``imp<short>/stageout/<file>`` must exist on
+        the remote host before Snakemake runs. Recording it in a manifest is not
+        enough: nothing processes that manifest remotely.
+        """
+        mock_ssh_cls.return_value = self.mock_client
+
+        job = self._make_job("a" * 32, is_input=True)
+        job.machine_id = "runner-uuid"
+        self.workflow.jobs = [job]
+
+        src_stageout = os.path.join(
+            self.tmpdir, ".Yuki", "Storage", self.project_uuid,
+            "a" * 32, "runner-uuid", "stageout",
+        )
+        os.makedirs(src_stageout, exist_ok=True)
+        with open(os.path.join(src_stageout, "data.root"), "wb") as f:
+            f.write(b"input-bytes")
+
+        self._prepare_snakefile()
+
+        self.workflow._upload_files_remote()
+
+        expected = f"{self.workflow.remote_exec_path}/impaaaaaaa/stageout/data.root"
+        self.assertIn(expected, self.mock_sftp.files)
+        self.assertEqual(self.mock_sftp.files[expected], b"input-bytes")
+
+    @patch("paramiko.SSHClient")
+    def test_upload_files_remote_uploads_rawdata_stageout_files(self, mock_ssh_cls):
+        """Rawdata files must be copied to the remote ``imp<short>/stageout`` dir."""
+        mock_ssh_cls.return_value = self.mock_client
+
+        job = self._make_job("b" * 32)
+        job.environment.return_value = "rawdata"
+        job.path = os.path.join(self.tmpdir, "jobs", "b" * 32)
+        self.workflow.jobs = [job]
+
+        rawdata_dir = os.path.join(job.path, "rawdata")
+        os.makedirs(rawdata_dir, exist_ok=True)
+        with open(os.path.join(rawdata_dir, "raw.txt"), "wb") as f:
+            f.write(b"raw-bytes")
+
+        self._prepare_snakefile()
+
+        self.workflow._upload_files_remote()
+
+        expected = f"{self.workflow.remote_exec_path}/impbbbbbbb/stageout/raw.txt"
+        self.assertIn(expected, self.mock_sftp.files)
+        self.assertEqual(self.mock_sftp.files[expected], b"raw-bytes")
 
 
 if __name__ == "__main__":

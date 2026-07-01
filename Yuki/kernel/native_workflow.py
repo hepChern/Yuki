@@ -12,7 +12,7 @@ import json
 from CelebiChrono.utils import metadata
 from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
-from .status_constants import FAILED, DISSONANCE, CODA, translate_to_musical, is_terminal_status
+from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
 from . import file_types
 
 DEFAULT_ENVIRONMENT = "docker.io/reanahub/reana-env-root6:6.18.04"
@@ -253,7 +253,7 @@ class NativeWorkflow(VWorkflow):
             short = job.short_uuid()
             done_path = os.path.join(self.local_exec_path, f"{short}.done")
             if os.path.exists(done_path):
-                job.set_status(CODA, "Local execution completed")
+                job.set_status("finished", "Local execution completed")
                 continue
 
             if not workflow_terminal:

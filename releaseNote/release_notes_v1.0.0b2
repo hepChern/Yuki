@@ -13,4 +13,18 @@
 + Add runner management endpoints.
   - `PATCH /update-runner/<runner>` to update runner settings.
   - `GET /runners-config` to return full runner configurations.
++ Add SSH runner backend for remote workflow execution on generic SSH hosts.
+  - Upload job definition files, inputs, and rawdata to the remote host over SFTP.
+  - Run Snakemake on the remote host over SSH and poll for completion.
+  - Download outputs, logs, and engine logs back to Yuki Storage.
++ Fix SSH runner input/rawdata staging.
+  - Copy staged input and rawdata files directly to `imp<short>/stageout/` on the remote host.
+  - Remove the unused `stage_manifest.json` path that only worked for the local backend.
++ Fix workflow backend-type resolution on reload.
+  - Persist `backend_type` in the workflow's local `config.json`.
+  - Correct the workflow config lookup path to include `<project_uuid>/<uuid>`.
++ Fix SSH workflow status update to read job list from local `jobs_info` instead of the remote-only `workflow_info.json`.
++ Store completed jobs with the legacy status `finished` (musical `coda`) so the client displays `[coda][finished]`.
+  - Migrate existing workflows that stored the raw musical name `coda` to `finished` on the next status poll.
++ Add unit tests for SSH workflow upload, status update, and backend-type persistence.
 + Bump version to 1.0.0b2.

@@ -376,8 +376,16 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         else:
             print("Current status is: ", current_status)
 
-        # Check if current status is terminal (no further updates)
+        # Normalize storage convention: a completed job should store the legacy
+        # status name "finished" rather than the musical name "coda". This
+        # migrates workflows that were marked complete before the convention
+        # change so the client displays [coda][finished] instead of [coda][coda].
         current_musical = translate_to_musical(current_status)
+        if current_musical == CODA and current_status != "finished":
+            self.set_status("finished", self.detailed_status())
+            current_status = "finished"
+
+        # Check if current status is terminal (no further updates)
         if is_terminal_status(current_musical):
             return
 

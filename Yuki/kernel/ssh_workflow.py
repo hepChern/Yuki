@@ -13,7 +13,7 @@ from logging import getLogger
 from CelebiChrono.utils import metadata
 from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
-from .status_constants import FAILED, DISSONANCE, CODA, translate_to_musical, is_terminal_status
+from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
 from . import file_types
 
 logger = getLogger("YukiLogger")
@@ -256,17 +256,19 @@ class SshWorkflow(VWorkflow):
             ssh.put_text(json.dumps(workflow_info, indent=2), remote_info_path)
 
     def _upload_files_remote(self):  # pylint: disable=too-many-locals
-        """Upload all files to the remote execution directory."""
-        stage_manifest = []
+        """Upload all files to the remote execution directory.
 
+        Unlike the native backend, the remote host has no FileStager to resolve
+        a stage manifest, so input and rawdata files are copied directly into
+        each job's ``imp<short>/stageout`` directory. Downstream jobs reach them
+        through their ``gen -> ../imp<short>`` symlink (``gen/stageout/...``).
+        """
         with self._ssh() as ssh:
             total_jobs = len(self.jobs)
             for j_idx, job in enumerate(self.jobs):
                 files = job.files()
                 total_files = len(files)
                 for f_idx, name in enumerate(files):
-                    if "/stageout/" in name:
-                        continue
                     src_path = os.path.join(job.path, "contents", name[8:])
                     dst_path = f"{self.remote_exec_path}/imp{name}"
                     if os.path.exists(src_path):
@@ -283,15 +285,13 @@ class SshWorkflow(VWorkflow):
                         total_raw = len(filelist)
                         for f_idx, filename in enumerate(filelist):
                             src_path = os.path.join(rawdata_path, filename)
-                            dst_rel = f"imp{job.short_uuid()}/stageout/{filename}"
-                            stage_manifest.append({
-                                "type": "rawdata",
-                                "job_uuid": job.uuid,
-                                "src_path": src_path,
-                                "dst_rel": dst_rel,
-                            })
+                            dst_path = (
+                                f"{self.remote_exec_path}/"
+                                f"imp{job.short_uuid()}/stageout/{filename}"
+                            )
+                            ssh.put(src_path, dst_path)
                             self.logger(
-                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Queued rawdata "
+                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded rawdata "
                                 f"{f_idx+1}/{total_raw}: {filename}"
                             )
 
@@ -311,26 +311,15 @@ class SshWorkflow(VWorkflow):
                         total_input = len(filelist)
                         for f_idx, filename in enumerate(filelist):
                             src_path = os.path.join(src_stageout, filename)
-                            dst_rel = f"imp{job.short_uuid()}/stageout/{filename}"
-                            stage_manifest.append({
-                                "type": "input",
-                                "job_uuid": job.uuid,
-                                "machine_id": job.machine_id,
-                                "src_path": src_path,
-                                "dst_rel": dst_rel,
-                            })
+                            dst_path = (
+                                f"{self.remote_exec_path}/"
+                                f"imp{job.short_uuid()}/stageout/{filename}"
+                            )
+                            ssh.put(src_path, dst_path)
                             self.logger(
-                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Queued input "
+                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded input "
                                 f"{f_idx+1}/{total_input}: {filename}"
                             )
-
-            if stage_manifest:
-                remote_manifest_path = f"{self.remote_exec_path}/stage_manifest.json"
-                ssh.put_text(
-                    json.dumps({"entries": stage_manifest}, indent=2),
-                    remote_manifest_path
-                )
-                self.logger(f"[SSH] Stage manifest uploaded: {len(stage_manifest)} entries")
 
             ssh.put(self.snakefile_path, f"{self.remote_exec_path}/Snakefile")
             self.logger("[SSH] Uploaded: Snakefile")
@@ -404,7 +393,7 @@ echo $? > yuki.exit
                 short = job.short_uuid()
                 done_path = f"{self.remote_exec_path}/{short}.done"
                 if ssh.exists(done_path):
-                    job.set_status(CODA, "Remote execution completed")
+                    job.set_status("finished", "Remote execution completed")
                     continue
 
                 if not workflow_terminal:
@@ -428,13 +417,14 @@ echo $? > yuki.exit
             all_done = True
             self.logger("[SSH] Checking jobs status...")
 
-            workflow_info_json = os.path.join(self.path, "workflow_info.json")
-            with open(workflow_info_json, "r", encoding='utf-8') as f:
-                workflow_info = json.load(f)
-            jobs = []
-            for step in workflow_info["workflow"]["specification"]["steps"]:
-                name = step["name"]
-                jobs.append(name[4:])
+            # Derive the tracked jobs from self.jobs (loaded from local
+            # config.json jobs_info when the workflow is reloaded). Do not rely
+            # on workflow_info.json, which is only uploaded to the remote host.
+            jobs = [
+                job.short_uuid()
+                for job in self.jobs
+                if not job.is_input and job.job_type() != "algorithm"
+            ]
 
             with self._ssh() as ssh:
                 for job_uuid in jobs:

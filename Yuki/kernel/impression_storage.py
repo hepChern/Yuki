@@ -170,7 +170,7 @@ class ImpressionStorage:
     def watermark(self):
         """Applies watermarks to the stored results."""
         for name, job, workflow in self._get_runner_contexts():
-            if job.status() == CODA:
+            if job.status(musical=True) == CODA:
                 print(f"[{name}] Applying watermarks...")
                 workflow.watermark(self.impression)
 

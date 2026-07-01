@@ -71,8 +71,9 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         self.assertTrue(os.path.isdir(self.workflow.local_exec_path))
         self.assertEqual(self.workflow.uuid, self.workflow_uuid)
 
-    def test_propagate_done_jobs_become_coda(self):
-        from Yuki.kernel.status_constants import CODA
+    def test_propagate_done_jobs_become_finished(self):
+        """Completed jobs should be stored with the legacy status 'finished'
+        so the client can display [coda][finished]."""
         job_a = self._make_job("a" * 32)
         job_b = self._make_job("b" * 32)
         self.workflow.jobs = [job_a, job_b]
@@ -82,8 +83,8 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
 
         self.workflow.propagate_job_statuses(workflow_terminal=False)
 
-        job_a.set_status.assert_called_once_with(CODA, "Local execution completed")
-        job_b.set_status.assert_called_once_with(CODA, "Local execution completed")
+        job_a.set_status.assert_called_once_with("finished", "Local execution completed")
+        job_b.set_status.assert_called_once_with("finished", "Local execution completed")
 
     def test_propagate_in_flight_leaves_jobs_unchanged(self):
         job = self._make_job("a" * 32, status_value="in movement")
