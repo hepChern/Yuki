@@ -1,4 +1,8 @@
 ## v1.0.0b2
++ Return structured collect reports from workflow backends.
+  - `NativeWorkflow`, `SshWorkflow`, and `ReanaWorkflow` `download_*` methods now return `{collected, skipped, failed}` with per-file reasons such as `already in Yuki`, `does not match selector`, `source missing`, and download failure messages.
+  - `ImpressionStorage.collect*()` aggregates per-runner reports and returns the combined result.
+  - Collect HTTP endpoints (`/collect*`) now return the report as JSON instead of plain `"ok"`.
 + Add runtime support for `lhcb_ap_datalist` tasks.
   - Generate `lbapi_key.json` from the deposited `config.local.json` APD token.
   - Use `docker://celebichrono/lhcb-apd:0.9.0` container for AP tasks.

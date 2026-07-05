@@ -385,35 +385,48 @@ class ReanaWorkflow(VWorkflow):
         if not REANA_AVAILABLE:
             raise ImportError("reana_client is not available")
         self.set_environment(self.machine_id)
+        report = {"collected": [], "skipped": [], "failed": []}
         if impression:
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
                                 self.project_uuid, impression, self.machine_id)
             try:
-                if not os.path.exists(os.path.join(path, "stageout.downloaded")):
-                    files = client.list_files(
-                        self.get_name(),
-                        self.get_access_token(self.machine_id),
-                        "imp"+impression[0:7]+"/stageout"
-                    )
-                    os.makedirs(os.path.join(path, "stageout"), exist_ok=True)
-                    # self.logger(f"Files: {files}")
-                    total_files = len(files)
-                    for i, file in enumerate(files):
-                        self.logger(f'[{i+1}/{total_files}] Downloading stageout: {file["name"]}')
+                if os.path.exists(os.path.join(path, "stageout.downloaded")):
+                    report["skipped"].append(
+                        {"file": "<stageout>", "reason": "already collected"})
+                    return report
+                files = client.list_files(
+                    self.get_name(),
+                    self.get_access_token(self.machine_id),
+                    "imp"+impression[0:7]+"/stageout"
+                )
+                os.makedirs(os.path.join(path, "stageout"), exist_ok=True)
+                # self.logger(f"Files: {files}")
+                total_files = len(files)
+                for i, file in enumerate(files):
+                    name = file["name"]
+                    self.logger(f'[{i+1}/{total_files}] Downloading stageout: {name}')
+                    try:
                         output = client.download_file(
                             self.get_name(),
-                            file["name"],
+                            name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, file["name"][11:])
+                        filename = os.path.join(path, name[11:])
                         with open(filename, "wb") as f:
                             f.write(output[0])
-                    # all done, make a finish file
-                    finish_file = os.path.join(path, "stageout.downloaded")
-                    with open(finish_file, "w", encoding='utf-8') as f:
-                        pass
+                        report["collected"].append(os.path.basename(name))
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        report["failed"].append(
+                            {"file": os.path.basename(name), "reason": str(exc)})
+                # all done, make a finish file
+                finish_file = os.path.join(path, "stageout.downloaded")
+                with open(finish_file, "w", encoding='utf-8') as f:
+                    pass
             except Exception as e:
                 self.logger(f"Failed to download stageout: {e}")
+                report["failed"].append(
+                    {"file": "<stageout>", "reason": str(e)})
+        return report
 
     def download_logs(self, impression=None):
         """Download workflow logs."""
@@ -421,33 +434,46 @@ class ReanaWorkflow(VWorkflow):
         if not REANA_AVAILABLE:
             raise ImportError("reana_client is not available")
         self.set_environment(self.machine_id)
+        report = {"collected": [], "skipped": [], "failed": []}
         if impression:
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
                                 self.project_uuid, impression, self.machine_id)
             try:
-                if not os.path.exists(os.path.join(path, "logs.downloaded")):
-                    files = client.list_files(
-                        self.get_name(),
-                        self.get_access_token(self.machine_id),
-                        "imp"+impression[0:7]+"/logs"
-                    )
-                    os.makedirs(os.path.join(path, "logs"), exist_ok=True)
-                    total_logs = len(files)
-                    for i, file in enumerate(files):
-                        self.logger(f'[{i+1}/{total_logs}] Downloading log: {file["name"]}')
+                if os.path.exists(os.path.join(path, "logs.downloaded")):
+                    report["skipped"].append(
+                        {"file": "<logs>", "reason": "already collected"})
+                    return report
+                files = client.list_files(
+                    self.get_name(),
+                    self.get_access_token(self.machine_id),
+                    "imp"+impression[0:7]+"/logs"
+                )
+                os.makedirs(os.path.join(path, "logs"), exist_ok=True)
+                total_logs = len(files)
+                for i, file in enumerate(files):
+                    name = file["name"]
+                    self.logger(f'[{i+1}/{total_logs}] Downloading log: {name}')
+                    try:
                         output = client.download_file(
                             self.get_name(),
-                            file["name"],
+                            name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, file["name"][11:])
+                        filename = os.path.join(path, name[11:])
                         with open(filename, "wb") as f:
                             f.write(output[0])
-                    # all done, make a finish file
-                    with open(os.path.join(path, "logs.downloaded"), "w", encoding='utf-8') as f:
-                        pass
+                        report["collected"].append(os.path.basename(name))
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        report["failed"].append(
+                            {"file": os.path.basename(name), "reason": str(exc)})
+                # all done, make a finish file
+                with open(os.path.join(path, "logs.downloaded"), "w", encoding='utf-8') as f:
+                    pass
             except Exception as e:
                 self.logger(f"Failed to download logs: {e}")
+                report["failed"].append(
+                    {"file": "<logs>", "reason": str(e)})
+        return report
 
     @staticmethod
     def _size_bytes(size):
@@ -504,12 +530,14 @@ class ReanaWorkflow(VWorkflow):
                 result.append({"name": rel, "size": self._size_bytes(f.get("size", 0))})
         return result
 
+    # pylint: disable=too-many-locals
     def download_selected(self, impression, predicate, kind="stageout"):
         """Download only remote files whose basename satisfies predicate and
         that are not already in Storage. Does not write the dir marker."""
         if not REANA_AVAILABLE:
             raise ImportError("reana_client is not available")
         self.set_environment(self.machine_id)
+        report = {"collected": [], "skipped": [], "failed": []}
         path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
                             self.project_uuid, impression, self.machine_id)
         prefix = "imp" + impression[0:7] + "/" + kind + "/"
@@ -519,15 +547,23 @@ class ReanaWorkflow(VWorkflow):
             self.logger(
                 f"Giving up listing imp{impression[0:7]}/{kind} after retries "
                 f"[{type(e).__name__}]: {e!r}")
-            return
+            report["skipped"].append(
+                {"file": f"<{kind}>", "reason": f"failed to list files: {e}"})
+            return report
         os.makedirs(os.path.join(path, kind), exist_ok=True)
         for f in files:
             name = f["name"]
             rel = name[len(prefix):] if name.startswith(prefix) else os.path.basename(name)
-            if not rel or not predicate(os.path.basename(rel)):
+            if not rel:
+                continue
+            if not predicate(os.path.basename(rel)):
+                report["skipped"].append(
+                    {"file": rel, "reason": "does not match selector"})
                 continue
             dest = os.path.join(path, kind, rel)
             if os.path.exists(dest):
+                report["skipped"].append(
+                    {"file": rel, "reason": "already in Yuki"})
                 continue
             try:
                 output = client.download_file(
@@ -535,9 +571,12 @@ class ReanaWorkflow(VWorkflow):
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with open(dest, "wb") as fh:
                     fh.write(output[0])
+                report["collected"].append(rel)
                 self.logger(f"Downloaded selected {kind}: {rel}")
-            except Exception as e:
-                self.logger(f"Failed to download {rel}: {e}")
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                report["failed"].append({"file": rel, "reason": str(exc)})
+                self.logger(f"Failed to download {rel}: {exc}")
+        return report
 
     def ping(self):
         """Ping the REANA server."""

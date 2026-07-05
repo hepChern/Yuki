@@ -497,6 +497,7 @@ echo $? > yuki.exit
                 continue
             job.set_status(FAILED, "SSH workflow killed by user")
 
+    # pylint: disable=too-many-locals
     def _collect_remote_artifacts(self, impression, artifact_dir, marker_name, label):
         """Collect a job artifact directory from remote execution into Storage."""
         src_path = f"{self.remote_exec_path}/imp{impression[0:7]}/{artifact_dir}"
@@ -509,16 +510,21 @@ echo $? > yuki.exit
             self.machine_id,
             artifact_dir
         )
+        report = {"collected": [], "skipped": [], "failed": []}
 
         with self._ssh() as ssh:
             try:
                 entries = ssh.listdir(src_path)
             except FileNotFoundError:
                 self.logger(f"[SSH] No {label} found at: {src_path}")
-                return False
+                report["skipped"].append(
+                    {"file": f"<{label}>", "reason": "source missing"})
+                return report
 
             if not entries:
-                return False
+                report["skipped"].append(
+                    {"file": f"<{label}>", "reason": "source empty"})
+                return report
 
             os.makedirs(dst_path, exist_ok=True)
             total_files = len(entries)
@@ -526,42 +532,59 @@ echo $? > yuki.exit
                 remote_file = f"{src_path}/{filename}"
                 local_file = os.path.join(dst_path, filename)
                 if os.path.exists(local_file):
+                    report["skipped"].append(
+                        {"file": filename, "reason": "already in Yuki"})
                     continue
-                if ssh.isfile(remote_file):
+                if not ssh.isfile(remote_file):
+                    report["skipped"].append(
+                        {"file": filename, "reason": "not a regular file"})
+                    continue
+                try:
                     ssh.get(remote_file, local_file)
+                    report["collected"].append(filename)
                     self.logger(f"[SSH] [{i+1}/{total_files}] Collected {label}: {filename}")
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    report["failed"].append(
+                        {"file": filename, "reason": str(exc)})
 
         marker_path = os.path.join(os.path.dirname(dst_path), marker_name)
         with open(marker_path, "w", encoding='utf-8') as _:
             pass
-        return True
+        return report
 
     def download(self, impression=None):
         """Download/collect results from remote execution."""
         self.logger("[SSH] Collecting results from remote execution")
+        report = {"collected": [], "skipped": [], "failed": []}
         if impression:
-            self._collect_remote_artifacts(
+            stageout_report = self._collect_remote_artifacts(
                 impression, "stageout", "stageout.downloaded", "output"
             )
-            self._collect_remote_artifacts(
+            logs_report = self._collect_remote_artifacts(
                 impression, "logs", "logs.downloaded", "log"
             )
+            for key in report:
+                report[key].extend(stageout_report.get(key, []))
+                report[key].extend(logs_report.get(key, []))
+        return report
 
     def download_outputs(self, impression=None):
         """Download outputs from remote execution."""
         if impression:
             self.logger("[SSH] Collecting outputs from remote execution")
-            self._collect_remote_artifacts(
+            return self._collect_remote_artifacts(
                 impression, "stageout", "stageout.downloaded", "output"
             )
+        return {"collected": [], "skipped": [], "failed": []}
 
     def download_logs(self, impression=None):
         """Download logs from remote execution."""
         if impression:
             self.logger("[SSH] Collecting logs from remote execution")
-            self._collect_remote_artifacts(
+            return self._collect_remote_artifacts(
                 impression, "logs", "logs.downloaded", "log"
             )
+        return {"collected": [], "skipped": [], "failed": []}
 
     def list_runner_files(self, impression, kind="stageout"):
         """List files in the remote execution dir under imp<short>/<kind>."""
@@ -593,6 +616,7 @@ echo $? > yuki.exit
         dst_path = os.path.join(
             os.environ["HOME"], ".Yuki", "Storage",
             self.project_uuid, impression, self.machine_id, kind)
+        report = {"collected": [], "skipped": [], "failed": []}
         os.makedirs(dst_path, exist_ok=True)
 
         with self._ssh() as ssh:
@@ -600,18 +624,32 @@ echo $? > yuki.exit
                 entries = ssh.listdir(src_path)
             except FileNotFoundError:
                 self.logger(f"[SSH] No {kind} found at: {src_path}")
-                return
+                report["skipped"].append(
+                    {"file": f"<{kind}>", "reason": "source missing"})
+                return report
             for filename in entries:
                 if not predicate(filename):
+                    report["skipped"].append(
+                        {"file": filename, "reason": "does not match selector"})
                     continue
                 remote_file = f"{src_path}/{filename}"
                 if not ssh.isfile(remote_file):
+                    report["skipped"].append(
+                        {"file": filename, "reason": "not a regular file"})
                     continue
                 dst_file = os.path.join(dst_path, filename)
                 if os.path.exists(dst_file):
+                    report["skipped"].append(
+                        {"file": filename, "reason": "already in Yuki"})
                     continue
-                ssh.get(remote_file, dst_file)
-                self.logger(f"[SSH] Collected selected {kind}: {filename}")
+                try:
+                    ssh.get(remote_file, dst_file)
+                    report["collected"].append(filename)
+                    self.logger(f"[SSH] Collected selected {kind}: {filename}")
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    report["failed"].append(
+                        {"file": filename, "reason": str(exc)})
+        return report
 
     def get_workflow_logs(self):
         """Persist remote engine logs in the same workflow-level location as REANA."""

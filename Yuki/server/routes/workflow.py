@@ -1,7 +1,7 @@
 """
 Workflow management routes for starting, stopping, and monitoring workflows.
 """
-from flask import Blueprint, request
+from flask import Blueprint, request, jsonify
 from Yuki.kernel.impression_storage import ImpressionStorage
 
 bp = Blueprint('workflow', __name__)
@@ -19,24 +19,21 @@ def collect(project_uuid, impression):
     """Collect workflow results for a specific project and impression."""
     from Yuki.kernel.impression_storage import ImpressionStorage
     storage = ImpressionStorage(project_uuid, impression)
-    storage.collect()
-    return "ok"
+    return jsonify(storage.collect())
 
 @bp.route("/collect-outputs/<project_uuid>/<impression>", methods=['GET'])
 def collect_outputs(project_uuid, impression):
     """Collect workflow outputs for a specific project and impression."""
     from Yuki.kernel.impression_storage import ImpressionStorage
     storage = ImpressionStorage(project_uuid, impression)
-    storage.collect_outputs()
-    return "ok"
+    return jsonify(storage.collect_outputs())
 
 @bp.route("/collect-logs/<project_uuid>/<impression>", methods=['GET'])
 def collect_logs(project_uuid, impression):
     """Collect workflow logs for a specific project and impression."""
     from Yuki.kernel.impression_storage import ImpressionStorage
     storage = ImpressionStorage(project_uuid, impression)
-    storage.collect_logs()
-    return "ok"
+    return jsonify(storage.collect_logs())
 
 @bp.route("/watermark/<project_uuid>/<impression>", methods=['GET'])
 def watermark(project_uuid, impression):
@@ -70,10 +67,11 @@ def collect_files(project_uuid, impression):
     else:
         spec = "all"
     storage = ImpressionStorage(project_uuid, impression)
+    report = {}
     if request.args.get("names"):
         for one in request.args.get("names").split(","):
             if one:
-                storage.collect_files(kind, one)
+                report[one] = storage.collect_files(kind, one)
     else:
-        storage.collect_files(kind, spec)
-    return "ok"
+        report[spec] = storage.collect_files(kind, spec)
+    return jsonify(report)

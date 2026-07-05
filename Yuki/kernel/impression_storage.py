@@ -48,25 +48,46 @@ class ImpressionStorage:
         # Mark local record as failed
         VJob(self.job_path, None).set_status("failed")
 
+    @staticmethod
+    def _merge_reports(reports):
+        """Merge a list of per-kind collect reports into one report."""
+        merged = {"collected": [], "skipped": [], "failed": []}
+        for report in reports:
+            if not report:
+                continue
+            for key in merged:
+                merged[key].extend(report.get(key, []))
+        return merged
+
     def collect(self):
         """Light default: plots + logs on success, logs on failure."""
+        report = {}
         for name, job, workflow in self._get_runner_contexts():
             job_status = job.status(musical=True)
+            runner_report = {}
             if job_status == CODA:
                 print(f"[{name}] Collecting plots + logs...")
-                workflow.download_selected(self.impression, file_types.is_plot, "stageout")
-                workflow.download_logs(self.impression)
+                runner_report = self._merge_reports([
+                    workflow.download_selected(self.impression, file_types.is_plot, "stageout"),
+                    workflow.download_logs(self.impression),
+                ])
             elif job_status in (FAILED, DISSONANCE):
                 print(f"[{name}] Collecting logs...")
-                workflow.download_logs(self.impression)
+                runner_report = workflow.download_logs(self.impression)
+            report[name] = runner_report
+        return report
 
     def collect_files(self, kind, spec):
         """Download a subset of <kind> files matching a selection spec."""
         predicate = file_types.make_predicate(spec)
+        report = {}
         for name, job, workflow in self._get_runner_contexts():
             if job.status(musical=True) == CODA:
                 print(f"[{name}] Collecting {kind} matching {spec!r}...")
-                workflow.download_selected(self.impression, predicate, kind)
+                report[name] = workflow.download_selected(self.impression, predicate, kind)
+            else:
+                report[name] = {"collected": [], "skipped": [], "failed": []}
+        return report
 
     def file_status(self, kind="stageout"):
         """Merge runner listing with downloaded Storage state for <kind>.
@@ -146,20 +167,28 @@ class ImpressionStorage:
 
     def collect_outputs(self):
         """Retrieves only output files from runners."""
+        report = {}
         for name, job, workflow in self._get_runner_contexts():
             if job.status(musical=True) == CODA:
                 print(f"[{name}] Collecting outputs...")
-                workflow.download_outputs(self.impression)
+                report[name] = workflow.download_outputs(self.impression)
+            else:
+                report[name] = {"collected": [], "skipped": [], "failed": []}
+        return report
 
     def collect_logs(self):
         """Retrieves only logs from runners."""
+        report = {}
         for name, job, workflow in self._get_runner_contexts():
             job_status = job.status(musical=True)
             if job_status == CODA or job_status in (FAILED, DISSONANCE):
                 print(f"[{name}] Collecting logs...")
-                workflow.download_logs(self.impression)
+                report[name] = workflow.download_logs(self.impression)
+            else:
+                report[name] = {"collected": [], "skipped": [], "failed": []}
 
         self.collect_engine_logs()
+        return report
 
     def collect_engine_logs(self):
         """Retrieves engine logs from runners."""

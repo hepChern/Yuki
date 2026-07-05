@@ -19,12 +19,15 @@ def test_collect_light_downloads_plots_and_logs(tmp_path):
     s, ims = _storage(tmp_path)
     job = mock.Mock(); job.status.return_value = CODA
     wf = mock.Mock()
+    wf.download_selected.return_value = {"collected": [], "skipped": [], "failed": []}
+    wf.download_logs.return_value = {"collected": [], "skipped": [], "failed": []}
     s._get_runner_contexts = lambda: [("runner", job, wf)]
-    s.collect()
+    report = s.collect()
     # download_selected called with the is_plot predicate on stageout
     assert wf.download_selected.call_args.args[1] is ims.file_types.is_plot
     wf.download_logs.assert_called_once()
     wf.download_outputs.assert_not_called()
+    assert "runner" in report
 
 
 def test_collect_files_uses_predicate(tmp_path):

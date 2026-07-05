@@ -386,10 +386,11 @@ class NativeWorkflow(VWorkflow):
                 continue
             job.set_status(FAILED, "Native workflow killed by user")
 
+    # pylint: disable=too-many-locals
     def _collect_artifacts(self, impression, artifact_dir, marker_name, label):
         """Collect a job artifact directory from local execution into Storage.
 
-        Returns True when the artifact directory existed and was collected.
+        Returns a report dict with collected/skipped/failed file lists.
         """
         src_path = os.path.join(
             self.local_exec_path,
@@ -405,10 +406,13 @@ class NativeWorkflow(VWorkflow):
             self.machine_id,
             artifact_dir
         )
+        report = {"collected": [], "skipped": [], "failed": []}
 
         if not os.path.exists(src_path):
             self.logger(f"[LOCAL] No {label} found at: {src_path}")
-            return False
+            report["skipped"].append(
+                {"file": f"<{label}>", "reason": "source missing"})
+            return report
 
         os.makedirs(dst_path, exist_ok=True)
         filelist = os.listdir(src_path)
@@ -417,41 +421,55 @@ class NativeWorkflow(VWorkflow):
             src_file = os.path.join(src_path, filename)
             dst_file = os.path.join(dst_path, filename)
             if os.path.exists(dst_file):
+                report["skipped"].append(
+                    {"file": filename, "reason": "already in Yuki"})
                 continue
-            shutil.copy2(src_file, dst_file)
-            self.logger(f"[LOCAL] [{i+1}/{total_files}] Collected {label}: {filename}")
+            try:
+                shutil.copy2(src_file, dst_file)
+                report["collected"].append(filename)
+                self.logger(f"[LOCAL] [{i+1}/{total_files}] Collected {label}: {filename}")
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                report["failed"].append(
+                    {"file": filename, "reason": str(exc)})
 
         marker_path = os.path.join(os.path.dirname(dst_path), marker_name)
         with open(marker_path, "w", encoding='utf-8') as _:
             pass
-        return True
+        return report
 
     def download(self, impression=None):
         """Download/collect results from local execution."""
         self.logger("[LOCAL] Collecting results from local execution")
+        report = {"collected": [], "skipped": [], "failed": []}
         if impression:
-            self._collect_artifacts(
+            stageout_report = self._collect_artifacts(
                 impression, "stageout", "stageout.downloaded", "output"
             )
-            self._collect_artifacts(
+            logs_report = self._collect_artifacts(
                 impression, "logs", "logs.downloaded", "log"
             )
+            for key in report:
+                report[key].extend(stageout_report.get(key, []))
+                report[key].extend(logs_report.get(key, []))
+        return report
 
     def download_outputs(self, impression=None):
         """Download outputs from local execution."""
         if impression:
             self.logger("[LOCAL] Collecting outputs from local execution")
-            self._collect_artifacts(
+            return self._collect_artifacts(
                 impression, "stageout", "stageout.downloaded", "output"
             )
+        return {"collected": [], "skipped": [], "failed": []}
 
     def download_logs(self, impression=None):
         """Download logs from local execution."""
         if impression:
             self.logger("[LOCAL] Collecting logs from local execution")
-            self._collect_artifacts(
+            return self._collect_artifacts(
                 impression, "logs", "logs.downloaded", "log"
             )
+        return {"collected": [], "skipped": [], "failed": []}
 
     def list_runner_files(self, impression, kind="stageout"):
         """List files in the local execution dir under imp<short>/<kind>."""
@@ -470,21 +488,34 @@ class NativeWorkflow(VWorkflow):
         """Copy only matching, not-yet-present files into Storage. No marker."""
         src_path = os.path.join(
             self.local_exec_path, f"imp{impression[0:7]}", kind)
+        report = {"collected": [], "skipped": [], "failed": []}
         if not os.path.isdir(src_path):
             self.logger(f"[LOCAL] No {kind} found at: {src_path}")
-            return
+            report["skipped"].append(
+                {"file": f"<{kind}>", "reason": "source missing"})
+            return report
         dst_path = os.path.join(
             os.environ["HOME"], ".Yuki", "Storage",
             self.project_uuid, impression, self.machine_id, kind)
         os.makedirs(dst_path, exist_ok=True)
         for filename in os.listdir(src_path):
             if not predicate(filename):
+                report["skipped"].append(
+                    {"file": filename, "reason": "does not match selector"})
                 continue
             dst_file = os.path.join(dst_path, filename)
             if os.path.exists(dst_file):
+                report["skipped"].append(
+                    {"file": filename, "reason": "already in Yuki"})
                 continue
-            shutil.copy2(os.path.join(src_path, filename), dst_file)
-            self.logger(f"[LOCAL] Collected selected {kind}: {filename}")
+            try:
+                shutil.copy2(os.path.join(src_path, filename), dst_file)
+                report["collected"].append(filename)
+                self.logger(f"[LOCAL] Collected selected {kind}: {filename}")
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                report["failed"].append(
+                    {"file": filename, "reason": str(exc)})
+        return report
 
     def get_workflow_logs(self):
         """Persist local engine logs in the same workflow-level location as REANA."""

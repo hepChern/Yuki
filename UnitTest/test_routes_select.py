@@ -8,9 +8,13 @@ def test_collect_files_route_passes_spec():
     app = _app(wf_routes.bp)
     with mock.patch.object(wf_routes, "ImpressionStorage") as S:
         inst = S.return_value
+        inst.collect_files.return_value = {
+            "runner": {"collected": [], "skipped": [], "failed": []}
+        }
         c = app.test_client()
         r = c.get("/collect-files/proj/imp?kind=stageout&pattern=*.root")
         assert r.status_code == 200
+        assert r.get_json()["*.root"]["runner"]["collected"] == []
         inst.collect_files.assert_called_once_with("stageout", "*.root")
 
 
