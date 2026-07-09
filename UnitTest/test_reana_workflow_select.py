@@ -21,6 +21,7 @@ def test_list_runner_files_strips_prefix_and_keeps_size():
     fake = [
         {"name": "imp1234567/stageout/mass.png", "size": 10},
         {"name": "imp1234567/stageout/ntuple.root", "size": 999},
+        {"name": "imp1234567/stageout/plots/fit.png", "size": 20},
     ]
     with mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
          mock.patch.object(reana_workflow, "client") as cli:
@@ -28,6 +29,49 @@ def test_list_runner_files_strips_prefix_and_keeps_size():
         out = wf.list_runner_files("1234567abc", "stageout")
     assert {"name": "mass.png", "size": 10} in out
     assert {"name": "ntuple.root", "size": 999} in out
+    assert {"name": "plots/fit.png", "size": 20} in out
+
+
+def test_download_outputs_creates_subdirectories(tmp_path):
+    wf = _make_wf()
+    home = tmp_path
+    storage = home / ".Yuki" / "Storage" / "proj-1" / "imp7" / "runner-1"
+    fake = [
+        {"name": "impimp7/stageout/mass.png", "size": 3},
+        {"name": "impimp7/stageout/data/ntuple.root", "size": 5},
+    ]
+    with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+         mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
+         mock.patch.object(reana_workflow, "client") as cli:
+        cli.list_files.return_value = fake
+        cli.download_file.return_value = (b"data",)
+        report = wf.download_outputs("imp7")
+        stageout = storage / "stageout"
+        assert (stageout / "mass.png").exists()
+        assert (stageout / "data" / "ntuple.root").exists()
+        assert "data/ntuple.root" in report["collected"]
+        assert (storage / "stageout.downloaded").exists()
+
+
+def test_download_selected_matches_relative_path(tmp_path):
+    wf = _make_wf()
+    home = tmp_path
+    storage = home / ".Yuki" / "Storage" / "proj-1" / "imp7" / "runner-1" / "stageout"
+    storage.mkdir(parents=True)
+    fake = [
+        {"name": "impimp7/stageout/mass.png", "size": 3},
+        {"name": "impimp7/stageout/plots/fit.png", "size": 4},
+    ]
+    with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+         mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
+         mock.patch.object(reana_workflow, "client") as cli:
+        cli.list_files.return_value = fake
+        cli.download_file.return_value = (b"data",)
+        wf.download_selected("imp7",
+                             reana_workflow.file_types.make_predicate("plots/*.png"),
+                             "stageout")
+        assert (storage / "plots" / "fit.png").exists()
+        assert not (storage / "mass.png").exists()
 
 
 def test_list_runner_files_normalizes_reana_size_dict():

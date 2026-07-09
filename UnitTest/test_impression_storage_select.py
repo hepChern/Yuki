@@ -65,6 +65,25 @@ def _finished_job(wid="wf-1"):
     return job
 
 
+def test_file_status_merges_nested_files(tmp_path):
+    s, ims = _storage(tmp_path)
+    stageout = tmp_path / "job" / "runner-1" / "stageout"
+    stageout.mkdir(parents=True)
+    (stageout / "mass.png").write_bytes(b"img")
+    (stageout / "data").mkdir()
+    (stageout / "data" / "ntuple.root").write_bytes(b"data")
+    wf = mock.Mock()
+    wf.list_runner_files.return_value = [
+        {"name": "mass.png", "size": 3},
+        {"name": "data/ntuple.root", "size": 4},
+    ]
+    s._get_runner_contexts = lambda: [("runner", mock.Mock(), wf)]
+    rows = {r["name"]: r for r in s.file_status("stageout")}
+    assert rows["mass.png"]["in_yuki"] and rows["mass.png"]["type"] == "plot"
+    assert rows["data/ntuple.root"]["in_yuki"]
+    assert rows["data/ntuple.root"]["type"] == "data"
+
+
 def test_file_status_caches_runner_list_for_finished_job(tmp_path):
     """A finished job's runner listing is fetched live once, cached, and served
     from the cache on the next call without another REANA list_files."""

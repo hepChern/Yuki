@@ -11,6 +11,20 @@ import shutil
 from pathlib import Path
 
 
+def walk_files(top_dir):
+    """Yield (rel_path, abs_path) for every regular file under top_dir.
+
+    rel_path is relative to top_dir and uses the platform separator.
+    """
+    if not os.path.isdir(top_dir):
+        return
+    for root, _dirs, filenames in os.walk(top_dir):
+        for filename in filenames:
+            abs_path = os.path.join(root, filename)
+            rel_path = os.path.relpath(abs_path, top_dir)
+            yield rel_path, abs_path
+
+
 class FileStager:
     """Handle file staging with CoW-clone optimization."""
 
@@ -285,16 +299,21 @@ class FileStager:
                 src_path = entry["src_path"]
                 resolved_from = "manifest"
                 if not os.path.exists(src_path):
-                    # Reconstruct from host-side Storage path
-                    basename = os.path.basename(entry["dst_rel"])
+                    # Reconstruct from host-side Storage path using the full
+                    # relative path captured in dst_rel (imp<short>/stageout/<rel>).
+                    short_uuid = entry["job_uuid"][:7]
+                    rel_path = os.path.relpath(
+                        entry["dst_rel"],
+                        os.path.join(f"imp{short_uuid}", "stageout")
+                    )
                     if entry["type"] == "rawdata":
                         src_path = os.path.join(
-                            self.storage_dir, entry["job_uuid"], "rawdata", basename
+                            self.storage_dir, entry["job_uuid"], "rawdata", rel_path
                         )
                     elif entry["type"] == "input":
                         src_path = os.path.join(
                             self.storage_dir, entry["job_uuid"],
-                            entry.get("machine_id", ""), "stageout", basename
+                            entry.get("machine_id", ""), "stageout", rel_path
                         )
                     resolved_from = "storage"
 

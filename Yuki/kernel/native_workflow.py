@@ -14,6 +14,7 @@ from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
 from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
 from . import file_types
+from .file_staging import walk_files
 
 DEFAULT_ENVIRONMENT = "docker.io/reanahub/reana-env-root6:6.18.04"
 
@@ -124,14 +125,13 @@ class NativeWorkflow(VWorkflow):
             if job.environment() == "rawdata":
                 rawdata_path = os.path.join(job.path, "rawdata")
                 if os.path.exists(rawdata_path):
-                    filelist = os.listdir(rawdata_path)
+                    filelist = list(walk_files(rawdata_path))
                     total_raw = len(filelist)
-                    for f_idx, filename in enumerate(filelist):
-                        src_path = os.path.join(rawdata_path, filename)
+                    for f_idx, (rel_path, src_path) in enumerate(filelist):
                         dst_rel = os.path.join(
                             f"imp{job.short_uuid()}",
                             "stageout",
-                            filename
+                            rel_path
                         )
                         stage_manifest.append({
                             "type": "rawdata",
@@ -140,7 +140,7 @@ class NativeWorkflow(VWorkflow):
                             "dst_rel": dst_rel,
                         })
                         self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Queued rawdata "
-                                     f"{f_idx+1}/{total_raw}: {filename}")
+                                     f"{f_idx+1}/{total_raw}: {rel_path}")
 
             # Record input files for lazy staging (links resolved at run-workflow time)
             elif job.is_input:
@@ -156,14 +156,13 @@ class NativeWorkflow(VWorkflow):
                 )
 
                 if os.path.exists(src_stageout):
-                    filelist = os.listdir(src_stageout)
+                    filelist = list(walk_files(src_stageout))
                     total_input = len(filelist)
-                    for f_idx, filename in enumerate(filelist):
-                        src_path = os.path.join(src_stageout, filename)
+                    for f_idx, (rel_path, src_path) in enumerate(filelist):
                         dst_rel = os.path.join(
                             f"imp{job.short_uuid()}",
                             "stageout",
-                            filename
+                            rel_path
                         )
                         stage_manifest.append({
                             "type": "input",
@@ -173,7 +172,7 @@ class NativeWorkflow(VWorkflow):
                             "dst_rel": dst_rel,
                         })
                         self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Queued input "
-                                     f"{f_idx+1}/{total_input}: {filename}")
+                                     f"{f_idx+1}/{total_input}: {rel_path}")
 
         # Write stage manifest for FileStager to process on the host
         if stage_manifest:
@@ -260,7 +259,9 @@ class NativeWorkflow(VWorkflow):
                 continue
 
             logs_dir = os.path.join(self.local_exec_path, f"imp{short}", "logs")
-            has_logs = os.path.isdir(logs_dir) and bool(os.listdir(logs_dir))
+            has_logs = os.path.isdir(logs_dir) and any(
+                True for _ in walk_files(logs_dir)
+            )
             if has_logs:
                 tail = self._read_job_log_tail(short)
                 if tail:
@@ -289,17 +290,18 @@ class NativeWorkflow(VWorkflow):
 
         pattern = re.compile(r"^celebi_user_step(\d+)\.log$")
         candidates = []
-        for fname in os.listdir(logs_dir):
+        for rel_path, abs_path in walk_files(logs_dir):
+            fname = os.path.basename(rel_path)
             m = pattern.match(fname)
             if m:
-                candidates.append((int(m.group(1)), fname))
+                candidates.append((int(m.group(1)), abs_path))
 
         if not candidates:
             return ""
 
         candidates.sort(reverse=True)
         latest = candidates[0][1]
-        log_path = os.path.join(logs_dir, latest)
+        log_path = latest
 
         try:
             with open(log_path, "r", encoding="utf-8", errors="replace") as f:
@@ -415,22 +417,22 @@ class NativeWorkflow(VWorkflow):
             return report
 
         os.makedirs(dst_path, exist_ok=True)
-        filelist = os.listdir(src_path)
+        filelist = list(walk_files(src_path))
         total_files = len(filelist)
-        for i, filename in enumerate(filelist):
-            src_file = os.path.join(src_path, filename)
-            dst_file = os.path.join(dst_path, filename)
+        for i, (rel_path, src_file) in enumerate(filelist):
+            dst_file = os.path.join(dst_path, rel_path)
             if os.path.exists(dst_file):
                 report["skipped"].append(
-                    {"file": filename, "reason": "already in Yuki"})
+                    {"file": rel_path, "reason": "already in Yuki"})
                 continue
             try:
+                os.makedirs(os.path.dirname(dst_file), exist_ok=True)
                 shutil.copy2(src_file, dst_file)
-                report["collected"].append(filename)
-                self.logger(f"[LOCAL] [{i+1}/{total_files}] Collected {label}: {filename}")
+                report["collected"].append(rel_path)
+                self.logger(f"[LOCAL] [{i+1}/{total_files}] Collected {label}: {rel_path}")
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 report["failed"].append(
-                    {"file": filename, "reason": str(exc)})
+                    {"file": rel_path, "reason": str(exc)})
 
         marker_path = os.path.join(os.path.dirname(dst_path), marker_name)
         with open(marker_path, "w", encoding='utf-8') as _:
@@ -478,10 +480,8 @@ class NativeWorkflow(VWorkflow):
         if not os.path.isdir(src_path):
             return []
         result = []
-        for filename in os.listdir(src_path):
-            full = os.path.join(src_path, filename)
-            size = os.path.getsize(full) if os.path.isfile(full) else 0
-            result.append({"name": filename, "size": size})
+        for rel_path, abs_path in walk_files(src_path):
+            result.append({"name": rel_path, "size": os.path.getsize(abs_path)})
         return result
 
     def download_selected(self, impression, predicate, kind="stageout"):
@@ -498,23 +498,24 @@ class NativeWorkflow(VWorkflow):
             os.environ["HOME"], ".Yuki", "Storage",
             self.project_uuid, impression, self.machine_id, kind)
         os.makedirs(dst_path, exist_ok=True)
-        for filename in os.listdir(src_path):
-            if not predicate(filename):
+        for rel_path, src_file in walk_files(src_path):
+            if not predicate(rel_path):
                 report["skipped"].append(
-                    {"file": filename, "reason": "does not match selector"})
+                    {"file": rel_path, "reason": "does not match selector"})
                 continue
-            dst_file = os.path.join(dst_path, filename)
+            dst_file = os.path.join(dst_path, rel_path)
             if os.path.exists(dst_file):
                 report["skipped"].append(
-                    {"file": filename, "reason": "already in Yuki"})
+                    {"file": rel_path, "reason": "already in Yuki"})
                 continue
             try:
-                shutil.copy2(os.path.join(src_path, filename), dst_file)
-                report["collected"].append(filename)
-                self.logger(f"[LOCAL] Collected selected {kind}: {filename}")
+                os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+                report["collected"].append(rel_path)
+                self.logger(f"[LOCAL] Collected selected {kind}: {rel_path}")
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 report["failed"].append(
-                    {"file": filename, "reason": str(exc)})
+                    {"file": rel_path, "reason": str(exc)})
         return report
 
     def get_workflow_logs(self):

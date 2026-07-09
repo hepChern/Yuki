@@ -54,13 +54,16 @@ class _MockSftp:
     def listdir(self, path):
         if path not in self.dirs:
             raise FileNotFoundError(path)
-        entries = []
-        for name in self.files:
-            if name.startswith(path + "/"):
-                rel = name[len(path) + 1:]
-                if "/" not in rel:
-                    entries.append(rel)
-        return entries
+        seen = set()
+        for store in (self.files, self.dirs):
+            for name in store:
+                if name.startswith(path + "/"):
+                    rel = name[len(path) + 1:]
+                    if "/" not in rel:
+                        seen.add(rel)
+                    else:
+                        seen.add(rel.split("/", 1)[0])
+        return list(seen)
 
     def stat(self, path):
         if path in self.dirs:
@@ -344,27 +347,94 @@ class TestSshWorkflow(unittest.TestCase):
         self.assertEqual(self.mock_sftp.files[expected], b"input-bytes")
 
     @patch("paramiko.SSHClient")
-    def test_upload_files_remote_uploads_rawdata_stageout_files(self, mock_ssh_cls):
-        """Rawdata files must be copied to the remote ``imp<short>/stageout`` dir."""
+    def test_upload_files_remote_preserves_nested_input_structure(self, mock_ssh_cls):
+        """Nested subdirectories inside input stageout must be uploaded recursively."""
         mock_ssh_cls.return_value = self.mock_client
 
-        job = self._make_job("b" * 32)
-        job.environment.return_value = "rawdata"
-        job.path = os.path.join(self.tmpdir, "jobs", "b" * 32)
+        job = self._make_job("a" * 32, is_input=True)
+        job.machine_id = "runner-uuid"
         self.workflow.jobs = [job]
 
-        rawdata_dir = os.path.join(job.path, "rawdata")
-        os.makedirs(rawdata_dir, exist_ok=True)
-        with open(os.path.join(rawdata_dir, "raw.txt"), "wb") as f:
-            f.write(b"raw-bytes")
+        src_stageout = os.path.join(
+            self.tmpdir, ".Yuki", "Storage", self.project_uuid,
+            "a" * 32, "runner-uuid", "stageout",
+        )
+        nested_dir = os.path.join(src_stageout, "data")
+        os.makedirs(nested_dir, exist_ok=True)
+        with open(os.path.join(nested_dir, "data.root"), "wb") as f:
+            f.write(b"input-bytes")
 
         self._prepare_snakefile()
-
         self.workflow._upload_files_remote()
 
-        expected = f"{self.workflow.remote_exec_path}/impbbbbbbb/stageout/raw.txt"
+        expected = f"{self.workflow.remote_exec_path}/impaaaaaaa/stageout/data/data.root"
         self.assertIn(expected, self.mock_sftp.files)
-        self.assertEqual(self.mock_sftp.files[expected], b"raw-bytes")
+        self.assertEqual(self.mock_sftp.files[expected], b"input-bytes")
+
+    @patch("paramiko.SSHClient")
+    def test_collect_remote_artifacts_preserves_nested_stageout(self, mock_ssh_cls):
+        """Nested remote stageout files must be downloaded preserving structure."""
+        mock_ssh_cls.return_value = self.mock_client
+
+        impression = "i" * 32
+        short = impression[:7]
+        remote_stageout = f"{self.workflow.remote_exec_path}/imp{short}/stageout"
+        self.mock_sftp.dirs.add(remote_stageout)
+        self.mock_sftp.dirs.add(f"{remote_stageout}/plots")
+        self.mock_sftp.files[f"{remote_stageout}/plots/mass.png"] = b"img"
+
+        report = self.workflow._collect_remote_artifacts(
+            impression, "stageout", "stageout.downloaded", "output"
+        )
+
+        local_stageout = os.path.join(
+            self.tmpdir, ".Yuki", "Storage", self.project_uuid,
+            impression, self.workflow.machine_id, "stageout"
+        )
+        self.assertTrue(os.path.exists(os.path.join(local_stageout, "plots", "mass.png")))
+        self.assertIn("plots/mass.png", report["collected"])
+
+    @patch("paramiko.SSHClient")
+    def test_list_runner_files_remote_returns_relative_paths(self, mock_ssh_cls):
+        """list_runner_files must return relative paths for nested files."""
+        mock_ssh_cls.return_value = self.mock_client
+
+        impression = "i" * 32
+        short = impression[:7]
+        remote_stageout = f"{self.workflow.remote_exec_path}/imp{short}/stageout"
+        self.mock_sftp.dirs.add(remote_stageout)
+        self.mock_sftp.dirs.add(f"{remote_stageout}/data")
+        self.mock_sftp.files[f"{remote_stageout}/data/ntuple.root"] = b"data"
+
+        out = self.workflow.list_runner_files(impression, "stageout")
+        names = {f["name"] for f in out}
+        self.assertIn("data/ntuple.root", names)
+
+    @patch("paramiko.SSHClient")
+    def test_download_selected_remote_matches_relative_path(self, mock_ssh_cls):
+        """download_selected predicate must see relative paths for nested files."""
+        mock_ssh_cls.return_value = self.mock_client
+
+        impression = "i" * 32
+        short = impression[:7]
+        remote_stageout = f"{self.workflow.remote_exec_path}/imp{short}/stageout"
+        self.mock_sftp.dirs.add(remote_stageout)
+        self.mock_sftp.dirs.add(f"{remote_stageout}/plots")
+        self.mock_sftp.files[f"{remote_stageout}/plots/mass.png"] = b"img"
+        self.mock_sftp.files[f"{remote_stageout}/ntuple.root"] = b"data"
+
+        from Yuki.kernel import file_types
+        report = self.workflow.download_selected(
+            impression, file_types.make_predicate("plots/*.png"), "stageout"
+        )
+
+        local_stageout = os.path.join(
+            self.tmpdir, ".Yuki", "Storage", self.project_uuid,
+            impression, self.workflow.machine_id, "stageout"
+        )
+        self.assertTrue(os.path.exists(os.path.join(local_stageout, "plots", "mass.png")))
+        self.assertFalse(os.path.exists(os.path.join(local_stageout, "ntuple.root")))
+        self.assertIn("plots/mass.png", report["collected"])
 
 
 if __name__ == "__main__":

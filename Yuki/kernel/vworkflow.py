@@ -25,6 +25,7 @@ from Yuki.kernel.status_constants import (
     translate_to_musical, get_detailed_status_message
 )
 from Yuki.utils import snakefile
+from .file_staging import walk_files
 
 CHERN_CACHE = ChernCache.instance()
 
@@ -588,15 +589,20 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             self.logger(f"Outputs path: {outputs_path}")
             watermark_path = os.path.join(path, "watermarks")
             os.makedirs(watermark_path, exist_ok=True)
-            filelist = [f for f in os.listdir(outputs_path) if f.endswith(".png")]
+            filelist = [
+                (rel_path, abs_path)
+                for rel_path, abs_path in walk_files(outputs_path)
+                if rel_path.endswith(".png")
+            ]
             total_files = len(filelist)
-            self.logger(f"Files to watermark: {filelist}")
+            self.logger(f"Files to watermark: {[r for r, _ in filelist]}")
 
             # Water mark the png files
-            for i, filename in enumerate(filelist):
+            for i, (rel_path, abs_path) in enumerate(filelist):
+                filename = os.path.basename(rel_path)
                 # 1. Open the image and convert it to RGBA.
                 # The watermark will be drawn directly onto this image object.
-                image = Image.open(os.path.join(outputs_path, filename)).convert("RGBA")
+                image = Image.open(abs_path).convert("RGBA")
 
                 # 2. Create the drawing context directly on the image
                 draw = ImageDraw.Draw(image)
@@ -629,9 +635,14 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                 draw.text((x, y), text, font=font, fill=fill_color)
 
                 # 4. Save the resulting image.
-                image.save(os.path.join(watermark_path,
-                                         f"imp{impression[:8]}_{filename}"), format="PNG")
-                self.logger(f"[{i+1}/{total_files}] Saved watermarked image: {filename}")
+                dst_name = os.path.join(
+                    os.path.dirname(rel_path),
+                    f"imp{impression[:8]}_{filename}"
+                )
+                dst_path = os.path.join(watermark_path, dst_name)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                image.save(dst_path, format="PNG")
+                self.logger(f"[{i+1}/{total_files}] Saved watermarked image: {rel_path}")
 
     @abstractmethod
     def update_workflow_status(self):

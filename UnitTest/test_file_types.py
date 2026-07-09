@@ -34,9 +34,29 @@ def test_is_plot_covers_legacy_image_set():
         assert file_types.is_plot("x" + ext) is True
 
 
-def test_is_inline_image_excludes_pdf_and_eps():
-    for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"):
-        assert file_types.is_inline_image("x" + ext) is True
-    for ext in (".pdf", ".eps"):
-        assert file_types.is_inline_image("x" + ext) is False
-        assert file_types.is_plot("x" + ext) is True   # still a plot, just not inline
+def test_make_predicate_relative_path():
+    pred = file_types.make_predicate("plots/mass.png")
+    assert pred("plots/mass.png")
+    assert not pred("mass.png")
+    assert not pred("plots/other.png")
+
+
+def test_make_predicate_basename_glob_matches_nested():
+    pred = file_types.make_predicate("*.png")
+    assert pred("mass.png")
+    assert pred("plots/mass.png")
+    assert not pred("mass.root")
+
+
+def test_make_predicate_path_glob():
+    pred = file_types.make_predicate("plots/*.png")
+    assert pred("plots/mass.png")
+    assert not pred("mass.png")
+    assert not pred("data/mass.png")
+
+
+def test_make_predicate_literal_matches_basename_or_path():
+    pred = file_types.make_predicate("mass.png")
+    assert pred("mass.png")
+    assert pred("plots/mass.png")
+    assert not pred("other.png")

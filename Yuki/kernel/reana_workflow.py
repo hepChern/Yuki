@@ -11,6 +11,7 @@ import json
 from CelebiChrono.utils import metadata
 from .vworkflow import VWorkflow
 from . import file_types
+from .file_staging import walk_files
 
 from Yuki.kernel.status_constants import (
     PRELUDE, ORCHESTRATING, DISSONANCE, CODA, FINAL_NOTE
@@ -225,25 +226,23 @@ class ReanaWorkflow(VWorkflow):
                         self.get_access_token(self.machine_id)
                     )
             if job.environment() == "rawdata":
-                filelist = os.listdir(os.path.join(job.path, "rawdata"))
+                rawdata_dir = os.path.join(job.path, "rawdata")
+                filelist = list(walk_files(rawdata_dir))
                 total_raw = len(filelist)
-                for f_idx, filename in enumerate(filelist):
-                    rawdata_path = os.path.join(job.path, "rawdata", filename)
+                for f_idx, (rel_path, rawdata_path) in enumerate(filelist):
                     with open(rawdata_path, "rb") as f:
                         self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading rawdata "
-                                    f"{f_idx+1}/{total_raw}: {filename}")
+                                    f"{f_idx+1}/{total_raw}: {rel_path}")
                         client.upload_file(
                             self.get_name(),
                             f,
-                            "imp" + job.short_uuid() + "/stageout/" + filename,
+                            "imp" + job.short_uuid() + "/stageout/" + rel_path,
                             self.get_access_token(self.machine_id)
                         )
             elif job.is_input:
                 if job.use_eos() and job.machine_id == self.machine_id:
                     continue
                 impression = job.path.split("/")[-1]
-                # self.logger(f"Downloading the files from impression "
-                #             f"{impression}")
                 path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
                                     self.project_uuid, impression, job.machine_id)
                 if not os.path.exists(os.path.join(path, "stageout")):
@@ -252,17 +251,17 @@ class ReanaWorkflow(VWorkflow):
 
                 # Reset the id
                 self.set_environment(self.machine_id)
-                filelist = os.listdir(os.path.join(path, "stageout"))
+                stageout_dir = os.path.join(path, "stageout")
+                filelist = list(walk_files(stageout_dir))
                 total_input = len(filelist)
-                for f_idx, filename in enumerate(filelist):
-                    file_path = os.path.join(path, "stageout", filename)
+                for f_idx, (rel_path, file_path) in enumerate(filelist):
                     with open(file_path, "rb") as f:
                         self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading input "
-                                    f"{f_idx+1}/{total_input}: {filename}")
+                                    f"{f_idx+1}/{total_input}: {rel_path}")
                         client.upload_file(
                             self.get_name(),
                             f,
-                            "imp"+job.short_uuid() + "/stageout/" + filename,
+                            "imp"+job.short_uuid() + "/stageout/" + rel_path,
                             self.get_access_token(self.machine_id)
                         )
 
@@ -338,13 +337,17 @@ class ReanaWorkflow(VWorkflow):
                     # self.logger(f"Files: {files}")
                     total_files = len(files)
                     for i, file in enumerate(files):
-                        self.logger(f'[{i+1}/{total_files}] Downloading stageout: {file["name"]}')
+                        name = file["name"]
+                        self.logger(f'[{i+1}/{total_files}] Downloading stageout: {name}')
                         output = client.download_file(
                             self.get_name(),
-                            file["name"],
+                            name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, file["name"][11:])
+                        prefix = f"imp{impression[0:7]}/stageout/"
+                        rel = name[len(prefix):] if name.startswith(prefix) else name
+                        filename = os.path.join(path, "stageout", rel)
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
@@ -364,13 +367,17 @@ class ReanaWorkflow(VWorkflow):
                     os.makedirs(os.path.join(path, "logs"), exist_ok=True)
                     total_logs = len(files)
                     for i, file in enumerate(files):
-                        self.logger(f'[{i+1}/{total_logs}] Downloading log: {file["name"]}')
+                        name = file["name"]
+                        self.logger(f'[{i+1}/{total_logs}] Downloading log: {name}')
                         output = client.download_file(
                             self.get_name(),
-                            file["name"],
+                            name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, file["name"][11:])
+                        prefix = f"imp{impression[0:7]}/logs/"
+                        rel = name[len(prefix):] if name.startswith(prefix) else name
+                        filename = os.path.join(path, "logs", rel)
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
@@ -404,6 +411,8 @@ class ReanaWorkflow(VWorkflow):
                 total_files = len(files)
                 for i, file in enumerate(files):
                     name = file["name"]
+                    prefix = f"imp{impression[0:7]}/stageout/"
+                    rel = name[len(prefix):] if name.startswith(prefix) else name
                     self.logger(f'[{i+1}/{total_files}] Downloading stageout: {name}')
                     try:
                         output = client.download_file(
@@ -411,13 +420,14 @@ class ReanaWorkflow(VWorkflow):
                             name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, name[11:])
+                        filename = os.path.join(path, "stageout", rel)
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
                         with open(filename, "wb") as f:
                             f.write(output[0])
-                        report["collected"].append(os.path.basename(name))
+                        report["collected"].append(rel)
                     except Exception as exc:  # pylint: disable=broad-exception-caught
                         report["failed"].append(
-                            {"file": os.path.basename(name), "reason": str(exc)})
+                            {"file": rel, "reason": str(exc)})
                 # all done, make a finish file
                 finish_file = os.path.join(path, "stageout.downloaded")
                 with open(finish_file, "w", encoding='utf-8') as f:
@@ -452,6 +462,8 @@ class ReanaWorkflow(VWorkflow):
                 total_logs = len(files)
                 for i, file in enumerate(files):
                     name = file["name"]
+                    prefix = f"imp{impression[0:7]}/logs/"
+                    rel = name[len(prefix):] if name.startswith(prefix) else name
                     self.logger(f'[{i+1}/{total_logs}] Downloading log: {name}')
                     try:
                         output = client.download_file(
@@ -459,13 +471,14 @@ class ReanaWorkflow(VWorkflow):
                             name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, name[11:])
+                        filename = os.path.join(path, "logs", rel)
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
                         with open(filename, "wb") as f:
                             f.write(output[0])
-                        report["collected"].append(os.path.basename(name))
+                        report["collected"].append(rel)
                     except Exception as exc:  # pylint: disable=broad-exception-caught
                         report["failed"].append(
-                            {"file": os.path.basename(name), "reason": str(exc)})
+                            {"file": rel, "reason": str(exc)})
                 # all done, make a finish file
                 with open(os.path.join(path, "logs.downloaded"), "w", encoding='utf-8') as f:
                     pass
@@ -556,7 +569,7 @@ class ReanaWorkflow(VWorkflow):
             rel = name[len(prefix):] if name.startswith(prefix) else os.path.basename(name)
             if not rel:
                 continue
-            if not predicate(os.path.basename(rel)):
+            if not predicate(rel):
                 report["skipped"].append(
                     {"file": rel, "reason": "does not match selector"})
                 continue

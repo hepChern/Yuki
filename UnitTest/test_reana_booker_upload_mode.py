@@ -17,6 +17,8 @@ def _layout(tmp_path):
     (base / "logs").mkdir(parents=True)
     (base / "stageout" / "mass.png").write_bytes(b"img")
     (base / "stageout" / "ntuple.root").write_bytes(b"data")
+    (base / "stageout" / "plots").mkdir()
+    (base / "stageout" / "plots" / "fit.png").write_bytes(b"img2")
     (base / "logs" / "celebi.stdout").write_bytes(b"log")
     return base
 
@@ -46,6 +48,14 @@ def test_all_includes_data(tmp_path):
     _layout(tmp_path)
     names = _run(_booker(), tmp_path, "all")
     assert any(n.endswith("stageout/ntuple.root") for n in names)
+
+
+def test_nested_stageout_uploaded_with_relative_path(tmp_path):
+    _layout(tmp_path)
+    names = _run(_booker(), tmp_path, "plots+logs")
+    assert "impression_data/imp-abc/stageout/plots/fit.png" in names
+    assert "impression_data/imp-abc/stageout/mass.png" in names
+    assert not any(n.endswith("stageout/ntuple.root") for n in names)
 
 
 def test_filelist_manifest_uploaded(tmp_path):

@@ -179,6 +179,34 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         stopped_job.set_status.assert_not_called()
         deleted_job.set_status.assert_not_called()
 
+    def test_copy_files_local_writes_nested_stage_manifest(self):
+        """Nested rawdata/input files must be recorded with full relative paths."""
+        import json
+
+        job = self._make_job("a" * 32)
+        job.environment.return_value = "rawdata"
+        job.path = os.path.join(self.tmpdir, "jobs", "a" * 32)
+        rawdata_dir = os.path.join(job.path, "rawdata")
+        os.makedirs(os.path.join(rawdata_dir, "data"), exist_ok=True)
+        with open(os.path.join(rawdata_dir, "data", "x.root"), "wb") as f:
+            f.write(b"x")
+
+        self.workflow.jobs = [job]
+        self.workflow.snakefile_path = os.path.join(
+            self.tmpdir, "Snakefile"
+        )
+        with open(self.workflow.snakefile_path, "w", encoding="utf-8") as f:
+            f.write("rule test: shell: 'echo ok'")
+
+        self.workflow.copy_files_local()
+
+        manifest_path = os.path.join(self.workflow.local_exec_path, "stage_manifest.json")
+        self.assertTrue(os.path.exists(manifest_path))
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest = json.load(f)
+        dst_rels = {e["dst_rel"] for e in manifest["entries"]}
+        self.assertIn("impaaaaaaa/stageout/data/x.root", dst_rels)
+
 
 if __name__ == "__main__":
     unittest.main()

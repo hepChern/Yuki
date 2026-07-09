@@ -28,17 +28,26 @@ def classify(filename):
 
 
 def make_predicate(spec):
-    """Build a basename predicate from a selection spec.
+    """Build a name predicate from a selection spec.
 
     spec is one of: 'plots', 'data', 'all', a glob pattern, or a literal
-    filename. Returns a function (basename) -> bool.
+    filename/path. Returns a function (name) -> bool where name may be a
+    relative path such as 'subdir/file.root' or a bare filename.
+
+    Semantics:
+      - type keywords classify by basename extension.
+      - globs without '/' match the basename.
+      - globs with '/' match the full relative path.
+      - literal names match either the exact relative path or the basename.
     """
     if spec in ("all", "", None):
         return lambda name: True
     if spec == "plots":
-        return is_plot
+        return lambda name: is_plot(os.path.basename(name))
     if spec == "data":
-        return lambda name: not is_plot(name)
+        return lambda name: not is_plot(os.path.basename(name))
     if any(ch in spec for ch in "*?["):
-        return lambda name: fnmatch.fnmatch(name, spec)
-    return lambda name: name == spec
+        if "/" in spec:
+            return lambda name: fnmatch.fnmatch(name, spec)
+        return lambda name: fnmatch.fnmatch(os.path.basename(name), spec)
+    return lambda name: name == spec or os.path.basename(name) == spec

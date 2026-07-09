@@ -595,10 +595,10 @@ class ReanaBooker:
                 # Walk and upload all files in this stageout directory
                 for root, _dirs, files in os.walk(stageout_dir):
                     for filename in files:
-                        if not stage_pred(filename):
-                            continue
                         file_path = os.path.join(root, filename)
                         rel_path = os.path.relpath(file_path, stageout_dir)
+                        if not stage_pred(rel_path):
+                            continue
                         upload_name = (
                             f"impression_data/{impression_id}/"
                             f"stageout/{rel_path}"

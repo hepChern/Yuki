@@ -15,6 +15,7 @@ from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
 from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
 from . import file_types
+from .file_staging import walk_files
 
 logger = getLogger("YukiLogger")
 
@@ -131,6 +132,28 @@ class _SshConnection:
             self._sftp.remove(remote_path)
         except FileNotFoundError:
             pass
+
+    def walk_files(self, remote_dir):
+        """Recursively yield (rel_path, remote_path, size) for remote files.
+
+        Skips entries that cannot be stat'd. Directories are traversed; other
+        non-regular, non-directory entries are ignored.
+        """
+        try:
+            entries = self.listdir(remote_dir)
+        except FileNotFoundError:
+            return
+        for entry in entries:
+            remote_path = f"{remote_dir}/{entry}"
+            try:
+                st = self._sftp.stat(remote_path)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                for rel, rpath, size in self.walk_files(remote_path):
+                    yield f"{entry}/{rel}", rpath, size
+            elif stat.S_ISREG(st.st_mode):
+                yield entry, remote_path, st.st_size
 
     def exec(self, command, timeout=300):
         """Execute a command on the remote host.
@@ -281,18 +304,17 @@ class SshWorkflow(VWorkflow):
                 if job.environment() == "rawdata":
                     rawdata_path = os.path.join(job.path, "rawdata")
                     if os.path.exists(rawdata_path):
-                        filelist = os.listdir(rawdata_path)
+                        filelist = list(walk_files(rawdata_path))
                         total_raw = len(filelist)
-                        for f_idx, filename in enumerate(filelist):
-                            src_path = os.path.join(rawdata_path, filename)
+                        for f_idx, (rel_path, src_path) in enumerate(filelist):
                             dst_path = (
                                 f"{self.remote_exec_path}/"
-                                f"imp{job.short_uuid()}/stageout/{filename}"
+                                f"imp{job.short_uuid()}/stageout/{rel_path}"
                             )
                             ssh.put(src_path, dst_path)
                             self.logger(
                                 f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded rawdata "
-                                f"{f_idx+1}/{total_raw}: {filename}"
+                                f"{f_idx+1}/{total_raw}: {rel_path}"
                             )
 
                 elif job.is_input:
@@ -307,18 +329,17 @@ class SshWorkflow(VWorkflow):
                         "stageout"
                     )
                     if os.path.exists(src_stageout):
-                        filelist = os.listdir(src_stageout)
+                        filelist = list(walk_files(src_stageout))
                         total_input = len(filelist)
-                        for f_idx, filename in enumerate(filelist):
-                            src_path = os.path.join(src_stageout, filename)
+                        for f_idx, (rel_path, src_path) in enumerate(filelist):
                             dst_path = (
                                 f"{self.remote_exec_path}/"
-                                f"imp{job.short_uuid()}/stageout/{filename}"
+                                f"imp{job.short_uuid()}/stageout/{rel_path}"
                             )
                             ssh.put(src_path, dst_path)
                             self.logger(
                                 f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded input "
-                                f"{f_idx+1}/{total_input}: {filename}"
+                                f"{f_idx+1}/{total_input}: {rel_path}"
                             )
 
             ssh.put(self.snakefile_path, f"{self.remote_exec_path}/Snakefile")
@@ -360,23 +381,23 @@ echo $? > yuki.exit
 
         logs_dir = f"{self.remote_exec_path}/imp{short_uuid}/logs"
         try:
-            entries = ssh.listdir(logs_dir)
+            filelist = list(ssh.walk_files(logs_dir))
         except FileNotFoundError:
             return ""
 
         pattern = re.compile(r"^celebi_user_step(\d+)\.log$")
         candidates = []
-        for fname in entries:
+        for rel_path, remote_path, _size in filelist:
+            fname = os.path.basename(rel_path)
             m = pattern.match(fname)
             if m:
-                candidates.append((int(m.group(1)), fname))
+                candidates.append((int(m.group(1)), remote_path))
         if not candidates:
             return ""
 
         candidates.sort(reverse=True)
         latest = candidates[0][1]
-        remote_path = f"{logs_dir}/{latest}"
-        out, _err, _code = ssh.exec(f"tail -c {max_chars} {remote_path}")
+        out, _err, _code = ssh.exec(f"tail -c {max_chars} {latest}")
         return out
 
     def propagate_job_statuses(self, workflow_terminal=False):
@@ -400,7 +421,7 @@ echo $? > yuki.exit
                     continue
 
                 logs_dir = f"{self.remote_exec_path}/imp{short}/logs"
-                has_logs = bool(ssh.listdir(logs_dir))
+                has_logs = bool(list(ssh.walk_files(logs_dir)))
                 if has_logs:
                     tail = self._read_remote_log_tail(ssh, short)
                     detail = f"Remote execution failed: {tail}" if tail else "Remote execution failed"
@@ -514,38 +535,33 @@ echo $? > yuki.exit
 
         with self._ssh() as ssh:
             try:
-                entries = ssh.listdir(src_path)
+                filelist = list(ssh.walk_files(src_path))
             except FileNotFoundError:
                 self.logger(f"[SSH] No {label} found at: {src_path}")
                 report["skipped"].append(
                     {"file": f"<{label}>", "reason": "source missing"})
                 return report
 
-            if not entries:
+            if not filelist:
                 report["skipped"].append(
                     {"file": f"<{label}>", "reason": "source empty"})
                 return report
 
             os.makedirs(dst_path, exist_ok=True)
-            total_files = len(entries)
-            for i, filename in enumerate(entries):
-                remote_file = f"{src_path}/{filename}"
-                local_file = os.path.join(dst_path, filename)
+            total_files = len(filelist)
+            for i, (rel_path, remote_file, _size) in enumerate(filelist):
+                local_file = os.path.join(dst_path, rel_path)
                 if os.path.exists(local_file):
                     report["skipped"].append(
-                        {"file": filename, "reason": "already in Yuki"})
-                    continue
-                if not ssh.isfile(remote_file):
-                    report["skipped"].append(
-                        {"file": filename, "reason": "not a regular file"})
+                        {"file": rel_path, "reason": "already in Yuki"})
                     continue
                 try:
                     ssh.get(remote_file, local_file)
-                    report["collected"].append(filename)
-                    self.logger(f"[SSH] [{i+1}/{total_files}] Collected {label}: {filename}")
+                    report["collected"].append(rel_path)
+                    self.logger(f"[SSH] [{i+1}/{total_files}] Collected {label}: {rel_path}")
                 except Exception as exc:  # pylint: disable=broad-exception-caught
                     report["failed"].append(
-                        {"file": filename, "reason": str(exc)})
+                        {"file": rel_path, "reason": str(exc)})
 
         marker_path = os.path.join(os.path.dirname(dst_path), marker_name)
         with open(marker_path, "w", encoding='utf-8') as _:
@@ -592,14 +608,11 @@ echo $? > yuki.exit
         result = []
         with self._ssh() as ssh:
             try:
-                entries = ssh.listdir(src_path)
+                filelist = list(ssh.walk_files(src_path))
             except FileNotFoundError:
                 return []
-            for filename in entries:
-                remote_file = f"{src_path}/{filename}"
-                if ssh.isfile(remote_file):
-                    size = self._sftp_file_size(ssh, remote_file)
-                    result.append({"name": filename, "size": size})
+            for rel_path, remote_file, size in filelist:
+                result.append({"name": rel_path, "size": size})
         return result
 
     @staticmethod
@@ -621,34 +634,29 @@ echo $? > yuki.exit
 
         with self._ssh() as ssh:
             try:
-                entries = ssh.listdir(src_path)
+                filelist = list(ssh.walk_files(src_path))
             except FileNotFoundError:
                 self.logger(f"[SSH] No {kind} found at: {src_path}")
                 report["skipped"].append(
                     {"file": f"<{kind}>", "reason": "source missing"})
                 return report
-            for filename in entries:
-                if not predicate(filename):
+            for rel_path, remote_file, _size in filelist:
+                if not predicate(rel_path):
                     report["skipped"].append(
-                        {"file": filename, "reason": "does not match selector"})
+                        {"file": rel_path, "reason": "does not match selector"})
                     continue
-                remote_file = f"{src_path}/{filename}"
-                if not ssh.isfile(remote_file):
-                    report["skipped"].append(
-                        {"file": filename, "reason": "not a regular file"})
-                    continue
-                dst_file = os.path.join(dst_path, filename)
+                dst_file = os.path.join(dst_path, rel_path)
                 if os.path.exists(dst_file):
                     report["skipped"].append(
-                        {"file": filename, "reason": "already in Yuki"})
+                        {"file": rel_path, "reason": "already in Yuki"})
                     continue
                 try:
                     ssh.get(remote_file, dst_file)
-                    report["collected"].append(filename)
-                    self.logger(f"[SSH] Collected selected {kind}: {filename}")
+                    report["collected"].append(rel_path)
+                    self.logger(f"[SSH] Collected selected {kind}: {rel_path}")
                 except Exception as exc:  # pylint: disable=broad-exception-caught
                     report["failed"].append(
-                        {"file": filename, "reason": str(exc)})
+                        {"file": rel_path, "reason": str(exc)})
         return report
 
     def get_workflow_logs(self):

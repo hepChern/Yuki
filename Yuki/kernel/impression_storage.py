@@ -102,7 +102,11 @@ class ImpressionStorage:
             machine_id = self.runners_id.get(name)
             machine_dir = os.path.join(self.job_path, machine_id)
             storage_dir = os.path.join(machine_dir, kind)
-            downloaded = set(os.listdir(storage_dir)) if os.path.isdir(storage_dir) else set()
+            downloaded = set()
+            if os.path.isdir(storage_dir):
+                for root, _dirs, files in os.walk(storage_dir):
+                    for f in files:
+                        downloaded.add(os.path.relpath(os.path.join(root, f), storage_dir))
 
             runner_files = self._runner_files(job, workflow, kind, machine_dir)
 
