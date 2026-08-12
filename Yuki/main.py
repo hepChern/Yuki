@@ -44,7 +44,7 @@ def docker():
 @click.argument('image', default='yuki:latest')
 @click.option('--yuki-dir', '-d', envvar='YUKIDIR',
               default='~/.Yuki', show_default=True,
-              help='Host directory to mount as /root/.Yuki (env: YUKIDIR).')
+              help='Host directory to mount as /home/yuki/.Yuki (env: YUKIDIR).')
 @click.option('--port', '-p', envvar='YUKIPORT',
               default='3315', show_default=True,
               help='Host port to map to container port 3315 (env: YUKIPORT).')
@@ -60,7 +60,7 @@ def docker_run(image, yuki_dir, port, dev_dir, celebi_dir):
     yuki_dir = os.path.expanduser(yuki_dir)
     cmd = [
         'docker', 'run', '-it', '-d',
-        '-v', f'{yuki_dir}:/root/.Yuki',
+        '-v', f'{yuki_dir}:/home/yuki/.Yuki',
         '-p', f'{port}:3315',
     ]
     if dev_dir:

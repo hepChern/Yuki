@@ -36,7 +36,8 @@ COPY . /app/Yuki
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install celebichrono && \
-    pip install -e .
+    pip install -e . && \
+    chown -R yuki:yuki /app/Yuki
 
 USER yuki
 WORKDIR /app
