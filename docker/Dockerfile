@@ -1,8 +1,11 @@
-# Production image for Yuki
-# Builds from source and runs as non-root where possible
-FROM python:3.10-slim
+# syntax=docker/dockerfile:1
+# Multi-stage build for Yuki.
+#   docker build --target dev  -t yuki:dev .
+#   docker build --target prod -t yuki:<version> .   (prod is the default/final stage)
 
-# Install system dependencies
+########## base ##########
+FROM python:3.10-slim AS base
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -10,35 +13,47 @@ RUN apt-get update && \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Non-root runtime user; storage dir created here so named volumes
+# inherit yuki ownership on first mount.
+RUN useradd --create-home --uid 1000 --shell /bin/sh yuki && \
+    mkdir -p /home/yuki/.Yuki && \
+    chown -R yuki:yuki /home/yuki
 
-# Python deps
-RUN pip install --user --no-cache-dir click
-RUN pip install --user --no-cache-dir colored
-RUN pip install --user --no-cache-dir diff-match-patch
-RUN pip install --user --no-cache-dir python-daemon
-RUN pip install --user --no-cache-dir ipython
-RUN pip install --user --no-cache-dir PyYAML==5.1
-RUN pip install --user --no-cache-dir requests
-RUN pip install --user --no-cache-dir reana-client
-RUN pip install --user --no-cache-dir flask
-RUN pip install --user --no-cache-dir celery
-RUN pip install --user --no-cache-dir setuptools
-RUN pip install --user --no-cache-dir pillow
-# RUN pip install --user --no-cache-dir -r requirements.txt
-RUN pip install --user build
-RUN pip install --user celebichrono
+RUN pip install --no-cache-dir build
 
-# Copy source and build
-COPY . /app/Yuki
-WORKDIR /app/Yuki
-RUN python -m build && \
-    pip install --user dist/*.whl
-
-WORKDIR /app
-COPY docker/entrypoint.sh .
-RUN chmod +x entrypoint.sh
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 3315
 
+########## dev ##########
+# Editable install; docker-compose bind-mounts the repo over /app/Yuki
+# (same path, so the editable install keeps working).
+FROM base AS dev
+
+WORKDIR /app/Yuki
+COPY . /app/Yuki
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install celebichrono && \
+    pip install -e .
+
+USER yuki
+WORKDIR /app
+CMD ["/app/entrypoint.sh"]
+
+########## prod (final stage = default) ##########
+FROM base AS prod
+
+WORKDIR /app/Yuki-src
+COPY . /app/Yuki-src
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install celebichrono && \
+    python -m build && \
+    pip install dist/*.whl && \
+    cd /app && rm -rf /app/Yuki-src
+
+USER yuki
+WORKDIR /app
 CMD ["/app/entrypoint.sh"]
