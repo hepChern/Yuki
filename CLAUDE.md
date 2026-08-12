@@ -193,8 +193,7 @@ Note: as of the Docker consolidation (2026-08), containers run as non-root user 
 
 - `pyproject.toml`: Build configuration and dependencies
 - `docker-compose.yml`: Local development orchestration
-- `docker/Dockerfile`: Production container image
-- `docker/Dockerfile.dev`: Development container image
+- `docker/Dockerfile`: Multi-stage container image (dev/prod targets)
 - `.github/workflows/docker-nightly.yml`: Nightly image CI
 - `Yuki/main.py`: CLI entry point with Click commands
 - `Yuki/server/app.py`: Flask application setup
