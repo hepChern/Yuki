@@ -2,14 +2,24 @@ services:
   yuki:
     build:
       context: .
-      dockerfile: docker/Dockerfile.dev
+      dockerfile: docker/Dockerfile
+      target: dev
+    image: yuki:dev
     container_name: yuki-dev
     ports:
       - "3315:3315"
     volumes:
       - .:/app/Yuki
-      - /Users/wave/workdir/Celebi/Celebi/CelebiChrono:/app/CelebiChrono
-      - yuki-storage:/root/.Yuki
+      - yuki-storage:/home/yuki/.Yuki
+      # Optional CelebiChrono sibling checkout:
+      #   CELEBI_DIR=../CelebiChrono docker compose up
+      # Default is a committed empty placeholder, so no mount happens
+      # and the PyPI celebichrono package is used.
+      - type: bind
+        source: ${CELEBI_DIR:-./docker/celebi-placeholder}
+        target: /app/CelebiChrono
+        bind:
+          create_host_path: false
     environment:
       - FLASK_ENV=development
       - CELERY_BROKER_URL=amqp://localhost
