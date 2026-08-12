@@ -40,11 +40,25 @@ def status():
 def docker():
     """Docker management commands."""
 
+
+def _docker_is_rootless():
+    """True if the Docker daemon runs rootless (uid-mapped user namespace)."""
+    try:
+        result = subprocess.run(
+            ['docker', 'info', '--format', '{{json .SecurityOptions}}'],
+            capture_output=True, text=True, check=True
+        )
+        return 'rootless' in result.stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
 @docker.command('run')
 @click.argument('image', default='yuki:latest')
 @click.option('--yuki-dir', '-d', envvar='YUKIDIR',
               default='~/.Yuki', show_default=True,
-              help='Host directory to mount as /home/yuki/.Yuki (env: YUKIDIR).')
+              help='Host directory to mount as the container storage '
+                   '(/home/yuki/.Yuki, or /root/.Yuki under rootless Docker). '
+                   '(env: YUKIDIR).')
 @click.option('--port', '-p', envvar='YUKIPORT',
               default='3315', show_default=True,
               help='Host port to map to container port 3315 (env: YUKIPORT).')
@@ -58,9 +72,20 @@ def docker_run(image, yuki_dir, port, dev_dir, celebi_dir):
     IMAGE is the Docker image name (default: yuki:latest).
     """
     yuki_dir = os.path.expanduser(yuki_dir)
+    if _docker_is_rootless():
+        # Rootless Docker maps container uid 1000 to an unprivileged host
+        # subuid that cannot write the bind-mounted host dir. Container root
+        # maps to the invoking host user instead, so run as root and store
+        # under /root/.Yuki (HOME for root, where the server looks).
+        user_args = ['--user', 'root']
+        storage_target = '/root/.Yuki'
+    else:
+        user_args = []
+        storage_target = '/home/yuki/.Yuki'
     cmd = [
         'docker', 'run', '-it', '-d',
-        '-v', f'{yuki_dir}:/home/yuki/.Yuki',
+        *user_args,
+        '-v', f'{yuki_dir}:{storage_target}',
         '-p', f'{port}:3315',
     ]
     if dev_dir:

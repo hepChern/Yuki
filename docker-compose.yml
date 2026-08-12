@@ -10,7 +10,10 @@ services:
       - "3315:3315"
     volumes:
       - .:/app/Yuki
-      - yuki-storage:/home/yuki/.Yuki
+      # Host storage, shared with `yuki docker run` and native runs.
+      # Bind mounts are uid-tolerant on Docker Desktop (macOS) — this
+      # compose file targets macOS only; on Linux use `yuki docker run`.
+      - ${YUKIDIR:-~/.Yuki}:/home/yuki/.Yuki
       # Optional CelebiChrono sibling checkout:
       #   CELEBI_DIR=../CelebiChrono docker compose up
       # Default mounts a committed placeholder dir (only a .gitkeep);
@@ -26,6 +29,3 @@ services:
     working_dir: /app
     stdin_open: true
     tty: true
-
-volumes:
-  yuki-storage:

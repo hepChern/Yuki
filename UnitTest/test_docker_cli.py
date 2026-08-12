@@ -6,11 +6,18 @@ from click.testing import CliRunner
 from Yuki.main import cli
 
 
-def _run(args):
+def _run(args, info_stdout=''):
+    """Invoke the CLI with subprocess mocked; info_stdout fakes `docker info` output."""
     runner = CliRunner()
     with mock.patch("Yuki.main.subprocess.run") as m_run:
+        m_run.return_value.stdout = info_stdout
         result = runner.invoke(cli, args)
     return result, m_run
+
+
+def _run_cmd(m_run):
+    """The final subprocess call is the `docker run` command itself."""
+    return m_run.call_args_list[-1][0][0]
 
 
 def test_docker_run_mounts_storage_at_yuki_home(tmp_path):
@@ -18,17 +25,32 @@ def test_docker_run_mounts_storage_at_yuki_home(tmp_path):
     result, m_run = _run(["docker", "run", "--yuki-dir", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    cmd = m_run.call_args[0][0]
+    cmd = _run_cmd(m_run)
     mount = cmd[cmd.index("-v") + 1]
     assert mount == f"{tmp_path}:/home/yuki/.Yuki"
     assert "/root/.Yuki" not in cmd
+    assert "--user" not in cmd
+
+
+def test_docker_run_rootless_runs_as_root_with_root_storage(tmp_path):
+    """Rootless Docker: container uid 1000 maps to an unwritable host subuid,
+    so run as root (maps to the invoking host user) and mount at /root/.Yuki."""
+    result, m_run = _run(["docker", "run", "--yuki-dir", str(tmp_path)],
+                         info_stdout='["name=rootless"]')
+
+    assert result.exit_code == 0, result.output
+    cmd = _run_cmd(m_run)
+    mount = cmd[cmd.index("-v") + 1]
+    assert mount == f"{tmp_path}:/root/.Yuki"
+    assert "--user" in cmd
+    assert cmd[cmd.index("--user") + 1] == "root"
 
 
 def test_docker_run_default_image_and_port():
     result, m_run = _run(["docker", "run"])
 
     assert result.exit_code == 0, result.output
-    cmd = m_run.call_args[0][0]
+    cmd = _run_cmd(m_run)
     assert cmd[-1] == "yuki:latest"
     assert "3315:3315" in cmd
 
@@ -39,7 +61,7 @@ def test_docker_run_celebi_dir_mount(tmp_path):
     result, m_run = _run(["docker", "run", "--celebi-dir", str(celebi)])
 
     assert result.exit_code == 0, result.output
-    cmd = m_run.call_args[0][0]
+    cmd = _run_cmd(m_run)
     assert f"{celebi}:/app/CelebiChrono" in cmd
 
 

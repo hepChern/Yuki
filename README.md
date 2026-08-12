@@ -30,7 +30,9 @@ docker compose up
 CELEBI_DIR=../CelebiChrono docker compose up
 ```
 
-Storage persists in the `yuki-storage` volume (`/home/yuki/.Yuki` in the container).
+Storage persists in your host `~/.Yuki` (override with `YUKIDIR=... docker compose up`),
+shared with native runs and `yuki docker run`. The compose setup targets macOS;
+on Linux, prefer the CLI below.
 
 ### Building images
 
@@ -45,6 +47,14 @@ docker/scripts/build.sh prod --nightly # yuki-nightly:0.0.<date>-1 naming
 
 ```bash
 docker run -d -p 3315:3315 yuki:latest
+```
+
+or via the CLI (mounts host `~/.Yuki` for storage; auto-detects rootless Docker
+and runs as root there so the mount stays writable):
+
+```bash
+yuki docker run                 # yuki:latest, port 3315, ~/.Yuki
+yuki docker run --port 3316     # custom host port
 ```
 
 Nightly images are also published to `ghcr.io` by CI.

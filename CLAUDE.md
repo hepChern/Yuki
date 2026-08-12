@@ -154,7 +154,7 @@ The project uses absolute imports within the package. Always import from `Yuki` 
   │               └── logs/
 ```
 
-Note: as of the Docker consolidation (2026-08), containers run as non-root user `yuki`, so in-container storage is `/home/yuki/.Yuki` (previously `/root/.Yuki`). Old `yuki-storage` volume contents under the root path are not migrated automatically.
+Note: as of the Docker consolidation (2026-08), containers run as non-root user `yuki`, so in-container storage is `/home/yuki/.Yuki` (previously `/root/.Yuki`). Docker setups mount the host `~/.Yuki` there; under rootless Docker `yuki docker run` runs as root and uses `/root/.Yuki` instead.
 
 ### Port Configuration
 - Flask server runs on port 3315
@@ -162,7 +162,7 @@ Note: as of the Docker consolidation (2026-08), containers run as non-root user 
 
 ### Docker Setup (`docker/`)
 - **Dockerfile**: Multi-stage — `base` (system deps, RabbitMQ, non-root `yuki` user) → `dev` (editable install) and `prod` (wheel install, default stage). Python deps resolve from `pyproject.toml`.
-- **docker-compose.yml**: Dev environment (`docker compose up`); optional `CELEBI_DIR` env var mounts a local CelebiChrono checkout.
+- **docker-compose.yml**: Dev environment for macOS (`docker compose up`); bind-mounts host `~/.Yuki` (override via `YUKIDIR`) and optionally a local CelebiChrono checkout (`CELEBI_DIR`). On Linux, use `yuki docker run` instead (auto-detects rootless Docker).
 - **entrypoint.sh**: Starts in-container RabbitMQ (state in `/tmp`), waits for the broker, then `yuki server start`.
 - **scripts/build.sh**: Local image builder — dev/prod targets, version or nightly tagging, optional tar export.
 
