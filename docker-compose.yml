@@ -13,8 +13,8 @@ services:
       - yuki-storage:/home/yuki/.Yuki
       # Optional CelebiChrono sibling checkout:
       #   CELEBI_DIR=../CelebiChrono docker compose up
-      # Default is a committed empty placeholder, so no mount happens
-      # and the PyPI celebichrono package is used.
+      # Default mounts a committed placeholder dir (only a .gitkeep);
+      # the PyPI celebichrono package still resolves normally.
       - type: bind
         source: ${CELEBI_DIR:-./docker/celebi-placeholder}
         target: /app/CelebiChrono
