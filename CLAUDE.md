@@ -61,15 +61,17 @@ yuki server stop  # or Ctrl-C
 ### Docker Development
 ```bash
 # Start dev environment with hot-reload
-# Source code is mounted as a volume
-# RabbitMQ starts automatically inside the container
+# Source code is mounted as a volume; RabbitMQ starts inside the container
 docker compose up
 
-# Build production image locally
-docker build -f docker/Dockerfile -t yuki:latest .
+# Optionally develop against a local CelebiChrono checkout instead of PyPI
+CELEBI_DIR=../CelebiChrono docker compose up
 
-# Build nightly image
-bash docker/scripts/build-nightly.sh
+# Build images locally
+docker/scripts/build.sh dev            # yuki:dev
+docker/scripts/build.sh prod           # yuki:<version> + yuki:latest (version from pyproject.toml)
+docker/scripts/build.sh prod --tar     # also exports yuki-<version>.tar via docker save
+docker/scripts/build.sh prod --nightly # yuki-nightly:0.0.<date>-1 naming
 ```
 
 ### Testing
@@ -152,16 +154,17 @@ The project uses absolute imports within the package. Always import from `Yuki` 
   │               └── logs/
 ```
 
+Note: as of the Docker consolidation (2026-08), containers run as non-root user `yuki`, so in-container storage is `/home/yuki/.Yuki` (previously `/root/.Yuki`). Old `yuki-storage` volume contents under the root path are not migrated automatically.
+
 ### Port Configuration
 - Flask server runs on port 3315
 - Celery uses RabbitMQ broker on localhost
 
 ### Docker Setup (`docker/`)
-- **Dockerfile**: Production image (rootless, builds from source)
-- **Dockerfile.dev**: Development image with volume-mount support
-- **docker-compose.yml**: One-command dev environment (`docker compose up`)
-- **entrypoint.sh / entrypoint.dev.sh**: RabbitMQ + Yuki startup scripts
-- **scripts/build-nightly.sh**: Local nightly image builder
+- **Dockerfile**: Multi-stage — `base` (system deps, RabbitMQ, non-root `yuki` user) → `dev` (editable install) and `prod` (wheel install, default stage). Python deps resolve from `pyproject.toml`.
+- **docker-compose.yml**: Dev environment (`docker compose up`); optional `CELEBI_DIR` env var mounts a local CelebiChrono checkout.
+- **entrypoint.sh**: Starts in-container RabbitMQ (state in `/tmp`), waits for the broker, then `yuki server start`.
+- **scripts/build.sh**: Local image builder — dev/prod targets, version or nightly tagging, optional tar export.
 
 ### CI/CD Pipeline
 - **Pylint**: Runs on push with Python 3.8-3.10
