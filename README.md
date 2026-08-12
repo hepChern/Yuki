@@ -2,17 +2,42 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hepChern/Yuki)
 
-Yuki is the Data Integration Thought Entity for the Chern Project. 
+Yuki is the Data Integration Thought Entity for the Chern Project — a data
+analysis management toolkit for high energy physics. A Flask web server with a
+Celery task queue manages jobs, workflows (REANA and native), runners, and
+impressions, storing data under `~/.Yuki/Storage/`.
 
-## Install:
-+ Download the package
-+ Run: python setup.py install
+## Install
 
-## Start:
-+ yuki server start
+```bash
+# From source (development)
+pip install -e .
 
-## Stop:
-+ Ctrl-C
+# Or build and install the package
+python -m build
+pip install dist/yuki-*.whl
+```
+
+## Run the server
+
+Requires a RabbitMQ broker at `amqp://localhost` (or run everything in Docker — see below).
+
+```bash
+yuki server start    # Flask on port 3315 + Celery worker
+yuki server status
+yuki server stop     # or Ctrl-C
+```
+
+## CLI overview
+
+```bash
+yuki server start|stop|status      # manage the web server
+yuki docker run|restart            # run Yuki in Docker (see below)
+yuki run-workflow <uuid>           # execute a workflow
+yuki impression-export <uuids...> --project-uuid <uuid> -o out.tar.gz
+yuki impression-import <tar_file> --project-uuid <uuid>
+yuki env-map add|list|remove       # manage environment mappings
+```
 
 ## Run with Docker
 
@@ -59,3 +84,8 @@ yuki docker run --port 3316     # custom host port
 
 Nightly images are also published to `ghcr.io` by CI.
 
+## Testing
+
+```bash
+python -m pytest UnitTest/ -v
+```
