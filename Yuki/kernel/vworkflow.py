@@ -25,6 +25,7 @@ from Yuki.kernel.status_constants import (
     translate_to_musical, get_detailed_status_message
 )
 from Yuki.utils import snakefile
+from .file_staging import walk_files
 
 CHERN_CACHE = ChernCache.instance()
 
@@ -81,23 +82,47 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
 
         Behavior:
         - If mode is provided, use it.
-        - Otherwise determine mode from stored configuration of the workflow runner.
+        - Otherwise, for an existing workflow, prefer the backend_type stored
+          in the workflow's own config.json; fall back to the global
+          backend_types mapping keyed by the workflow's machine_id.
+        - For a new workflow, persist the resolved backend_type so that later
+          status/file-status calls reload the correct subclass even when the
+          global mapping is missing or uses a different key.
         """
-        if not mode:
+        if not mode and uuid:
             workflow_path = os.path.join(os.environ["HOME"], ".Yuki",
-                                          "Workflows", uuid)
-            runner_id = metadata.ConfigFile(
-                os.path.join(workflow_path, "config.json")).read_variable("machine_id", "")
-            config = metadata.ConfigFile(os.path.join(os.environ["HOME"],
-                                                   ".Yuki", "config.json"))
-            backend_types = config.read_variable("backend_types", {})
-            mode = backend_types.get(runner_id, "reana")
+                                          "Workflows", project_uuid, uuid)
+            workflow_config = metadata.ConfigFile(
+                os.path.join(workflow_path, "config.json"))
+            stored_mode = workflow_config.read_variable("backend_type", "")
+            if stored_mode:
+                mode = stored_mode
+            else:
+                runner_id = workflow_config.read_variable("machine_id", "")
+                config = metadata.ConfigFile(os.path.join(os.environ["HOME"],
+                                                       ".Yuki", "config.json"))
+                backend_types = config.read_variable("backend_types", {})
+                mode = backend_types.get(runner_id, "reana")
+        if not mode:
+            mode = "reana"
+
         # Accept both "native" (new) and "dry" (legacy/deprecated) for backward compatibility
         if mode in ("native", "dry"):
             from .native_workflow import NativeWorkflow
-            return NativeWorkflow(project_uuid, jobs, uuid)
-        from .reana_workflow import ReanaWorkflow
-        return ReanaWorkflow(project_uuid, jobs, uuid)
+            workflow = NativeWorkflow(project_uuid, jobs, uuid)
+        elif mode == "ssh":
+            from .ssh_workflow import SshWorkflow
+            workflow = SshWorkflow(project_uuid, jobs, uuid)
+        else:
+            from .reana_workflow import ReanaWorkflow
+            workflow = ReanaWorkflow(project_uuid, jobs, uuid)
+
+        # Persist backend_type on creation so reloads are independent of the
+        # global backend_types mapping.
+        if not uuid:
+            workflow.config_file.write_variable("backend_type", mode)
+
+        return workflow
 
     def get_name(self):
         """Get a human-readable name for the workflow."""
@@ -564,15 +589,20 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             self.logger(f"Outputs path: {outputs_path}")
             watermark_path = os.path.join(path, "watermarks")
             os.makedirs(watermark_path, exist_ok=True)
-            filelist = [f for f in os.listdir(outputs_path) if f.endswith(".png")]
+            filelist = [
+                (rel_path, abs_path)
+                for rel_path, abs_path in walk_files(outputs_path)
+                if rel_path.endswith(".png")
+            ]
             total_files = len(filelist)
-            self.logger(f"Files to watermark: {filelist}")
+            self.logger(f"Files to watermark: {[r for r, _ in filelist]}")
 
             # Water mark the png files
-            for i, filename in enumerate(filelist):
+            for i, (rel_path, abs_path) in enumerate(filelist):
+                filename = os.path.basename(rel_path)
                 # 1. Open the image and convert it to RGBA.
                 # The watermark will be drawn directly onto this image object.
-                image = Image.open(os.path.join(outputs_path, filename)).convert("RGBA")
+                image = Image.open(abs_path).convert("RGBA")
 
                 # 2. Create the drawing context directly on the image
                 draw = ImageDraw.Draw(image)
@@ -605,9 +635,14 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                 draw.text((x, y), text, font=font, fill=fill_color)
 
                 # 4. Save the resulting image.
-                image.save(os.path.join(watermark_path,
-                                         f"imp{impression[:8]}_{filename}"), format="PNG")
-                self.logger(f"[{i+1}/{total_files}] Saved watermarked image: {filename}")
+                dst_name = os.path.join(
+                    os.path.dirname(rel_path),
+                    f"imp{impression[:8]}_{filename}"
+                )
+                dst_path = os.path.join(watermark_path, dst_name)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                image.save(dst_path, format="PNG")
+                self.logger(f"[{i+1}/{total_files}] Saved watermarked image: {rel_path}")
 
     @abstractmethod
     def update_workflow_status(self):

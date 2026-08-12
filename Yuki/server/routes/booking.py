@@ -155,6 +155,7 @@ def book_reana():
         - access_token: REANA access token (optional if registered)
         - verify_ssl: "true" or "false" (default "true")
         - stageout: "true" or "false" (default "false")
+        - upload: "plots+logs" / "data+logs" / "all" / "logs" (default "plots+logs")
 
     Returns:
         JSON with booking result.
@@ -163,7 +164,10 @@ def book_reana():
         # Get form fields
         project_name = request.form.get("project_name", "")
         verify_ssl = request.form.get("verify_ssl", "true").lower() != "false"
-        stageout = request.form.get("stageout", "false").lower() == "true"
+        upload_mode = request.form.get("upload", "plots+logs")
+        # Legacy: a bare stageout=true means "upload everything".
+        if request.form.get("stageout", "false").lower() == "true":
+            upload_mode = "all"
 
         if not project_name:
             return jsonify({"error": "Missing project_name"}), 400
@@ -201,7 +205,7 @@ def book_reana():
 
             # Book to REANA
             booker = ReanaBooker(server_url, access_token, verify_ssl=verify_ssl)
-            result = booker.book_project(project_path, project_name, stageout=stageout)
+            result = booker.book_project(project_path, project_name, upload_mode=upload_mode)
 
             response = {
                 "success": result.success,
@@ -240,6 +244,7 @@ def book_reana_stream():
         - access_token: REANA access token (optional if registered)
         - verify_ssl: "true" or "false" (default "true")
         - stageout: "true" or "false" (default "false")
+        - upload: "plots+logs" / "data+logs" / "all" / "logs" (default "plots+logs")
 
     Returns:
         Chunked NDJSON stream of progress messages.
@@ -252,7 +257,10 @@ def book_reana_stream():
     # Validate request up front (before starting the stream)
     project_name = request.form.get("project_name", "")
     verify_ssl = request.form.get("verify_ssl", "true").lower() != "false"
-    stageout = request.form.get("stageout", "false").lower() == "true"
+    upload_mode = request.form.get("upload", "plots+logs")
+    # Legacy: a bare stageout=true means "upload everything".
+    if request.form.get("stageout", "false").lower() == "true":
+        upload_mode = "all"
 
     if not project_name:
         return jsonify({"error": "Missing project_name"}), 400
@@ -301,7 +309,7 @@ def book_reana_stream():
                     verify_ssl=verify_ssl,
                     progress_callback=progress_callback
                 )
-                result = booker.book_project(project_path, project_name, stageout=stageout)
+                result = booker.book_project(project_path, project_name, upload_mode=upload_mode)
 
                 msg_queue.put({
                     "done": True,

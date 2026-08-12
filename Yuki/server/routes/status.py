@@ -10,6 +10,7 @@ from CelebiChrono.utils.metadata import ConfigFile
 from CelebiChrono.kernel.chern_cache import ChernCache
 from ...kernel.vjob import VJob
 from ...kernel.vworkflow import VWorkflow
+from Yuki.kernel import file_types
 from ...kernel.status_constants import (
     translate_to_musical, translate_to_legacy, is_valid_status,
     CODA, FAILED
@@ -225,7 +226,7 @@ def process_directory(job_path, runner_id, base_dir, file_infos_dict, max_previe
             continue
 
         ext = os.path.splitext(filename)[1].lower()
-        is_image = ext in ('.png', '.jpg', '.jpeg', '.gif')
+        is_image = file_types.is_inline_image(filename)
         is_text = ext in ('.txt', '.log', '.stdout')
         watermarked = base_dir == 'watermarks'
         is_log = base_dir == 'logs'
@@ -354,8 +355,7 @@ def process_directory2(job_path, runner_id, sub_dir, file_infos_dict,  # pylint:
         if os.path.isfile(fpath):
             ext = os.path.splitext(fname)[1].lower()
             # Plot/Image extensions
-            is_image = ext in ['.png', '.jpg', '.jpeg', '.gif',
-                               '.webp', '.svg']
+            is_image = file_types.is_inline_image(fname)
             # Data/Log extensions
             is_text = ext in ['.txt', '.md', '.json', '.yaml', '.py',
                               '.log', '.stdout', '.stderr', '.csv']

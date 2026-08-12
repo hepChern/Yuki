@@ -71,8 +71,9 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         self.assertTrue(os.path.isdir(self.workflow.local_exec_path))
         self.assertEqual(self.workflow.uuid, self.workflow_uuid)
 
-    def test_propagate_done_jobs_become_coda(self):
-        from Yuki.kernel.status_constants import CODA
+    def test_propagate_done_jobs_become_finished(self):
+        """Completed jobs should be stored with the legacy status 'finished'
+        so the client can display [coda][finished]."""
         job_a = self._make_job("a" * 32)
         job_b = self._make_job("b" * 32)
         self.workflow.jobs = [job_a, job_b]
@@ -82,8 +83,8 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
 
         self.workflow.propagate_job_statuses(workflow_terminal=False)
 
-        job_a.set_status.assert_called_once_with(CODA, "Local execution completed")
-        job_b.set_status.assert_called_once_with(CODA, "Local execution completed")
+        job_a.set_status.assert_called_once_with("finished", "Local execution completed")
+        job_b.set_status.assert_called_once_with("finished", "Local execution completed")
 
     def test_propagate_in_flight_leaves_jobs_unchanged(self):
         job = self._make_job("a" * 32, status_value="in movement")
@@ -177,6 +178,34 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         failed_job.set_status.assert_not_called()
         stopped_job.set_status.assert_not_called()
         deleted_job.set_status.assert_not_called()
+
+    def test_copy_files_local_writes_nested_stage_manifest(self):
+        """Nested rawdata/input files must be recorded with full relative paths."""
+        import json
+
+        job = self._make_job("a" * 32)
+        job.environment.return_value = "rawdata"
+        job.path = os.path.join(self.tmpdir, "jobs", "a" * 32)
+        rawdata_dir = os.path.join(job.path, "rawdata")
+        os.makedirs(os.path.join(rawdata_dir, "data"), exist_ok=True)
+        with open(os.path.join(rawdata_dir, "data", "x.root"), "wb") as f:
+            f.write(b"x")
+
+        self.workflow.jobs = [job]
+        self.workflow.snakefile_path = os.path.join(
+            self.tmpdir, "Snakefile"
+        )
+        with open(self.workflow.snakefile_path, "w", encoding="utf-8") as f:
+            f.write("rule test: shell: 'echo ok'")
+
+        self.workflow.copy_files_local()
+
+        manifest_path = os.path.join(self.workflow.local_exec_path, "stage_manifest.json")
+        self.assertTrue(os.path.exists(manifest_path))
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest = json.load(f)
+        dst_rels = {e["dst_rel"] for e in manifest["entries"]}
+        self.assertIn("impaaaaaaa/stageout/data/x.root", dst_rels)
 
 
 if __name__ == "__main__":

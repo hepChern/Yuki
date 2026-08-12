@@ -12,7 +12,9 @@ import json
 from CelebiChrono.utils import metadata
 from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
-from .status_constants import FAILED, DISSONANCE, CODA, translate_to_musical, is_terminal_status
+from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
+from . import file_types
+from .file_staging import walk_files
 
 DEFAULT_ENVIRONMENT = "docker.io/reanahub/reana-env-root6:6.18.04"
 
@@ -123,14 +125,13 @@ class NativeWorkflow(VWorkflow):
             if job.environment() == "rawdata":
                 rawdata_path = os.path.join(job.path, "rawdata")
                 if os.path.exists(rawdata_path):
-                    filelist = os.listdir(rawdata_path)
+                    filelist = list(walk_files(rawdata_path))
                     total_raw = len(filelist)
-                    for f_idx, filename in enumerate(filelist):
-                        src_path = os.path.join(rawdata_path, filename)
+                    for f_idx, (rel_path, src_path) in enumerate(filelist):
                         dst_rel = os.path.join(
                             f"imp{job.short_uuid()}",
                             "stageout",
-                            filename
+                            rel_path
                         )
                         stage_manifest.append({
                             "type": "rawdata",
@@ -139,7 +140,7 @@ class NativeWorkflow(VWorkflow):
                             "dst_rel": dst_rel,
                         })
                         self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Queued rawdata "
-                                     f"{f_idx+1}/{total_raw}: {filename}")
+                                     f"{f_idx+1}/{total_raw}: {rel_path}")
 
             # Record input files for lazy staging (links resolved at run-workflow time)
             elif job.is_input:
@@ -155,14 +156,13 @@ class NativeWorkflow(VWorkflow):
                 )
 
                 if os.path.exists(src_stageout):
-                    filelist = os.listdir(src_stageout)
+                    filelist = list(walk_files(src_stageout))
                     total_input = len(filelist)
-                    for f_idx, filename in enumerate(filelist):
-                        src_path = os.path.join(src_stageout, filename)
+                    for f_idx, (rel_path, src_path) in enumerate(filelist):
                         dst_rel = os.path.join(
                             f"imp{job.short_uuid()}",
                             "stageout",
-                            filename
+                            rel_path
                         )
                         stage_manifest.append({
                             "type": "input",
@@ -172,7 +172,7 @@ class NativeWorkflow(VWorkflow):
                             "dst_rel": dst_rel,
                         })
                         self.logger(f"[LOCAL] [Job {j_idx+1}/{total_jobs}] Queued input "
-                                     f"{f_idx+1}/{total_input}: {filename}")
+                                     f"{f_idx+1}/{total_input}: {rel_path}")
 
         # Write stage manifest for FileStager to process on the host
         if stage_manifest:
@@ -252,14 +252,16 @@ class NativeWorkflow(VWorkflow):
             short = job.short_uuid()
             done_path = os.path.join(self.local_exec_path, f"{short}.done")
             if os.path.exists(done_path):
-                job.set_status(CODA, "Local execution completed")
+                job.set_status("finished", "Local execution completed")
                 continue
 
             if not workflow_terminal:
                 continue
 
             logs_dir = os.path.join(self.local_exec_path, f"imp{short}", "logs")
-            has_logs = os.path.isdir(logs_dir) and bool(os.listdir(logs_dir))
+            has_logs = os.path.isdir(logs_dir) and any(
+                True for _ in walk_files(logs_dir)
+            )
             if has_logs:
                 tail = self._read_job_log_tail(short)
                 if tail:
@@ -288,17 +290,18 @@ class NativeWorkflow(VWorkflow):
 
         pattern = re.compile(r"^celebi_user_step(\d+)\.log$")
         candidates = []
-        for fname in os.listdir(logs_dir):
+        for rel_path, abs_path in walk_files(logs_dir):
+            fname = os.path.basename(rel_path)
             m = pattern.match(fname)
             if m:
-                candidates.append((int(m.group(1)), fname))
+                candidates.append((int(m.group(1)), abs_path))
 
         if not candidates:
             return ""
 
         candidates.sort(reverse=True)
         latest = candidates[0][1]
-        log_path = os.path.join(logs_dir, latest)
+        log_path = latest
 
         try:
             with open(log_path, "r", encoding="utf-8", errors="replace") as f:
@@ -385,10 +388,11 @@ class NativeWorkflow(VWorkflow):
                 continue
             job.set_status(FAILED, "Native workflow killed by user")
 
+    # pylint: disable=too-many-locals
     def _collect_artifacts(self, impression, artifact_dir, marker_name, label):
         """Collect a job artifact directory from local execution into Storage.
 
-        Returns True when the artifact directory existed and was collected.
+        Returns a report dict with collected/skipped/failed file lists.
         """
         src_path = os.path.join(
             self.local_exec_path,
@@ -404,51 +408,115 @@ class NativeWorkflow(VWorkflow):
             self.machine_id,
             artifact_dir
         )
+        report = {"collected": [], "skipped": [], "failed": []}
 
         if not os.path.exists(src_path):
             self.logger(f"[LOCAL] No {label} found at: {src_path}")
-            return False
+            report["skipped"].append(
+                {"file": f"<{label}>", "reason": "source missing"})
+            return report
 
         os.makedirs(dst_path, exist_ok=True)
-        filelist = os.listdir(src_path)
+        filelist = list(walk_files(src_path))
         total_files = len(filelist)
-        for i, filename in enumerate(filelist):
-            src_file = os.path.join(src_path, filename)
-            dst_file = os.path.join(dst_path, filename)
-            shutil.copy2(src_file, dst_file)
-            self.logger(f"[LOCAL] [{i+1}/{total_files}] Collected {label}: {filename}")
+        for i, (rel_path, src_file) in enumerate(filelist):
+            dst_file = os.path.join(dst_path, rel_path)
+            if os.path.exists(dst_file):
+                report["skipped"].append(
+                    {"file": rel_path, "reason": "already in Yuki"})
+                continue
+            try:
+                os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+                report["collected"].append(rel_path)
+                self.logger(f"[LOCAL] [{i+1}/{total_files}] Collected {label}: {rel_path}")
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                report["failed"].append(
+                    {"file": rel_path, "reason": str(exc)})
 
         marker_path = os.path.join(os.path.dirname(dst_path), marker_name)
         with open(marker_path, "w", encoding='utf-8') as _:
             pass
-        return True
+        return report
 
     def download(self, impression=None):
         """Download/collect results from local execution."""
         self.logger("[LOCAL] Collecting results from local execution")
+        report = {"collected": [], "skipped": [], "failed": []}
         if impression:
-            self._collect_artifacts(
+            stageout_report = self._collect_artifacts(
                 impression, "stageout", "stageout.downloaded", "output"
             )
-            self._collect_artifacts(
+            logs_report = self._collect_artifacts(
                 impression, "logs", "logs.downloaded", "log"
             )
+            for key in report:
+                report[key].extend(stageout_report.get(key, []))
+                report[key].extend(logs_report.get(key, []))
+        return report
 
     def download_outputs(self, impression=None):
         """Download outputs from local execution."""
         if impression:
             self.logger("[LOCAL] Collecting outputs from local execution")
-            self._collect_artifacts(
+            return self._collect_artifacts(
                 impression, "stageout", "stageout.downloaded", "output"
             )
+        return {"collected": [], "skipped": [], "failed": []}
 
     def download_logs(self, impression=None):
         """Download logs from local execution."""
         if impression:
             self.logger("[LOCAL] Collecting logs from local execution")
-            self._collect_artifacts(
+            return self._collect_artifacts(
                 impression, "logs", "logs.downloaded", "log"
             )
+        return {"collected": [], "skipped": [], "failed": []}
+
+    def list_runner_files(self, impression, kind="stageout"):
+        """List files in the local execution dir under imp<short>/<kind>."""
+        src_path = os.path.join(
+            self.local_exec_path, f"imp{impression[0:7]}", kind)
+        if not os.path.isdir(src_path):
+            return []
+        result = []
+        for rel_path, abs_path in walk_files(src_path):
+            result.append({"name": rel_path, "size": os.path.getsize(abs_path)})
+        return result
+
+    def download_selected(self, impression, predicate, kind="stageout"):
+        """Copy only matching, not-yet-present files into Storage. No marker."""
+        src_path = os.path.join(
+            self.local_exec_path, f"imp{impression[0:7]}", kind)
+        report = {"collected": [], "skipped": [], "failed": []}
+        if not os.path.isdir(src_path):
+            self.logger(f"[LOCAL] No {kind} found at: {src_path}")
+            report["skipped"].append(
+                {"file": f"<{kind}>", "reason": "source missing"})
+            return report
+        dst_path = os.path.join(
+            os.environ["HOME"], ".Yuki", "Storage",
+            self.project_uuid, impression, self.machine_id, kind)
+        os.makedirs(dst_path, exist_ok=True)
+        for rel_path, src_file in walk_files(src_path):
+            if not predicate(rel_path):
+                report["skipped"].append(
+                    {"file": rel_path, "reason": "does not match selector"})
+                continue
+            dst_file = os.path.join(dst_path, rel_path)
+            if os.path.exists(dst_file):
+                report["skipped"].append(
+                    {"file": rel_path, "reason": "already in Yuki"})
+                continue
+            try:
+                os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+                report["collected"].append(rel_path)
+                self.logger(f"[LOCAL] Collected selected {kind}: {rel_path}")
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                report["failed"].append(
+                    {"file": rel_path, "reason": str(exc)})
+        return report
 
     def get_workflow_logs(self):
         """Persist local engine logs in the same workflow-level location as REANA."""

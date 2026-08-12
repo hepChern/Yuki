@@ -14,6 +14,7 @@ from CelebiChrono.utils import csys
 from CelebiChrono.utils import metadata
 from .vjob import VJob
 from .image_job import ImageJob
+from .file_staging import walk_files
 
 class ContainerJob(VJob):
     """
@@ -491,19 +492,20 @@ class ContainerJob(VJob):
 
     def outputs(self):
         """
-        Get the list of output directories for this container.
+        Get the list of output files for this container.
 
         Returns:
-            list: List of output directory names
+            list: List of output file paths relative to the output root.
         """
         if self.machine_id is None:
             path = os.path.join(self.path, "rawdata")
-            return csys.list_dir(path)
+            if not os.path.exists(path):
+                return []
+            return [rel for rel, _ in walk_files(path)]
         path = os.path.join(self.path, self.machine_id, "stageout")
         if not os.path.exists(path):
             return []
-        dirs = csys.list_dir(path)
-        return dirs
+        return [rel for rel, _ in walk_files(path)]
 
     def _create_datalist_generator(self):
         """

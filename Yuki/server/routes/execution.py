@@ -3,10 +3,11 @@ Job execution routes.
 """
 from logging import getLogger
 
-from flask import Blueprint, request
+from flask import Blueprint, jsonify, request
 
 from ...kernel.vjob import VJob
 from ...kernel.container_job import ContainerJob
+from ...kernel.impression_storage import ImpressionStorage
 from ...kernel.status_constants import (
     SILENCE, PRELUDE, TUNING, FAILED, DISSONANCE,
     translate_to_musical
@@ -128,3 +129,11 @@ def outputs(project_uuid, impression, machine):
     if job.job_type() == "task":
         return " ".join(ContainerJob(path, machine).outputs())
     return ""
+
+
+@bp.route("/file-status/<project_uuid>/<impression>/<machine>", methods=['GET'])
+def file_status(project_uuid, impression, machine):
+    """Return merged runner + Storage file listing for an impression."""
+    kind = request.args.get("kind", "stageout")
+    storage = ImpressionStorage(project_uuid, impression)
+    return jsonify(storage.file_status(kind))

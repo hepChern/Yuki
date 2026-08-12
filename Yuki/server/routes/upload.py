@@ -16,6 +16,20 @@ bp = Blueprint('upload', __name__)
 logger = getLogger("YukiLogger")
 
 
+def _safe_send_from_directory(directory, filename):
+    """Validate filename stays inside directory before serving it.
+
+    Returns a Flask Response on success, or a "NOTFOUND" string if the
+    requested path would escape the intended directory.
+    """
+    real_dir = os.path.realpath(directory)
+    real_path = os.path.realpath(os.path.join(directory, filename))
+    if real_path != real_dir and not real_path.startswith(real_dir + os.sep):
+        logger.warning("Path traversal attempt blocked: %s under %s", filename, directory)
+        return "NOTFOUND"
+    return send_from_directory(directory, filename)
+
+
 @bp.route('/upload', methods=['POST'])
 def upload_file():
     """Upload a tar file and extract it to the target directory."""
@@ -75,18 +89,17 @@ def download_file(filename):
     return send_from_directory(directory, filename, as_attachment=True)
 
 
-@bp.route("/export/<project_uuid>/<impression>/<filename>", methods=['GET'])
+@bp.route("/export/<project_uuid>/<impression>/<path:filename>", methods=['GET'])
 def export(project_uuid, impression, filename):
     """Export a file from an impression."""
     job_path = config.get_job_path(project_uuid, impression)
     config_file = config.get_config_file()
 
     print("EXPORTING", job_path, filename)
-    if os.path.exists(os.path.join(job_path, "rawdata")):
-        full_path = os.path.join(job_path, "rawdata", filename)
-        if os.path.exists(full_path):
-            return send_from_directory(
-                os.path.join(job_path, "rawdata"), filename, as_attachment=True)
+    rawdata_dir = os.path.join(job_path, "rawdata")
+    full_path = os.path.join(rawdata_dir, filename)
+    if os.path.exists(full_path):
+        return _safe_send_from_directory(rawdata_dir, filename)
 
     runners = config_file.read_variable("runners", [])
     runners_id = config_file.read_variable("runners_id", {})
@@ -98,11 +111,11 @@ def export(project_uuid, impression, filename):
         full_path = os.path.join(path, filename)
         print("path", full_path)
         if os.path.exists(full_path):
-            return send_from_directory(path, filename, as_attachment=True)
+            return _safe_send_from_directory(path, filename)
     return "NOTFOUND"
 
 
-@bp.route("/get-file/<project_uuid>/<impression>/<filename>", methods=['GET'])
+@bp.route("/get-file/<project_uuid>/<impression>/<path:filename>", methods=['GET'])
 def get_file(project_uuid, impression, filename):
     """Get the path to a specific file in an impression."""
     job_path = config.get_job_path(project_uuid, impression)
@@ -112,32 +125,37 @@ def get_file(project_uuid, impression, filename):
 
     for machine in runners:
         machine_id = runners_id[machine]
-        path = os.path.join(job_path, machine_id, "stageout", filename)
-        if os.path.exists(path):
-            return path
+        path = os.path.join(job_path, machine_id, "stageout")
+        full_path = os.path.join(path, filename)
+        real_path = os.path.realpath(full_path)
+        real_dir = os.path.realpath(path)
+        if real_path != real_dir and not real_path.startswith(real_dir + os.sep):
+            continue
+        if os.path.exists(full_path):
+            return full_path
     return "NOTFOUND"
 
-@bp.route("/log-view/<project_uuid>/<impression>/<runner_id>/<filename>", methods=['GET'])
+@bp.route("/log-view/<project_uuid>/<impression>/<runner_id>/<path:filename>", methods=['GET'])
 def logview(project_uuid, impression, runner_id, filename):
     """View a specific file."""
     job_path = config.get_job_path(project_uuid, impression)
     path = os.path.join(job_path, runner_id, "logs")
-    return send_from_directory(path, filename)
+    return _safe_send_from_directory(path, filename)
 
 
-@bp.route("/file-view/<project_uuid>/<impression>/<runner_id>/<filename>", methods=['GET'])
+@bp.route("/file-view/<project_uuid>/<impression>/<runner_id>/<path:filename>", methods=['GET'])
 def fileview(project_uuid, impression, runner_id, filename):
     """View a specific file."""
     job_path = config.get_job_path(project_uuid, impression)
     path = os.path.join(job_path, runner_id, "stageout")
-    return send_from_directory(path, filename)
+    return _safe_send_from_directory(path, filename)
 
-@bp.route("/watermark-view/<project_uuid>/<impression>/<runner_id>/<filename>", methods=['GET'])
+@bp.route("/watermark-view/<project_uuid>/<impression>/<runner_id>/<path:filename>", methods=['GET'])
 def watermarkview(project_uuid, impression, runner_id, filename):
     """View a specific file."""
     job_path = config.get_job_path(project_uuid, impression)
     path = os.path.join(job_path, runner_id, "watermarks")
-    return send_from_directory(path, filename)
+    return _safe_send_from_directory(path, filename)
 
 
 # =============================================================================

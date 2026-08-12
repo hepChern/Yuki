@@ -10,6 +10,8 @@ import time
 import json
 from CelebiChrono.utils import metadata
 from .vworkflow import VWorkflow
+from . import file_types
+from .file_staging import walk_files
 
 from Yuki.kernel.status_constants import (
     PRELUDE, ORCHESTRATING, DISSONANCE, CODA, FINAL_NOTE
@@ -224,25 +226,23 @@ class ReanaWorkflow(VWorkflow):
                         self.get_access_token(self.machine_id)
                     )
             if job.environment() == "rawdata":
-                filelist = os.listdir(os.path.join(job.path, "rawdata"))
+                rawdata_dir = os.path.join(job.path, "rawdata")
+                filelist = list(walk_files(rawdata_dir))
                 total_raw = len(filelist)
-                for f_idx, filename in enumerate(filelist):
-                    rawdata_path = os.path.join(job.path, "rawdata", filename)
+                for f_idx, (rel_path, rawdata_path) in enumerate(filelist):
                     with open(rawdata_path, "rb") as f:
                         self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading rawdata "
-                                    f"{f_idx+1}/{total_raw}: {filename}")
+                                    f"{f_idx+1}/{total_raw}: {rel_path}")
                         client.upload_file(
                             self.get_name(),
                             f,
-                            "imp" + job.short_uuid() + "/stageout/" + filename,
+                            "imp" + job.short_uuid() + "/stageout/" + rel_path,
                             self.get_access_token(self.machine_id)
                         )
             elif job.is_input:
                 if job.use_eos() and job.machine_id == self.machine_id:
                     continue
                 impression = job.path.split("/")[-1]
-                # self.logger(f"Downloading the files from impression "
-                #             f"{impression}")
                 path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
                                     self.project_uuid, impression, job.machine_id)
                 if not os.path.exists(os.path.join(path, "stageout")):
@@ -251,17 +251,17 @@ class ReanaWorkflow(VWorkflow):
 
                 # Reset the id
                 self.set_environment(self.machine_id)
-                filelist = os.listdir(os.path.join(path, "stageout"))
+                stageout_dir = os.path.join(path, "stageout")
+                filelist = list(walk_files(stageout_dir))
                 total_input = len(filelist)
-                for f_idx, filename in enumerate(filelist):
-                    file_path = os.path.join(path, "stageout", filename)
+                for f_idx, (rel_path, file_path) in enumerate(filelist):
                     with open(file_path, "rb") as f:
                         self.logger(f"[Job {j_idx+1}/{total_jobs}] Uploading input "
-                                    f"{f_idx+1}/{total_input}: {filename}")
+                                    f"{f_idx+1}/{total_input}: {rel_path}")
                         client.upload_file(
                             self.get_name(),
                             f,
-                            "imp"+job.short_uuid() + "/stageout/" + filename,
+                            "imp"+job.short_uuid() + "/stageout/" + rel_path,
                             self.get_access_token(self.machine_id)
                         )
 
@@ -337,13 +337,17 @@ class ReanaWorkflow(VWorkflow):
                     # self.logger(f"Files: {files}")
                     total_files = len(files)
                     for i, file in enumerate(files):
-                        self.logger(f'[{i+1}/{total_files}] Downloading stageout: {file["name"]}')
+                        name = file["name"]
+                        self.logger(f'[{i+1}/{total_files}] Downloading stageout: {name}')
                         output = client.download_file(
                             self.get_name(),
-                            file["name"],
+                            name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, file["name"][11:])
+                        prefix = f"imp{impression[0:7]}/stageout/"
+                        rel = name[len(prefix):] if name.startswith(prefix) else name
+                        filename = os.path.join(path, "stageout", rel)
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
@@ -363,13 +367,17 @@ class ReanaWorkflow(VWorkflow):
                     os.makedirs(os.path.join(path, "logs"), exist_ok=True)
                     total_logs = len(files)
                     for i, file in enumerate(files):
-                        self.logger(f'[{i+1}/{total_logs}] Downloading log: {file["name"]}')
+                        name = file["name"]
+                        self.logger(f'[{i+1}/{total_logs}] Downloading log: {name}')
                         output = client.download_file(
                             self.get_name(),
-                            file["name"],
+                            name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, file["name"][11:])
+                        prefix = f"imp{impression[0:7]}/logs/"
+                        rel = name[len(prefix):] if name.startswith(prefix) else name
+                        filename = os.path.join(path, "logs", rel)
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
                         with open(filename, "wb") as f:
                             f.write(output[0])
                     # all done, make a finish file
@@ -384,35 +392,51 @@ class ReanaWorkflow(VWorkflow):
         if not REANA_AVAILABLE:
             raise ImportError("reana_client is not available")
         self.set_environment(self.machine_id)
+        report = {"collected": [], "skipped": [], "failed": []}
         if impression:
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
                                 self.project_uuid, impression, self.machine_id)
             try:
-                if not os.path.exists(os.path.join(path, "stageout.downloaded")):
-                    files = client.list_files(
-                        self.get_name(),
-                        self.get_access_token(self.machine_id),
-                        "imp"+impression[0:7]+"/stageout"
-                    )
-                    os.makedirs(os.path.join(path, "stageout"), exist_ok=True)
-                    # self.logger(f"Files: {files}")
-                    total_files = len(files)
-                    for i, file in enumerate(files):
-                        self.logger(f'[{i+1}/{total_files}] Downloading stageout: {file["name"]}')
+                if os.path.exists(os.path.join(path, "stageout.downloaded")):
+                    report["skipped"].append(
+                        {"file": "<stageout>", "reason": "already collected"})
+                    return report
+                files = client.list_files(
+                    self.get_name(),
+                    self.get_access_token(self.machine_id),
+                    "imp"+impression[0:7]+"/stageout"
+                )
+                os.makedirs(os.path.join(path, "stageout"), exist_ok=True)
+                # self.logger(f"Files: {files}")
+                total_files = len(files)
+                for i, file in enumerate(files):
+                    name = file["name"]
+                    prefix = f"imp{impression[0:7]}/stageout/"
+                    rel = name[len(prefix):] if name.startswith(prefix) else name
+                    self.logger(f'[{i+1}/{total_files}] Downloading stageout: {name}')
+                    try:
                         output = client.download_file(
                             self.get_name(),
-                            file["name"],
+                            name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, file["name"][11:])
+                        filename = os.path.join(path, "stageout", rel)
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
                         with open(filename, "wb") as f:
                             f.write(output[0])
-                    # all done, make a finish file
-                    finish_file = os.path.join(path, "stageout.downloaded")
-                    with open(finish_file, "w", encoding='utf-8') as f:
-                        pass
+                        report["collected"].append(rel)
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        report["failed"].append(
+                            {"file": rel, "reason": str(exc)})
+                # all done, make a finish file
+                finish_file = os.path.join(path, "stageout.downloaded")
+                with open(finish_file, "w", encoding='utf-8') as f:
+                    pass
             except Exception as e:
                 self.logger(f"Failed to download stageout: {e}")
+                report["failed"].append(
+                    {"file": "<stageout>", "reason": str(e)})
+        return report
 
     def download_logs(self, impression=None):
         """Download workflow logs."""
@@ -420,33 +444,152 @@ class ReanaWorkflow(VWorkflow):
         if not REANA_AVAILABLE:
             raise ImportError("reana_client is not available")
         self.set_environment(self.machine_id)
+        report = {"collected": [], "skipped": [], "failed": []}
         if impression:
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
                                 self.project_uuid, impression, self.machine_id)
             try:
-                if not os.path.exists(os.path.join(path, "logs.downloaded")):
-                    files = client.list_files(
-                        self.get_name(),
-                        self.get_access_token(self.machine_id),
-                        "imp"+impression[0:7]+"/logs"
-                    )
-                    os.makedirs(os.path.join(path, "logs"), exist_ok=True)
-                    total_logs = len(files)
-                    for i, file in enumerate(files):
-                        self.logger(f'[{i+1}/{total_logs}] Downloading log: {file["name"]}')
+                if os.path.exists(os.path.join(path, "logs.downloaded")):
+                    report["skipped"].append(
+                        {"file": "<logs>", "reason": "already collected"})
+                    return report
+                files = client.list_files(
+                    self.get_name(),
+                    self.get_access_token(self.machine_id),
+                    "imp"+impression[0:7]+"/logs"
+                )
+                os.makedirs(os.path.join(path, "logs"), exist_ok=True)
+                total_logs = len(files)
+                for i, file in enumerate(files):
+                    name = file["name"]
+                    prefix = f"imp{impression[0:7]}/logs/"
+                    rel = name[len(prefix):] if name.startswith(prefix) else name
+                    self.logger(f'[{i+1}/{total_logs}] Downloading log: {name}')
+                    try:
                         output = client.download_file(
                             self.get_name(),
-                            file["name"],
+                            name,
                             self.get_access_token(self.machine_id),
                         )
-                        filename = os.path.join(path, file["name"][11:])
+                        filename = os.path.join(path, "logs", rel)
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
                         with open(filename, "wb") as f:
                             f.write(output[0])
-                    # all done, make a finish file
-                    with open(os.path.join(path, "logs.downloaded"), "w", encoding='utf-8') as f:
-                        pass
+                        report["collected"].append(rel)
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        report["failed"].append(
+                            {"file": rel, "reason": str(exc)})
+                # all done, make a finish file
+                with open(os.path.join(path, "logs.downloaded"), "w", encoding='utf-8') as f:
+                    pass
             except Exception as e:
                 self.logger(f"Failed to download logs: {e}")
+                report["failed"].append(
+                    {"file": "<logs>", "reason": str(e)})
+        return report
+
+    @staticmethod
+    def _size_bytes(size):
+        """Normalize a REANA file size to int bytes.
+
+        REANA's list_files reports size as {"raw": <int>, "human_readable":
+        <str>}; the native runner and older REANA report a bare int. Flatten
+        to int so the file_status JSON contract (size: int) always holds and
+        the client's _human_size() never receives a dict.
+        """
+        if isinstance(size, dict):
+            return size.get("raw", 0) or 0
+        return size or 0
+
+    def _list_files(self, impression, kind, attempts=3):
+        """Call REANA list_files with bounded retry for transient TLS/connection
+        failures (e.g. SSL UNEXPECTED_EOF_WHILE_READING, seen intermittently
+        against reana.cern.ch). Returns the file list, or re-raises the last
+        error if every attempt fails."""
+        target = "imp" + impression[0:7] + "/" + kind
+        last = None
+        for i in range(attempts):
+            try:
+                return client.list_files(
+                    self.get_name(), self.get_access_token(self.machine_id), target)
+            except Exception as e:  # transient TLS/connection -> retry
+                last = e
+                self.logger(
+                    f"list_files {target} attempt {i + 1}/{attempts} failed "
+                    f"[{type(e).__name__}]: {e!r}")
+                if i + 1 < attempts:
+                    time.sleep(0.5 * (i + 1))
+        raise last
+
+    def list_runner_files(self, impression, kind="stageout"):
+        """List files in the runner workspace under imp<short>/<kind> without
+        downloading. Returns [{"name": <relative-to-kind>, "size": int}]."""
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
+        prefix = "imp" + impression[0:7] + "/" + kind + "/"
+        try:
+            files = self._list_files(impression, kind)
+        except Exception as e:
+            self.logger(
+                f"Giving up listing imp{impression[0:7]}/{kind} after retries "
+                f"[{type(e).__name__}]: {e!r}")
+            return []
+        result = []
+        for f in files:
+            name = f["name"]
+            rel = name[len(prefix):] if name.startswith(prefix) else os.path.basename(name)
+            if rel:
+                result.append({"name": rel, "size": self._size_bytes(f.get("size", 0))})
+        return result
+
+    # pylint: disable=too-many-locals
+    def download_selected(self, impression, predicate, kind="stageout"):
+        """Download only remote files whose basename satisfies predicate and
+        that are not already in Storage. Does not write the dir marker."""
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
+        report = {"collected": [], "skipped": [], "failed": []}
+        path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                            self.project_uuid, impression, self.machine_id)
+        prefix = "imp" + impression[0:7] + "/" + kind + "/"
+        try:
+            files = self._list_files(impression, kind)
+        except Exception as e:
+            self.logger(
+                f"Giving up listing imp{impression[0:7]}/{kind} after retries "
+                f"[{type(e).__name__}]: {e!r}")
+            report["skipped"].append(
+                {"file": f"<{kind}>", "reason": f"failed to list files: {e}"})
+            return report
+        os.makedirs(os.path.join(path, kind), exist_ok=True)
+        for f in files:
+            name = f["name"]
+            rel = name[len(prefix):] if name.startswith(prefix) else os.path.basename(name)
+            if not rel:
+                continue
+            if not predicate(rel):
+                report["skipped"].append(
+                    {"file": rel, "reason": "does not match selector"})
+                continue
+            dest = os.path.join(path, kind, rel)
+            if os.path.exists(dest):
+                report["skipped"].append(
+                    {"file": rel, "reason": "already in Yuki"})
+                continue
+            try:
+                output = client.download_file(
+                    self.get_name(), name, self.get_access_token(self.machine_id))
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "wb") as fh:
+                    fh.write(output[0])
+                report["collected"].append(rel)
+                self.logger(f"Downloaded selected {kind}: {rel}")
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                report["failed"].append({"file": rel, "reason": str(exc)})
+                self.logger(f"Failed to download {rel}: {exc}")
+        return report
 
     def ping(self):
         """Ping the REANA server."""

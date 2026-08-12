@@ -15,6 +15,8 @@ from reana_commons.api_client import BaseAPIClient
 from CelebiChrono.utils.message import Message
 from CelebiChrono.utils import metadata
 
+from . import file_types
+
 logger = getLogger("YukiLogger")
 
 
@@ -92,14 +94,17 @@ class ReanaBooker:
             pass
 
     def book_project(self, project_path: str, project_name: str,
-                     stageout: bool = False) -> Message:
+                     upload_mode: str = "plots+logs") -> Message:
         """Book a project to REANA.
 
         Args:
             project_path: Path to the extracted project directory.
             project_name: Name of the project.
-            stageout: If True, also upload stageout files from Yuki storage
-                to [reana_workspace]/impression_data/[impression_id]/stageout.
+            upload_mode: Selection spec for which outputs to upload from Yuki
+                storage to [reana_workspace]/impression_data/[impression_id]/.
+                One of plots+logs (default), plots, data, data+logs, logs, all,
+                or a glob. The legacy "stageout-or-nothing" toggle is gone:
+                the upload step always runs and upload_mode decides what.
 
         Returns:
             Message: Collected progress messages. If a progress_callback
@@ -188,13 +193,14 @@ class ReanaBooker:
             msg.data["server_url"] = self.server_url
             return msg
 
-        # Upload stageout files if requested
-        if stageout:
-            try:
-                self._upload_stageout_files(workflow_id, project_path, new_metadata)
-            except Exception as e:
-                logger.warning("Stageout upload failed: %s", e)
-                self._notify(f"Stageout upload warning: {e}\n", "warning")
+        # Upload selected outputs (plots/data/logs per upload_mode) from Yuki
+        # storage. This always runs; upload_mode decides what gets uploaded.
+        try:
+            self._upload_stageout_files(workflow_id, project_path, new_metadata,
+                                        upload_mode=upload_mode)
+        except Exception as e:
+            logger.warning("Stageout upload failed: %s", e)
+            self._notify(f"Stageout upload warning: {e}\n", "warning")
 
         msg = Message()
         msg.messages = self._progress_messages[:]
@@ -477,7 +483,7 @@ class ReanaBooker:
             logger.warning("Failed to upload reana_repo.yaml: %s", e)
 
     def _upload_stageout_files(self, workflow_id: str, project_path: str,
-                                repo_metadata: dict):
+                                repo_metadata: dict, upload_mode: str = "plots+logs"):
         """Upload stageout files from Yuki storage to REANA workspace.
 
         Looks up stageout files in ~/.Yuki/Storage/{project_uuid}/
@@ -488,6 +494,7 @@ class ReanaBooker:
             workflow_id: REANA workflow ID.
             project_path: Path to the extracted project directory.
             repo_metadata: Project metadata dict with impression UUIDs.
+            upload_mode: Selection spec for what to upload (plots/data/all/logs).
         """
         # Read project UUID from project's config
         project_config_path = os.path.join(project_path, ".celebi", "config.json")
@@ -539,6 +546,20 @@ class ReanaBooker:
         )
         total_uploaded = 0
 
+        tokens = set(upload_mode.split("+"))
+        include_logs = "logs" in tokens or "all" in tokens
+        if "all" in tokens:
+            stageout_spec = "all"
+        elif "data" in tokens and "plots" in tokens:
+            stageout_spec = "all"
+        elif "data" in tokens:
+            stageout_spec = "data"
+        elif "plots" in tokens:
+            stageout_spec = "plots"
+        else:
+            stageout_spec = None     # logs-only mode uploads no stageout
+        stage_pred = file_types.make_predicate(stageout_spec) if stageout_spec else (lambda n: False)
+
         for impression_id in impressions:
             impression_dir = os.path.join(storage_base, impression_id)
             if not os.path.isdir(impression_dir):
@@ -547,7 +568,27 @@ class ReanaBooker:
             # Each impression may have multiple runner subdirectories:
             # Storage/{project_uuid}/{impression_uuid}/{runner_uuid}/stageout/
             for runner_id in os.listdir(impression_dir):
-                stageout_dir = os.path.join(impression_dir, runner_id, "stageout")
+                runner_dir = os.path.join(impression_dir, runner_id)
+
+                # Upload the runner file manifest (filelist) produced by status/
+                # collect, independent of upload_mode, so the booked record lists
+                # every output even when the large data was not uploaded.
+                filelist_path = os.path.join(runner_dir, "stageout.filelist.json")
+                if os.path.isfile(filelist_path):
+                    manifest_name = (
+                        f"impression_data/{impression_id}/stageout.filelist.json")
+                    try:
+                        with open(filelist_path, "rb") as f:
+                            reana_client.upload_file(
+                                workflow=workflow_id, file_=f.read(),
+                                file_name=manifest_name,
+                                access_token=self.access_token)
+                        total_uploaded += 1
+                    except Exception as e:
+                        logger.warning("Failed to upload filelist %s: %s",
+                                       manifest_name, e)
+
+                stageout_dir = os.path.join(runner_dir, "stageout")
                 if not os.path.isdir(stageout_dir):
                     continue
 
@@ -556,6 +597,8 @@ class ReanaBooker:
                     for filename in files:
                         file_path = os.path.join(root, filename)
                         rel_path = os.path.relpath(file_path, stageout_dir)
+                        if not stage_pred(rel_path):
+                            continue
                         upload_name = (
                             f"impression_data/{impression_id}/"
                             f"stageout/{rel_path}"
@@ -576,6 +619,25 @@ class ReanaBooker:
                                 "Failed to upload stageout file %s: %s",
                                 upload_name, e
                             )
+
+                if include_logs:
+                    logs_dir = os.path.join(impression_dir, runner_id, "logs")
+                    if os.path.isdir(logs_dir):
+                        for root, _dirs, files in os.walk(logs_dir):
+                            for filename in files:
+                                file_path = os.path.join(root, filename)
+                                rel_path = os.path.relpath(file_path, logs_dir)
+                                upload_name = (
+                                    f"impression_data/{impression_id}/logs/{rel_path}")
+                                try:
+                                    with open(file_path, "rb") as f:
+                                        content = f.read()
+                                    reana_client.upload_file(
+                                        workflow=workflow_id, file_=content,
+                                        file_name=upload_name, access_token=self.access_token)
+                                    total_uploaded += 1
+                                except Exception as e:
+                                    logger.warning("Failed to upload log %s: %s", upload_name, e)
 
         if total_uploaded:
             self._notify(
