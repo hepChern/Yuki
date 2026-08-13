@@ -149,8 +149,9 @@ def docker_restart(container):
 # ------ Run workflow ------ #
 @cli.command('run-workflow')
 @click.argument('workflow_uuid')
-@click.option('--cores', '-j', default='all', show_default=True,
-              help='Number of cores to pass to snakemake.')
+@click.option('--cores', '-j', default=None,
+              help='Number of cores to pass to snakemake '
+                   '(default: runner setting, else all).')
 def run_workflow(workflow_uuid, cores):
     """Run a local workflow by its UUID with file staging and status tracking.
 
@@ -164,6 +165,8 @@ def run_workflow(workflow_uuid, cores):
     performance, with automatic fallback to regular copy for cross-filesystem.
     """
     import json
+    from CelebiChrono.utils.metadata import ConfigFile
+    from Yuki.kernel import runner_config
     from Yuki.kernel.snakemake_monitor import SnakemakeMonitor
     from Yuki.kernel.file_staging import FileStager
 
@@ -199,6 +202,13 @@ def run_workflow(workflow_uuid, cores):
         click.echo(f"Workflow {workflow_uuid} not found in $YUKIDIR/Workflows/")
         raise click.ClickException(f"Workflow not found")
 
+    # Resolve per-runner settings from the workflow's machine_id
+    workflow_cfg = ConfigFile(os.path.join(workflow_path, "config.json"))
+    machine_id = workflow_cfg.read_variable("machine_id", "")
+    settings = runner_config.get_runner_settings(
+        runner_config.open_config(), machine_id)
+    cores = cores or settings.get("cores", "all")
+
     # Create logger function
     def logger(msg):
         timestamp = os.popen('date +"%Y-%m-%d %H:%M:%S"').read().strip()
@@ -224,7 +234,12 @@ def run_workflow(workflow_uuid, cores):
     )
     logger(f"[SNAKEMAKE] Running snakemake with {cores} cores")
 
-    exit_code = monitor.execute_snakemake(cores, logger)
+    exit_code = monitor.execute_snakemake(
+        cores, logger,
+        mem_mb=settings.get("mem_mb"),
+        snakemake_path=settings.get("snakemake_path") or None,
+        conda_path=settings.get("conda_path") or None,
+    )
 
     # Stage out results
     if exit_code == 0:

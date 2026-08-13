@@ -45,13 +45,18 @@ class SnakemakeMonitor:
         self.project_uuid = project_uuid
         self.workflow_uuid = workflow_uuid
 
-    def execute_snakemake(self, cores, logger=None):
+    def execute_snakemake(self, cores, logger=None, mem_mb=None,
+                          snakemake_path=None, conda_path=None):
         """
         Execute snakemake and monitor progress.
 
         Args:
             cores: Number of cores to use
             logger: Optional logger function
+            mem_mb: Optional memory limit in MB; adds --resources mem_mb=<n>
+            snakemake_path: Optional path replacing the `snakemake` binary
+            conda_path: Optional conda binary path; its directory is
+                        prepended to PATH in the subprocess environment
 
         Returns:
             Exit code (0 for success, non-zero for failure)
@@ -64,12 +69,19 @@ class SnakemakeMonitor:
 
         # Build snakemake command
         cmd = [
-            "snakemake",
+            snakemake_path or "snakemake",
             "--use-conda",
             "--conda-frontend", "conda",
             "--keep-going",
             "-j", str(cores)
         ]
+        if mem_mb:
+            cmd += ["--resources", f"mem_mb={int(mem_mb)}"]
+        env = None
+        if conda_path:
+            env = dict(os.environ)
+            env["PATH"] = (os.path.dirname(conda_path) + os.pathsep
+                           + env.get("PATH", ""))
 
         try:
             # Execute snakemake with output capture
@@ -79,7 +91,8 @@ class SnakemakeMonitor:
                     cwd=self.local_exec_path,
                     stdout=log_f,
                     stderr=subprocess.STDOUT,
-                    text=True
+                    text=True,
+                    env=env
                 )
 
                 # Monitor execution
