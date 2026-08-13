@@ -4,6 +4,8 @@ Runner management routes.
 import os
 from flask import Blueprint, request, jsonify
 from CelebiChrono.utils import csys
+from ...kernel import runner_config
+from .. import runner_probe
 from ..config import config
 from ..utils import ping
 
@@ -321,3 +323,44 @@ def machine_id(machine):
     config_file = config.get_config_file()
     runner_id = config_file.read_variable("runners_id", {})
     return runner_id[machine]
+
+
+@bp.route("/test-runner/<runner>", methods=['GET'])
+def test_runner(runner):
+    """Probe a runner's capabilities and persist the result."""
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"Runner '{runner}' not found"}), 404
+    runner_id = runners_id[runner]
+    backend_types = config_file.read_variable("backend_types", {})
+    backend_type = backend_types.get(runner_id, "reana")
+    settings = runner_config.get_runner_settings(config_file, runner_id)
+
+    if backend_type == "ssh":
+        checks = runner_probe.probe_ssh(
+            runner_config.get_ssh_settings(config_file, runner_id))
+    elif backend_type == "reana":
+        urls = config_file.read_variable("urls", {})
+        tokens = config_file.read_variable("tokens", {})
+        checks = runner_probe.probe_reana(
+            urls.get(runner_id, ""), tokens.get(runner_id, ""), ping)
+    elif backend_type == "native":
+        checks = runner_probe.probe_native(settings)
+    else:  # dry / unknown backends: connectivity-only, always ok
+        checks = {"connectivity": {"ok": True}}
+
+    health = runner_probe.summarize(checks)
+    runner_config.set_runner_health(config_file, runner_id, health)
+    return jsonify(health)
+
+
+@bp.route("/runner-health/<runner>", methods=['GET'])
+def runner_health(runner):
+    """Return the persisted health of a runner (never re-probes)."""
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"Runner '{runner}' not found"}), 404
+    return jsonify(runner_config.get_runner_health(config_file,
+                                                   runners_id[runner]))
