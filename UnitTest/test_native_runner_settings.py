@@ -1,7 +1,6 @@
 """Tests for native runner settings consumption."""
 import json
 import os
-import tempfile
 from unittest import mock
 
 from Yuki.kernel.snakemake_monitor import SnakemakeMonitor
@@ -44,7 +43,7 @@ def test_native_workflow_uses_workdir_setting(monkeypatch, tmp_path):
 
     from Yuki.kernel.native_workflow import NativeWorkflow
     with mock.patch.object(NativeWorkflow, "__init__", lambda self, *a, **k: None):
-        wf = NativeWorkflow.__new__(NativeWorkflow)
+        NativeWorkflow.__new__(NativeWorkflow)
     # exercise the path-resolution logic directly
     from Yuki.kernel import runner_config
     settings = runner_config.get_runner_settings(runner_config.open_config(), "m1")

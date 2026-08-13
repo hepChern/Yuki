@@ -53,7 +53,7 @@ def probe_native(settings):
     return checks
 
 
-def probe_ssh(ssh_settings):
+def probe_ssh(ssh_settings):  # pylint: disable=too-many-locals
     """Probe connectivity plus snakemake/conda/workdir on the remote host."""
     try:
         import paramiko

@@ -152,7 +152,7 @@ def docker_restart(container):
 @click.option('--cores', '-j', default=None,
               help='Number of cores to pass to snakemake '
                    '(default: runner setting, else all).')
-def run_workflow(workflow_uuid, cores):
+def run_workflow(workflow_uuid, cores):  # pylint: disable=too-many-locals
     """Run a local workflow by its UUID with file staging and status tracking.
 
     For native workflows this:

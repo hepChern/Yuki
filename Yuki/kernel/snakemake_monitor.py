@@ -45,7 +45,7 @@ class SnakemakeMonitor:
         self.project_uuid = project_uuid
         self.workflow_uuid = workflow_uuid
 
-    def execute_snakemake(self, cores, logger=None, mem_mb=None,
+    def execute_snakemake(self, cores, logger=None, mem_mb=None,  # pylint: disable=too-many-arguments,too-many-positional-arguments
                           snakemake_path=None, conda_path=None):
         """
         Execute snakemake and monitor progress.
