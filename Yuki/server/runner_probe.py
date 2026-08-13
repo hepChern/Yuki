@@ -85,18 +85,25 @@ def probe_ssh(ssh_settings):
         _, stdout, stderr = client.exec_command(cmd, timeout=PROBE_TIMEOUT)
         return stdout.read().decode().strip(), stderr.read().decode().strip()
 
+    check_names = ("snakemake", "conda", "workdir_writable")
+    current = check_names[0]
     try:
         for name, setting, binary in (
                 ("snakemake", "snakemake_path", "snakemake"),
                 ("conda", "conda_path", "conda")):
+            current = name
             tool = ssh_settings.get(setting) or binary
             out, err = remote(f"{tool} --version")
             checks[name] = _err(err or f"{binary} not usable") if err else _ok(version=out)
+        current = "workdir_writable"
         workdir = ssh_settings.get("remote_workdir", "/tmp/yuki-workflows")
         _, err = remote(f"mkdir -p {workdir} && test -w {workdir}")
         checks["workdir_writable"] = _err(err) if err else _ok(path=workdir)
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        checks.setdefault("snakemake", _err(exc))
+        # A mid-probe transport failure must fail the record, not drop keys.
+        checks[current] = _err(f"probe aborted: {exc}")
+        for name in check_names:
+            checks.setdefault(name, _err(f"probe aborted: {exc}"))
     finally:
         client.close()
     return checks

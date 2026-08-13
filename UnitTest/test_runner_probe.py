@@ -94,6 +94,33 @@ def test_test_runner_ssh_failure_marks_failed(monkeypatch):
     assert body["checks"]["connectivity"]["ok"] is False
 
 
+def test_test_runner_ssh_mid_probe_failure_marks_failed(monkeypatch):
+    config_obj = _temp_config(monkeypatch)
+    _write_runner(config_obj, name="cluster", backend="ssh",
+                  settings={"ssh_host": "h", "ssh_user": "u"})
+    with mock.patch("paramiko.SSHClient") as ssh_cls:
+        client = ssh_cls.return_value
+        stdout = mock.MagicMock()
+        stdout.read.return_value = b"8.1.0\n"
+        stderr = mock.MagicMock()
+        stderr.read.return_value = b""
+        client.exec_command.side_effect = [
+            (None, stdout, stderr),      # snakemake probe succeeds
+            Exception("channel closed"),  # conda probe blows up mid-run
+        ]
+        r = _app(runner_routes.bp).test_client().get("/test-runner/cluster")
+    body = r.get_json()
+    assert body["status"] == "failed"
+    assert body["checks"]["connectivity"]["ok"] is True
+    assert body["checks"]["snakemake"]["ok"] is True
+    assert body["checks"]["conda"]["ok"] is False
+    assert "channel closed" in body["checks"]["conda"]["error"]
+    assert body["checks"]["workdir_writable"]["ok"] is False
+
+    cfg = json.load(open(config_obj.config_path, encoding="utf-8"))
+    assert cfg["runner_health"]["r-uuid"]["status"] == "failed"
+
+
 def test_test_runner_unknown_404(monkeypatch):
     _temp_config(monkeypatch)
     r = _app(runner_routes.bp).test_client().get("/test-runner/ghost")
