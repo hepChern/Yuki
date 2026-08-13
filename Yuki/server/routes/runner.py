@@ -209,7 +209,6 @@ def removerunner(runner):
         return "runner not found"
 
     runner_id = runners_id[runner]
-    backend_type = backend_types.get(runner_id, "reana")
     print("runner_id", runner_id)
     runners_list.remove(runner)
     del runners_id[runner]
@@ -232,8 +231,12 @@ def removerunner(runner):
     config_file.write_variable("tokens", tokens)
     config_file.write_variable("backend_types", backend_types)
 
-    if backend_type == "ssh":
-        _remove_ssh_config(config_file, runner_id)
+    _remove_ssh_config(config_file, runner_id)
+    for key in ("runner_settings", "runner_health"):
+        data = config_file.read_variable(key, {})
+        if runner_id in data:
+            del data[runner_id]
+            config_file.write_variable(key, data)
 
     return "successful"
 
@@ -339,6 +342,10 @@ def runners_config():
             "eos_mount_point": eos_mount_points.get(runner_id, ""),
             "cvmfs": cvmfs_repos.get(runner_id, []),
         }
+        runner_cfg["settings"] = runner_config.get_runner_settings(
+            config_file, runner_id)
+        runner_cfg["health"] = runner_config.get_runner_health(
+            config_file, runner_id)
         if backend_type == "ssh":
             runner_cfg.update({
                 "ssh_host": ssh_hosts.get(runner_id, ""),

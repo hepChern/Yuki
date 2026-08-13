@@ -253,3 +253,52 @@ def test_runners_url_tolerates_missing_entries(monkeypatch):
                    "urls": {}}, f)  # "b" has no id, "a" has no url
     r = _app(runner_routes.bp).test_client().get("/runners-url")
     assert r.status_code == 200
+
+
+def test_runners_config_includes_settings_and_health(monkeypatch):
+    _temp_config(monkeypatch)
+    runner_id = "r-uuid"
+    with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "runners": ["local"], "runners_id": {"local": runner_id},
+            "urls": {runner_id: ""}, "tokens": {runner_id: ""},
+            "backend_types": {runner_id: "native"},
+            "runner_settings": {runner_id: {"cores": 8}},
+            "runner_health": {runner_id: {"status": "ok", "checks": {}}},
+        }, f)
+    data = _app(runner_routes.bp).test_client().get("/runners-config").get_json()
+    assert data[0]["settings"] == {"cores": 8}
+    assert data[0]["health"]["status"] == "ok"
+
+
+def test_runners_config_defaults_without_new_maps(monkeypatch):
+    _temp_config(monkeypatch)
+    runner_id = "r-uuid"
+    with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
+        json.dump({"runners": ["local"], "runners_id": {"local": runner_id},
+                   "urls": {runner_id: ""}, "tokens": {runner_id: ""},
+                   "backend_types": {runner_id: "native"}}, f)
+    data = _app(runner_routes.bp).test_client().get("/runners-config").get_json()
+    assert data[0]["settings"] == {}
+    assert data[0]["health"] == {"status": "untested"}
+
+
+def test_remove_runner_cleans_settings_health_and_stale_ssh(monkeypatch):
+    _temp_config(monkeypatch)
+    runner_id = "r-uuid"
+    # backend flipped reana after ssh: stale ssh_* entries must still go
+    with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "runners": ["cluster"], "runners_id": {"cluster": runner_id},
+            "urls": {runner_id: ""}, "tokens": {runner_id: ""},
+            "backend_types": {runner_id: "reana"},
+            "ssh_hosts": {runner_id: "h"},
+            "runner_settings": {runner_id: {"cores": 8}},
+            "runner_health": {runner_id: {"status": "ok"}},
+        }, f)
+    r = _app(runner_routes.bp).test_client().get("/remove-runner/cluster")
+    assert r.status_code == 200
+    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    assert runner_id not in cfg.get("ssh_hosts", {})
+    assert runner_id not in cfg.get("runner_settings", {})
+    assert runner_id not in cfg.get("runner_health", {})
