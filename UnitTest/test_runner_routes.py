@@ -170,3 +170,86 @@ def test_runner_connection_ssh_uses_paramiko_ping(monkeypatch):
         r = app.test_client().get("/runner-connection/mycluster")
         assert r.status_code == 200
         assert r.get_json()["status"] == "Connected"
+
+
+def test_register_runner_stores_native_settings(monkeypatch):
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    r = c.post("/register-runner", data={
+        "runner": "local", "url": "", "token": "", "backend_type": "native",
+        "workdir": "/data/yuki", "cores": "8", "mem_mb": "4096",
+        "conda_path": "/opt/conda/bin/conda",
+    })
+    assert r.status_code == 200
+    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    runner_id = cfg["runners_id"]["local"]
+    assert cfg["runner_settings"][runner_id] == {
+        "workdir": "/data/yuki", "cores": 8, "mem_mb": 4096,
+        "conda_path": "/opt/conda/bin/conda",
+    }
+
+
+def test_register_runner_duplicate_name_409(monkeypatch):
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={"runner": "local", "url": "",
+                                     "token": "", "backend_type": "native"})
+    r = c.post("/register-runner", data={"runner": "local", "url": "",
+                                         "token": "", "backend_type": "native"})
+    assert r.status_code == 409
+    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    assert cfg["runners"].count("local") == 1
+
+
+def test_register_runner_missing_field_400(monkeypatch):
+    _temp_config(monkeypatch)
+    r = _app(runner_routes.bp).test_client().post(
+        "/register-runner", data={"runner": "local"})
+    assert r.status_code == 400
+
+
+def test_register_runner_ssh_double_writes_settings(monkeypatch):
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u", "ssh_key_path": "/k",
+        "ssh_port": "2222", "remote_workdir": "/remote",
+    })
+    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    runner_id = cfg["runners_id"]["cluster"]
+    # legacy maps still written
+    assert cfg["ssh_hosts"][runner_id] == "h"
+    # new map also written
+    s = cfg["runner_settings"][runner_id]
+    assert s["ssh_host"] == "h" and s["ssh_port"] == 2222
+    assert s["remote_workdir"] == "/remote"
+
+
+def test_update_runner_stores_settings(monkeypatch):
+    _temp_config(monkeypatch)
+    runner_id = "r-uuid"
+    with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
+        json.dump({"runners": ["local"], "runners_id": {"local": runner_id},
+                   "backend_types": {runner_id: "native"}}, f)
+    r = _app(runner_routes.bp).test_client().patch(
+        "/update-runner/local", json={"cores": 16, "snakemake_path": "/usr/bin/snakemake"})
+    assert r.status_code == 200
+    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    assert cfg["runner_settings"][runner_id]["cores"] == 16
+    assert cfg["runner_settings"][runner_id]["snakemake_path"] == "/usr/bin/snakemake"
+
+
+def test_machine_id_unknown_404(monkeypatch):
+    _temp_config(monkeypatch)
+    r = _app(runner_routes.bp).test_client().get("/machine-id/ghost")
+    assert r.status_code == 404
+
+
+def test_runners_url_tolerates_missing_entries(monkeypatch):
+    _temp_config(monkeypatch)
+    with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
+        json.dump({"runners": ["a", "b"], "runners_id": {"a": "id-a"},
+                   "urls": {}}, f)  # "b" has no id, "a" has no url
+    r = _app(runner_routes.bp).test_client().get("/runners-url")
+    assert r.status_code == 200
