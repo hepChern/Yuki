@@ -172,16 +172,6 @@ def run_workflow(workflow_uuid, cores):
 
     yuki_home = os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
 
-    local_exec_dir = os.path.join(yuki_home, "LocalWorkflows", workflow_uuid)
-    if not os.path.isdir(local_exec_dir):
-        click.echo(f"Workflow {workflow_uuid} not found.")
-        raise click.ClickException(f"Workflow {workflow_uuid} not found.")
-
-    snakefile_path = os.path.join(local_exec_dir, "Snakefile")
-    if not os.path.exists(snakefile_path):
-        click.echo(f"No Snakefile found in {local_exec_dir}")
-        raise click.ClickException(f"No Snakefile found in {local_exec_dir}")
-
     # Find the workflow in the Workflows directory to get project_uuid
     workflows_dir = os.path.join(yuki_home, "Workflows")
     workflow_path = None
@@ -208,6 +198,19 @@ def run_workflow(workflow_uuid, cores):
     settings = runner_config.get_runner_settings(
         runner_config.open_config(), machine_id)
     cores = cores or settings.get("cores", "all")
+
+    # The execution dir lives under the runner's workdir when configured
+    base_dir = settings.get("workdir") or os.path.join(
+        yuki_home, "LocalWorkflows")
+    local_exec_dir = os.path.join(base_dir, workflow_uuid)
+    if not os.path.isdir(local_exec_dir):
+        click.echo(f"Workflow {workflow_uuid} not found.")
+        raise click.ClickException(f"Workflow {workflow_uuid} not found.")
+
+    snakefile_path = os.path.join(local_exec_dir, "Snakefile")
+    if not os.path.exists(snakefile_path):
+        click.echo(f"No Snakefile found in {local_exec_dir}")
+        raise click.ClickException(f"No Snakefile found in {local_exec_dir}")
 
     # Create logger function
     def logger(msg):
