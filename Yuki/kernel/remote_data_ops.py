@@ -207,9 +207,23 @@ def verify_registered_data(project_uuid, impression_uuid):
         marker = ConfigFile(marker_path)
         host_runner = marker.read_variable("host_runner_id", "")
         managed_path = marker.read_variable("remote_path", "")
-        with _ssh_connection(host_runner) as ssh:
-            out, err, code = ssh.exec(remote_md5_command(managed_path),
-                                      timeout=3600)
+        # SSH connections to the runner flake occasionally (banner timeouts);
+        # retry once, then report a proper error instead of a 500.
+        last_exc = None
+        for _attempt in range(2):
+            try:
+                with _ssh_connection(host_runner) as ssh:
+                    out, err, code = ssh.exec(remote_md5_command(managed_path),
+                                              timeout=3600)
+                last_exc = None
+                break
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                last_exc = exc
+        if last_exc is not None:
+            return {"match": False, "expected": expected, "actual": "",
+                    "location": f"runner {_runner_name(host_runner)}",
+                    "error": f"ssh verify failed: "
+                             f"{str(last_exc) or type(last_exc).__name__}"}
         if code != 0:
             return {"match": False, "expected": expected, "actual": "",
                     "location": "", "error": f"remote md5 failed: {err or out}"}

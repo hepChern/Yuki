@@ -323,3 +323,62 @@ def test_verify_data_unknown_impression_404(monkeypatch, tmp_path):
     _temp_config(monkeypatch, tmp_path)
     r = _app(remote_data_routes.bp).test_client().get("/verify-data/proj/ghost")
     assert r.status_code == 404
+
+
+def test_verify_data_ssh_retry_succeeds(monkeypatch, tmp_path):
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    config_obj.config_path = str(tmp_path / "config.json")
+    with open(config_obj.config_path, "w", encoding="utf-8") as f:
+        json.dump({"runners": ["cluster"], "runners_id": {"cluster": "r1"}}, f)
+    _impression_fixture(tmp_path)
+
+    class FakeSsh:
+        def __init__(self):
+            self.calls = 0
+
+        def __enter__(self):
+            self.calls += 1
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def exec(self, command, timeout=None):
+            return "abc123", "", 0
+
+    attempts = {"n": 0}
+    fake = FakeSsh()
+
+    def flaky_conn(runner_id):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise ConnectionError("Error reading SSH protocol banner")
+        return fake
+
+    with mock.patch.object(remote_data_ops, "_ssh_connection",
+                           side_effect=flaky_conn):
+        r = _app(remote_data_routes.bp).test_client().get(
+            "/verify-data/proj/imp-1")
+    body = r.get_json()
+    assert body["match"] is True
+    assert attempts["n"] == 2
+
+
+def test_verify_data_ssh_failure_returns_error(monkeypatch, tmp_path):
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    config_obj.config_path = str(tmp_path / "config.json")
+    with open(config_obj.config_path, "w", encoding="utf-8") as f:
+        json.dump({"runners": ["cluster"], "runners_id": {"cluster": "r1"}}, f)
+    _impression_fixture(tmp_path)
+
+    def failing_conn(runner_id):
+        raise ConnectionError("Error reading SSH protocol banner")
+
+    with mock.patch.object(remote_data_ops, "_ssh_connection",
+                           side_effect=failing_conn):
+        r = _app(remote_data_routes.bp).test_client().get(
+            "/verify-data/proj/imp-1")
+    body = r.get_json()
+    assert body["match"] is False
+    assert "Error reading SSH" in body["error"]
+    assert body["expected"] == "abc123"
