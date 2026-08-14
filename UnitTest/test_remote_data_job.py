@@ -6,7 +6,10 @@ from unittest import mock
 import pytest
 
 from CelebiChrono.utils.file_utils import dir_md5
+from CelebiChrono.utils.metadata import ConfigFile
 from Yuki.kernel import remote_data_ops
+import importlib
+config_module = importlib.import_module("Yuki.server.config")
 
 
 class FakeSsh:
@@ -61,7 +64,7 @@ def test_register_remote_data_job_end_to_end(monkeypatch, tmp_path):
     statuses = [u["status"] for u in updates]
     assert statuses[0] == "hashing"
     assert "copying" in statuses
-    assert "registering" in statuses
+    assert "registering" not in statuses
 
     # hashing command ran
     assert any(c.startswith("python3 -c") for c in fake.commands)
@@ -80,7 +83,40 @@ def test_register_remote_data_job_end_to_end(monkeypatch, tmp_path):
     yaml = (imp_dir / "contents" / "celebi.yaml").read_text()
     assert f"uuid: {md5}" in yaml
     status = json.loads((imp_dir / "status.json").read_text())
-    assert status["status"] == "pending"
+    assert status["status"] == "archived"
+
+    # while the copy was in flight, the impression was "running"
+    running_updates = [u for u in updates if u["status"] == "copying"]
+    assert running_updates, "expected a copying stage update"
+
+
+def test_register_remote_data_job_copy_failure_marks_failed(monkeypatch, tmp_path):
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    data = _fixture_data(tmp_path)
+    md5 = dir_md5(str(data))
+    fake = FakeSsh(md5)
+
+    def failing_exec(command, timeout=None):
+        fake.commands.append(command)
+        if command.startswith("python3 -c"):
+            return md5, "", 0
+        return "", "disk full", 1
+
+    fake.exec = failing_exec
+    updates = []
+    with mock.patch("Yuki.kernel.ssh_workflow._SshConnection",
+                    return_value=fake):
+        with pytest.raises(RuntimeError) as exc:
+            remote_data_ops.register_remote_data_job(
+                "r1", str(data), "proj", "d", updates.append)
+    assert "copy failed" in str(exc.value)
+    # the impression exists with status failed
+    result_updates = [u for u in updates if u["status"] == "copying"]
+    assert result_updates
+    status_file = tmp_path / "Storage" / "proj"
+    statuses = list(status_file.glob("*/status.json"))
+    assert len(statuses) == 1
+    assert json.loads(statuses[0].read_text())["status"] == "failed"
 
 
 def test_register_remote_data_job_hash_failure(monkeypatch, tmp_path):
@@ -159,3 +195,65 @@ def test_register_remote_data_job_too_old_celebichrono(monkeypatch, tmp_path):
                 "r1", str(data), "proj", "d", lambda s: None)
     assert "too old" in str(exc.value)
     assert "CELEBI_DIR" in str(exc.value)
+
+
+class _StubConfig:
+    def __init__(self, root):
+        self.root = root
+
+    def get_job_path(self, project, impression):
+        return str(self.root / "Storage" / project / impression)
+
+    def get_config_file(self):
+        return ConfigFile(str(self.root / "config.json"))
+
+    def get_job_config_path(self, project, impression):
+        return str(self.root / "Storage" / project / impression / "config.json")
+
+
+def test_file_status_lists_remote_hosted_files(monkeypatch, tmp_path):
+    from Yuki.kernel.impression_storage import ImpressionStorage
+
+    job_dir = tmp_path / "Storage" / "proj" / "imp-1"
+    job_dir.mkdir(parents=True)
+    marker = ConfigFile(str(job_dir / "remote.json"))
+    marker.write_variable("host_runner_id", "r1")
+    marker.write_variable("remote_path", "/remote/imp")
+    monkeypatch.setattr(config_module, "config", _StubConfig(tmp_path))
+
+    calls = []
+
+    class FakeSsh:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def walk_files(self, path):
+            calls.append(path)
+            yield "a.txt", "/remote/imp/a.txt", 10
+            yield "sub/b.root", "/remote/imp/sub/b.root", 20
+
+    with mock.patch("Yuki.kernel.remote_data_ops._ssh_connection",
+                    return_value=FakeSsh()):
+        rows = ImpressionStorage("proj", "imp-1").file_status("stageout")
+    assert calls == ["/remote/imp"]
+    assert [r["name"] for r in rows] == ["a.txt", "sub/b.root"]
+    assert all(r["in_runner"] and not r["in_yuki"] for r in rows)
+    assert rows[1]["size"] == 20
+
+    # second call served from cache — no ssh round-trip
+    with mock.patch("Yuki.kernel.remote_data_ops._ssh_connection") as patched:
+        rows2 = ImpressionStorage("proj", "imp-1").file_status("stageout")
+        patched.assert_not_called()
+    assert rows2 == rows
+
+
+def test_file_status_no_remote_marker_returns_empty(monkeypatch, tmp_path):
+    from Yuki.kernel.impression_storage import ImpressionStorage
+    job_dir = tmp_path / "Storage" / "proj" / "imp-1"
+    job_dir.mkdir(parents=True)
+    monkeypatch.setattr(config_module, "config", _StubConfig(tmp_path))
+    rows = ImpressionStorage("proj", "imp-1").file_status("stageout")
+    assert rows == []

@@ -63,6 +63,22 @@ def test_read_job_state_valid_non_dict_json_returns_none(tmp_path):
         assert remote_data_ops.read_job_state(str(tmp_path), "j1") is None
 
 
+def test_find_existing_registration_skips_failed(tmp_path):
+    yuki_dir = tmp_path
+    imp_dir = yuki_dir / "Storage" / "proj" / "imp-failed"
+    os.makedirs(imp_dir / "contents")
+    with open(imp_dir / "contents" / "celebi.yaml", "w", encoding="utf-8") as f:
+        f.write("environment: rawdata\nuuid: abcdef\ndescriptor: d\n")
+    marker = ConfigFile(str(imp_dir / "remote.json"))
+    marker.write_variable("host_runner_id", "r1")
+    marker.write_variable("source_path", "/src/data")
+    marker.write_variable("remote_path", "/remote/imp")
+    status = ConfigFile(str(imp_dir / "status.json"))
+    status.write_variable("status", "failed")
+    assert remote_data_ops.find_existing_registration(
+        str(yuki_dir), "r1", "/src/data") is None
+
+
 def test_find_existing_registration(tmp_path):
     yuki_dir = tmp_path
     imp_dir = yuki_dir / "Storage" / "proj" / "imp-123"

@@ -114,6 +114,13 @@ def find_existing_registration(yuki_dir, runner_id, remote_path):
             if marker.read_variable("host_runner_id", "") == runner_id and \
                     marker.read_variable("source_path", "") == remote_path:
                 imp_dir = os.path.join(proj_dir, imp)
+                # A failed registration must not count as existing; it can
+                # be re-registered (synthesis overwrites the record).
+                status = ConfigFile(
+                    os.path.join(imp_dir, "status.json")
+                ).read_variable("status", "")
+                if status == "failed":
+                    continue
                 from CelebiChrono.utils import metadata
                 yaml_file = metadata.YamlFile(
                     os.path.join(imp_dir, "contents", "celebi.yaml"))
@@ -159,12 +166,26 @@ def _ssh_connection(runner_id):
                           port=settings.get("port", 22))
 
 
+def list_managed_files(runner_id, managed_path):
+    """List files in a runner's managed impressions dir via SSH.
+
+    Returns [{"name": rel_path, "size": bytes}, ...] (flat, sorted by
+    traversal order).
+    """
+    with _ssh_connection(runner_id) as ssh:
+        return [{"name": rel, "size": size}
+                for rel, _rpath, size in ssh.walk_files(managed_path)]
+
+
 def synthesize_impression(project_uuid, impression_uuid, data_md5, descriptor,
-                          runner_id, source_path, managed_dir):
+                          runner_id, source_path, managed_dir,
+                          status="running"):
     """Create the impression record in Yuki Storage (data stays remote).
 
     Replicates yuki_create_data's layout (contents/ + config.json +
     status.json) and adds remote.json marking the hosting runner.
+    The status is "running" while the data copy is in flight; the caller
+    flips it to "archived" (or "failed") when the copy settles.
     """
     from CelebiChrono.utils import metadata
     from Yuki.cli.yuki_create_data import (
@@ -188,13 +209,20 @@ def synthesize_impression(project_uuid, impression_uuid, data_md5, descriptor,
     for key, value in impression_config.items():
         config_file.write_variable(key, value)
 
-    status_file = metadata.ConfigFile(os.path.join(impression_dir, "status.json"))
-    status_file.write_variable("status", "pending")
+    set_impression_status(project_uuid, impression_uuid, status)
 
     remote_file = metadata.ConfigFile(os.path.join(impression_dir, "remote.json"))
     remote_file.write_variable("host_runner_id", runner_id)
     remote_file.write_variable("source_path", source_path)
     remote_file.write_variable("remote_path", managed_dir)
+
+
+def set_impression_status(project_uuid, impression_uuid, status):
+    """Write the impression's status.json."""
+    from CelebiChrono.utils import metadata
+    status_file = metadata.ConfigFile(os.path.join(
+        _yuki_dir(), "Storage", project_uuid, impression_uuid, "status.json"))
+    status_file.write_variable("status", status)
 
 
 def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,
@@ -232,15 +260,21 @@ def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,
         settings = _ssh_settings(runner_id)
         managed_dir = (f"{settings.get('remote_workdir', '/tmp/yuki-workflows')}"
                        f"/impressions/{project_uuid}/{impression_uuid}")
+
+        # The impression exists from here on: "running" while the copy is
+        # in flight, so status queries gate downstream submits correctly.
+        synthesize_impression(project_uuid, impression_uuid, data_md5,
+                              descriptor, runner_id, remote_path, managed_dir,
+                              status="running")
+
         update({"status": "copying", "result": None, "error": None})
         out, err, code = ssh.exec(
             build_remote_fast_copy_command(remote_path, managed_dir),
             timeout=10800)
         if code != 0:
+            set_impression_status(project_uuid, impression_uuid, "failed")
             raise RuntimeError(f"remote copy failed: {err or out}")
 
-        update({"status": "registering", "result": None, "error": None})
-        synthesize_impression(project_uuid, impression_uuid, data_md5,
-                              descriptor, runner_id, remote_path, managed_dir)
+        set_impression_status(project_uuid, impression_uuid, "archived")
         return {"uuid": data_md5, "impression_uuid": impression_uuid,
                 "descriptor": descriptor}

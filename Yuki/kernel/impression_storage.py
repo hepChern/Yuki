@@ -96,8 +96,11 @@ class ImpressionStorage:
         <machine>/<kind>.filelist.json after the first successful live fetch and
         served from there afterwards — sparing a slow, sometimes flaky REANA
         list_files on every status. See _runner_files for the policy.
+
+        Remote-hosted data (registered via register-data) is listed from the
+        host runner's managed impressions dir; see _remote_hosted_files.
         """
-        result = []
+        result = self._remote_hosted_files(kind)
         for name, job, workflow in self._get_runner_contexts():
             machine_id = self.runners_id.get(name)
             machine_dir = os.path.join(self.job_path, machine_id)
@@ -129,6 +132,71 @@ class ImpressionStorage:
                     "in_runner": False,
                     "in_yuki": True,
                 })
+        return result
+
+    def _remote_hosted_files(self, kind):
+        """List files of a remote-hosted data impression (register-data).
+
+        Files live in the host runner's managed impressions dir. The listing
+        is cached to <host_runner_id>/<kind>.filelist.json (same convention as
+        _runner_files) and merged with the Storage state, so rows report
+        in_runner/in_yuki like any other impression.
+        """
+        marker_path = os.path.join(self.job_path, "remote.json")
+        if not os.path.exists(marker_path):
+            return []
+        marker = ConfigFile(marker_path)
+        host_runner = marker.read_variable("host_runner_id", "")
+        managed_path = marker.read_variable("remote_path", "")
+        if not host_runner or not managed_path:
+            return []
+
+        machine_dir = os.path.join(self.job_path, host_runner)
+        cache_path = os.path.join(machine_dir, kind + ".filelist.json")
+
+        runner_files = None
+        if os.path.isfile(cache_path):
+            try:
+                with open(cache_path, encoding="utf-8") as fh:
+                    cached = json.load(fh)
+                if cached.get("workflow_id") == "remote-data":
+                    runner_files = cached.get("files", [])
+            except (OSError, ValueError):
+                pass
+
+        if runner_files is None:
+            from . import remote_data_ops
+            try:
+                runner_files = remote_data_ops.list_managed_files(
+                    host_runner, managed_path)
+            except Exception:
+                runner_files = []
+            if runner_files:
+                try:
+                    os.makedirs(machine_dir, exist_ok=True)
+                    with open(cache_path, "w", encoding="utf-8") as fh:
+                        json.dump({"workflow_id": "remote-data",
+                                   "files": runner_files}, fh)
+                except OSError:
+                    pass
+
+        storage_dir = os.path.join(machine_dir, kind)
+        downloaded = set()
+        if os.path.isdir(storage_dir):
+            for root, _dirs, files in os.walk(storage_dir):
+                for f in files:
+                    downloaded.add(os.path.relpath(
+                        os.path.join(root, f), storage_dir))
+
+        result = []
+        for rf in runner_files:
+            result.append({
+                "name": rf["name"],
+                "size": rf.get("size", 0),
+                "type": file_types.classify(rf["name"]),
+                "in_runner": True,
+                "in_yuki": rf["name"] in downloaded,
+            })
         return result
 
     def _runner_files(self, job, workflow, kind, machine_dir):
