@@ -5,6 +5,7 @@ import shutil
 import subprocess
 
 PROBE_TIMEOUT = 10
+ENV_LIST_TIMEOUT = 30
 
 
 def _ok(**extra):
@@ -111,6 +112,76 @@ def probe_ssh(ssh_settings):  # pylint: disable=too-many-locals
     finally:
         client.close()
     return checks
+
+
+def parse_conda_env_list(output):
+    """Parse `conda env list` text into [{'name', 'path', 'active'}]."""
+    envs = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        active = "*" in parts
+        parts = [p for p in parts if p != "*"]
+        if len(parts) == 2:
+            name, path = parts
+        elif len(parts) == 1:
+            name, path = "", parts[0]
+        else:
+            continue
+        envs.append({"name": name, "path": path, "active": active})
+    return envs
+
+
+def list_envs_native(settings):
+    """List conda environments on the Yuki host."""
+    conda = settings.get("conda_path") or shutil.which("conda")
+    if not conda:
+        return {"envs": [], "error": "conda not found in PATH"}
+    try:
+        result = subprocess.run([conda, "env", "list"], capture_output=True,
+                                text=True, timeout=ENV_LIST_TIMEOUT, check=False)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        return {"envs": [], "error": str(exc) or type(exc).__name__}
+    if result.returncode != 0:
+        error = result.stderr.strip() or f"conda env list exited {result.returncode}"
+        return {"envs": [], "error": error}
+    return {"envs": parse_conda_env_list(result.stdout), "error": None}
+
+
+def list_envs_ssh(ssh_settings):
+    """List conda environments on the remote host via SSH."""
+    try:
+        import paramiko
+    except ImportError:
+        return {"envs": [], "error": "paramiko is not installed"}
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        key_path = ssh_settings.get("key_path") or None
+        if key_path:
+            key_path = os.path.expanduser(key_path)
+            if not os.path.exists(key_path):
+                key_path = None
+        client.connect(hostname=ssh_settings.get("host", ""),
+                       port=ssh_settings.get("port", 22),
+                       username=ssh_settings.get("user", ""),
+                       key_filename=key_path,
+                       timeout=PROBE_TIMEOUT, banner_timeout=PROBE_TIMEOUT)
+        conda = ssh_settings.get("conda_path") or "conda"
+        _, stdout, stderr = client.exec_command(f"{conda} env list",
+                                                timeout=ENV_LIST_TIMEOUT)
+        out = stdout.read().decode().strip()
+        err = stderr.read().decode().strip()
+        if err and not out:
+            return {"envs": [], "error": err}
+        return {"envs": parse_conda_env_list(out), "error": None}
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        return {"envs": [], "error": str(exc) or type(exc).__name__}
+    finally:
+        client.close()
 
 
 def probe_reana(url, token, ping_func):

@@ -406,3 +406,26 @@ def runner_health(runner):
         return jsonify({"error": f"Runner '{runner}' not found"}), 404
     return jsonify(runner_config.get_runner_health(config_file,
                                                    runners_id[runner]))
+
+
+@bp.route("/runner-envs/<runner>", methods=['GET'])
+def runner_envs(runner):
+    """List conda environments available on a runner (ssh/native)."""
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"Runner '{runner}' not found"}), 404
+    runner_id = runners_id[runner]
+    backend_types = config_file.read_variable("backend_types", {})
+    backend_type = backend_types.get(runner_id, "reana")
+
+    if backend_type == "ssh":
+        result = runner_probe.list_envs_ssh(
+            runner_config.get_ssh_settings(config_file, runner_id))
+    elif backend_type == "native":
+        result = runner_probe.list_envs_native(
+            runner_config.get_runner_settings(config_file, runner_id))
+    else:
+        result = {"envs": [],
+                  "error": f"backend '{backend_type}' has no conda environments"}
+    return jsonify(result)
