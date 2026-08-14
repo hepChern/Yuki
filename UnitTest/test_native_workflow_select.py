@@ -1,3 +1,4 @@
+"""Tests for NativeWorkflow file selection and download helpers."""
 import os
 from unittest import mock
 
@@ -23,6 +24,7 @@ def _make_wf(tmp_path):
 
 
 def test_list_runner_files_native(tmp_path):
+    """list_runner_files walks the native stageout with relative names."""
     wf = _make_wf(tmp_path)
     out = {f["name"]: f["size"] for f in wf.list_runner_files("7654321xyz", "stageout")}
     assert out["mass.png"] == 3
@@ -32,6 +34,7 @@ def test_list_runner_files_native(tmp_path):
 
 
 def test_download_selected_native_nested(tmp_path):
+    """download_selected copies only files matching the predicate."""
     wf = _make_wf(tmp_path)
     with mock.patch.dict(os.environ, {"HOME": str(tmp_path / "home")}):
         report = wf.download_selected("7654321xyz",
@@ -47,6 +50,7 @@ def test_download_selected_native_nested(tmp_path):
 
 
 def test_download_outputs_native_preserves_subdirs(tmp_path):
+    """download_outputs keeps nested subdirectories in the target."""
     wf = _make_wf(tmp_path)
     with mock.patch.dict(os.environ, {"HOME": str(tmp_path / "home")}):
         report = wf.download_outputs("7654321xyz")
@@ -60,6 +64,7 @@ def test_download_outputs_native_preserves_subdirs(tmp_path):
 
 
 def test_download_selected_native_only_plots(tmp_path):
+    """download_selected with is_plot downloads images only."""
     wf = _make_wf(tmp_path)
     with mock.patch.dict(os.environ, {"HOME": str(tmp_path / "home")}):
         wf.download_selected("7654321xyz", native_workflow.file_types.is_plot, "stageout")

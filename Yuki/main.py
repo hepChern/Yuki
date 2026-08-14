@@ -4,10 +4,10 @@ import subprocess
 
 import click
 
+from Yuki.utils.env_interpreter import EnvInterpreter
 from .server_main import server_start
 from .server_main import stop as server_stop
 from .server_main import status as server_status
-from Yuki.utils.env_interpreter import EnvInterpreter
 
 @click.group()
 @click.pass_context
@@ -64,8 +64,10 @@ def _docker_is_rootless():
               help='Host port to map to container port 3315 (env: YUKIPORT).')
 @click.option('--dev-dir',
               help='Mount local Yuki source directory as /app/Yuki for development.')
-@click.option('--celebi-dir',
-              help='Mount local CelebiChrono source directory as /app/CelebiChrono for development.')
+@click.option(
+    '--celebi-dir',
+    help='Mount local CelebiChrono source directory as /app/CelebiChrono for development.'
+)
 def docker_run(image, yuki_dir, port, dev_dir, celebi_dir):
     """Run a Yuki Docker container.
 
@@ -119,7 +121,7 @@ def docker_restart(container):
         result = subprocess.run(
             ['docker', 'ps', '--filter', 'volume=/mnt/yuki-source',
              '--format', '{{.Names}}'],
-            capture_output=True, text=True
+            capture_output=True, text=True, check=False
         )
         containers = result.stdout.strip().split('\n')
         containers = [c for c in containers if c]
@@ -127,7 +129,7 @@ def docker_restart(container):
             result = subprocess.run(
                 ['docker', 'ps', '--filter', 'name=yuki-dev',
                  '--format', '{{.Names}}'],
-                capture_output=True, text=True
+                capture_output=True, text=True, check=False
             )
             containers = result.stdout.strip().split('\n')
             containers = [c for c in containers if c]
@@ -156,7 +158,7 @@ def docker_restart(container):
 @click.option('--cores', '-j', default=None,
               help='Number of cores to pass to snakemake '
                    '(default: runner setting, else all).')
-def run_workflow(workflow_uuid, cores):  # pylint: disable=too-many-locals
+def run_workflow(workflow_uuid, cores):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Run a local workflow by its UUID with file staging and status tracking.
 
     For native workflows this:
@@ -168,7 +170,6 @@ def run_workflow(workflow_uuid, cores):  # pylint: disable=too-many-locals
     Files are copied using hard links when on the same filesystem for
     performance, with automatic fallback to regular copy for cross-filesystem.
     """
-    import json
     from CelebiChrono.utils.metadata import ConfigFile
     from Yuki.kernel import runner_config
     from Yuki.kernel.snakemake_monitor import SnakemakeMonitor
@@ -194,7 +195,7 @@ def run_workflow(workflow_uuid, cores):  # pylint: disable=too-many-locals
 
     if not workflow_path:
         click.echo(f"Workflow {workflow_uuid} not found in $YUKIDIR/Workflows/")
-        raise click.ClickException(f"Workflow not found")
+        raise click.ClickException("Workflow not found")
 
     # Resolve per-runner settings from the workflow's machine_id
     workflow_cfg = ConfigFile(os.path.join(workflow_path, "config.json"))

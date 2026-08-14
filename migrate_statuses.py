@@ -6,17 +6,16 @@ This script migrates existing job status.json files from legacy status names
 to musical status names, adding detailed_status and status_legacy fields.
 """
 
-import os
-import json
 import argparse
+import json
+import os
+import sys
 from pathlib import Path
 
-# Import the translation functions
-import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from Yuki.kernel.status_constants import (
-    translate_to_musical, translate_to_legacy, get_detailed_status_message,
+from Yuki.kernel.status_constants import (  # pylint: disable=wrong-import-position
+    translate_to_musical, get_detailed_status_message,
     LEGACY_TO_MUSICAL, MUSICAL_TO_LEGACY,
     SILENCE, PRELUDE, IN_MOVEMENT, COMPOSING, ORCHESTRATING,
     TUNING, DISSONANCE, CODA, FINAL_NOTE,
@@ -107,7 +106,8 @@ def find_status_files(storage_root=None):
     return status_files
 
 
-def main():
+def main():  # pylint: disable=too-many-statements
+    """Run the status migration CLI."""
     parser = argparse.ArgumentParser(
         description="Migrate Yuki job statuses from legacy to musical names"
     )
@@ -151,7 +151,6 @@ def main():
     # Migration statistics
     migrated = 0
     failed = 0
-    skipped = 0
 
     for i, status_file in enumerate(status_files, 1):
         print(f"[{i}/{len(status_files)}] Processing: {status_file}")

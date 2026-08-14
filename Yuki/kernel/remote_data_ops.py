@@ -188,7 +188,7 @@ def _runner_name(runner_id):
     return runner_id
 
 
-def verify_registered_data(project_uuid, impression_uuid):
+def verify_registered_data(project_uuid, impression_uuid):  # pylint: disable=too-many-locals
     """Recompute the data md5 and compare it with the registered uuid.
 
     Remote-hosted data is hashed on the host runner's managed dir; local
@@ -243,7 +243,7 @@ def verify_registered_data(project_uuid, impression_uuid):
             "actual": actual, "location": "yuki storage", "error": None}
 
 
-def synthesize_impression(project_uuid, impression_uuid, data_md5, descriptor,
+def synthesize_impression(project_uuid, impression_uuid, data_md5, descriptor,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
                           runner_id, source_path, managed_dir,
                           status="running"):
     """Create the impression record in Yuki Storage (data stays remote).
@@ -291,7 +291,7 @@ def set_impression_status(project_uuid, impression_uuid, status):
     status_file.write_variable("status", status)
 
 
-def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,
+def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,  # pylint: disable=too-many-locals
                              update):
     """Run the registration pipeline: hash -> copy -> register.
 

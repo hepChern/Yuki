@@ -1,14 +1,15 @@
 """Tests for backend-aware cache_on_runner command generation."""
+# pylint: disable=protected-access
 import json
 import os
 from unittest import mock
 
 from CelebiChrono.utils.metadata import ConfigFile
 from Yuki.kernel.container_job import ContainerJob
-from Yuki.kernel import runner_config
 
 
 def _job(machine_id="m1", is_input=False, cache=True):
+    """Build a ContainerJob stub exercising cache_commands paths."""
     job = object.__new__(ContainerJob)
     job.machine_id = machine_id
     job.is_input = is_input
@@ -21,6 +22,7 @@ def _job(machine_id="m1", is_input=False, cache=True):
 
 
 def _ssh_settings(tmp_path, remote_workdir="/remote/work"):
+    """Write ssh runner settings into a config file in tmp_path."""
     yuki_dir = tmp_path
     with open(yuki_dir / "config.json", "w", encoding="utf-8") as f:
         json.dump({"runner_settings": {
@@ -30,6 +32,7 @@ def _ssh_settings(tmp_path, remote_workdir="/remote/work"):
 
 
 def test_cache_commands_reana_uses_eos(monkeypatch, tmp_path):
+    """REANA cache commands copy stageout into the EOS mount point."""
     monkeypatch.setenv("HOME", str(tmp_path))
     os.makedirs(tmp_path / ".Yuki", exist_ok=True)
     cfg = ConfigFile(str(tmp_path / ".Yuki" / "config.json"))
@@ -44,6 +47,7 @@ def test_cache_commands_reana_uses_eos(monkeypatch, tmp_path):
 
 
 def test_cache_commands_ssh_uses_impressions_dir(monkeypatch, tmp_path):
+    """SSH cache commands copy stageout into the remote impressions dir."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     _ssh_settings(tmp_path)
     job = _job()
@@ -55,27 +59,31 @@ def test_cache_commands_ssh_uses_impressions_dir(monkeypatch, tmp_path):
 
 
 def test_cache_commands_native_noop(monkeypatch, tmp_path):
+    """Native and dry backends generate no cache commands."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     job = _job()
-    assert job._cache_commands("m1", "native") == []
-    assert job._cache_commands("m1", "dry") == []
+    assert not job._cache_commands("m1", "native")
+    assert not job._cache_commands("m1", "dry")
 
 
 def test_cache_commands_disabled_noop(monkeypatch, tmp_path):
+    """A job with cache_on_runner disabled emits no cache commands."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     _ssh_settings(tmp_path)
     job = _job(cache=False)
-    assert job._cache_commands("m1", "ssh") == []
+    assert not job._cache_commands("m1", "ssh")
 
 
 def test_cache_commands_input_job_noop(monkeypatch, tmp_path):
+    """Input jobs never emit cache commands."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     _ssh_settings(tmp_path)
     job = _job(is_input=True)
-    assert job._cache_commands("m1", "ssh") == []
+    assert not job._cache_commands("m1", "ssh")
 
 
 def test_setup_commands_ssh_fetches_from_impressions(monkeypatch, tmp_path):
+    """SSH setup commands pull cached data from the remote impressions dir."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     _ssh_settings(tmp_path)
     job = _job()
@@ -87,6 +95,7 @@ def test_setup_commands_ssh_fetches_from_impressions(monkeypatch, tmp_path):
 
 
 def test_setup_commands_native_no_cache_source(monkeypatch, tmp_path):
+    """Native backends have no cache source, so only mkdir is emitted."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     job = _job()
     assert job.setup_commands("native") == ["mkdir -p impabc1234/stageout"]

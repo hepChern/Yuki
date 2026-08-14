@@ -8,9 +8,9 @@ from flask import Blueprint, render_template, request, jsonify, url_for, send_fr
 from werkzeug.utils import secure_filename
 from CelebiChrono.utils.metadata import ConfigFile
 from CelebiChrono.kernel.chern_cache import ChernCache
+from Yuki.kernel import file_types
 from ...kernel.vjob import VJob
 from ...kernel.vworkflow import VWorkflow
-from Yuki.kernel import file_types
 from ...kernel.status_constants import (
     translate_to_musical, translate_to_legacy, is_valid_status,
     CODA, FAILED
@@ -64,8 +64,6 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
     Returns JSON with musical status name and detailed status message.
     Optional query parameter: legacy=true to return legacy status name.
     """
-    legacy = request.args.get('legacy', 'false').lower() == 'true'
-
     job_path = config.get_job_path(project_uuid, impression_name)
     config_file = config.get_config_file()
     runners_list = config_file.read_variable("runners", [])
@@ -606,6 +604,3 @@ def engine_log(project_uuid, impression_name):
         os.path.dirname(log_path),
         "engine_logs.json"
     )
-
-
-

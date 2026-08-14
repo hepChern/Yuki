@@ -1,4 +1,5 @@
 """Unit tests for SshWorkflow remote backend."""
+# pylint: disable=protected-access
 import json
 import os
 import shutil
@@ -15,32 +16,38 @@ class _MockSftp:
         self.dirs = set()
 
     def mkdir(self, path):
+        """Record the created remote directory."""
         self.dirs.add(path)
 
     def chmod(self, path, _mode):
-        pass
+        """No-op chmod."""
 
     def close(self):
-        pass
+        """No-op close."""
 
     def put(self, local_path, remote_path):
+        """Read the local file into the in-memory store."""
         with open(local_path, "rb") as f:
             self.files[remote_path] = f.read()
 
     def get(self, remote_path, local_path):
+        """Write the stored remote file to local_path."""
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         with open(local_path, "wb") as f:
             f.write(self.files[remote_path])
 
     def file(self, remote_path, mode="r"):
+        """Open a writable handle into the in-memory store."""
         class _File:
             def __init__(self, store, path):
                 self._store = store
                 self._path = path
                 self._data = b""
             def write(self, data):
+                """Accumulate the uploaded bytes."""
                 self._data += data if isinstance(data, bytes) else data.encode("utf-8")
             def close(self):
+                """Flush the accumulated bytes into the store."""
                 self._store[self._path] = self._data
             def __enter__(self):
                 return self
@@ -52,6 +59,7 @@ class _MockSftp:
         raise NotImplementedError
 
     def listdir(self, path):
+        """List direct children of the remote directory."""
         if path not in self.dirs:
             raise FileNotFoundError(path)
         seen = set()
@@ -66,46 +74,59 @@ class _MockSftp:
         return list(seen)
 
     def stat(self, path):
+        """Return a minimal stat result for the remote path."""
         if path in self.dirs:
             from stat import S_IFDIR
-            class _Stat:
-                st_mode = S_IFDIR
-                st_size = 0
-            return _Stat()
+            return self._stat(S_IFDIR, 0)
         if path in self.files:
             from stat import S_IFREG
-            class _Stat:
-                st_mode = S_IFREG
-                st_size = len(self.files[path])
-            return _Stat()
+            return self._stat(S_IFREG, len(self.files[path]))
         raise FileNotFoundError(path)
 
+    def _stat(self, mode, size):
+        """Build a minimal stat result with the given mode and size."""
+        class _Stat:  # pylint: disable=too-few-public-methods
+            """Stat double carrying mode and size."""
+            st_mode = mode
+            st_size = size
+        return _Stat()
+
     def remove(self, path):
+        """Remove the remote file from the store."""
         self.files.pop(path, None)
 
 
-class _MockChannel:
+class _MockChannel:  # pylint: disable=too-few-public-methods
+    """A channel double reporting a fixed exit code."""
+
     def __init__(self, exit_code=0):
         self._exit_code = exit_code
 
     def recv_exit_status(self):
+        """Return the configured exit code."""
         return self._exit_code
 
 
-class _MockStdout:
+class _MockStdout:  # pylint: disable=too-few-public-methods
+    """An exec stdout double returning the fixture text."""
+
     def __init__(self, text, exit_code=0):
         self._text = text
         self.channel = _MockChannel(exit_code)
 
     def read(self):
+        """Return the fixture text as bytes."""
         return self._text.encode("utf-8")
 
 
-class _MockStderr:
+class _MockStderr:  # pylint: disable=too-few-public-methods
+    """An exec stderr double returning the fixture text."""
+
     def __init__(self, text):
         self._text = text
 
     def read(self):
+        """Return the fixture text as bytes."""
         return self._text.encode("utf-8")
 
 
@@ -159,7 +180,7 @@ class TestSshWorkflow(unittest.TestCase):
                 "remote_workdirs": {"runner-uuid": "/tmp/yuki-workflows"},
             }, f)
 
-    def _make_job(self, uuid_full, status_value="prelude",
+    def _make_job(self, uuid_full, status_value="prelude",  # pylint: disable=too-many-arguments,too-many-positional-arguments
                   is_input=False, job_type_value="task", files=None):
         job = MagicMock()
         job.uuid = uuid_full
@@ -174,6 +195,7 @@ class TestSshWorkflow(unittest.TestCase):
 
     @patch("paramiko.SSHClient")
     def test_execute_backend_uploads_snakefile_and_starts_command(self, mock_ssh_cls):
+        """_execute_backend uploads the Snakefile and runs the wrapper."""
         mock_ssh_cls.return_value = self.mock_client
         self.mock_client.exec_command.return_value = (
             MagicMock(), _MockStdout("12345"), _MockStderr("")
@@ -203,7 +225,6 @@ class TestSshWorkflow(unittest.TestCase):
         should derive the job list from self.jobs (loaded from local
         config.json jobs_info) instead of requiring the remote-only file.
         """
-        from Yuki.kernel.status_constants import CODA
         mock_ssh_cls.return_value = self.mock_client
 
         job = self._make_job("a" * 32)
@@ -219,12 +240,14 @@ class TestSshWorkflow(unittest.TestCase):
 
         results_path = os.path.join(self.workflow.path, "results.json")
         self.assertTrue(os.path.exists(results_path))
-        results = json.load(open(results_path, encoding="utf-8"))
+        with open(results_path, encoding="utf-8") as f:
+            results = json.load(f)
         self.assertEqual(results["results"]["status"], "finished")
         job.set_status.assert_called_with("finished", "Remote execution completed")
 
     @patch("paramiko.SSHClient")
     def test_update_workflow_status_reports_finished_when_done_files_exist(self, mock_ssh_cls):
+        """A done file on the runner yields a finished workflow status."""
         mock_ssh_cls.return_value = self.mock_client
         self.mock_sftp.dirs.add(self.workflow.remote_exec_path)
         short = "a" * 7
@@ -237,7 +260,8 @@ class TestSshWorkflow(unittest.TestCase):
         self.workflow.update_workflow_status()
 
         results_path = os.path.join(self.workflow.path, "results.json")
-        results = json.load(open(results_path, encoding="utf-8"))
+        with open(results_path, encoding="utf-8") as f:
+            results = json.load(f)
         self.assertEqual(results["results"]["status"], "finished")
         self.assertEqual(results["results"]["progress"]["completed"], 1)
 
@@ -258,6 +282,7 @@ class TestSshWorkflow(unittest.TestCase):
 
     @patch("paramiko.SSHClient")
     def test_download_outputs_pulls_remote_stageout_files(self, mock_ssh_cls):
+        """download_outputs pulls remote stageout files into Storage."""
         mock_ssh_cls.return_value = self.mock_client
         short = "a" * 7
         remote_dir = f"{self.workflow.remote_exec_path}/imp{short}/stageout"
@@ -276,10 +301,11 @@ class TestSshWorkflow(unittest.TestCase):
 
     @patch("paramiko.SSHClient")
     def test_kill_sends_signal_to_remote_pid(self, mock_ssh_cls):
+        """kill sends a signal to the remote pid from yuki.pid."""
         mock_ssh_cls.return_value = self.mock_client
         self.mock_sftp.files[f"{self.workflow.remote_exec_path}/yuki.pid"] = b"12345"
 
-        def exec_side_effect(command, timeout=300):
+        def exec_side_effect(command, timeout=300):  # pylint: disable=unused-argument
             if command.startswith("cat"):
                 return MagicMock(), _MockStdout("12345"), _MockStderr("")
             return MagicMock(), _MockStdout(""), _MockStderr("")
@@ -293,6 +319,7 @@ class TestSshWorkflow(unittest.TestCase):
 
     @patch("paramiko.SSHClient")
     def test_ping_returns_true_when_remote_echo_succeeds(self, mock_ssh_cls):
+        """ping returns True when the remote echo succeeds."""
         mock_ssh_cls.return_value = self.mock_client
         self.mock_client.exec_command.return_value = (
             MagicMock(), _MockStdout("ok"), _MockStderr("")
@@ -302,6 +329,7 @@ class TestSshWorkflow(unittest.TestCase):
 
     @patch("paramiko.SSHClient")
     def test_ping_returns_false_on_connection_failure(self, mock_ssh_cls):
+        """ping returns False when the connection is refused."""
         mock_ssh_cls.return_value = self.mock_client
         self.mock_client.connect.side_effect = OSError("Connection refused")
 
@@ -326,7 +354,7 @@ class TestSshWorkflow(unittest.TestCase):
         """
         mock_ssh_cls.return_value = self.mock_client
 
-        def exec_side_effect(command, timeout=300):
+        def exec_side_effect(command, timeout=300):  # pylint: disable=unused-argument
             if command.startswith("test -d"):
                 return MagicMock(), _MockStdout("", exit_code=1), _MockStderr("")
             return MagicMock(), _MockStdout(""), _MockStderr("")
@@ -358,7 +386,7 @@ class TestSshWorkflow(unittest.TestCase):
         """Nested subdirectories inside input stageout must be uploaded recursively."""
         mock_ssh_cls.return_value = self.mock_client
 
-        def exec_side_effect(command, timeout=300):
+        def exec_side_effect(command, timeout=300):  # pylint: disable=unused-argument
             if command.startswith("test -d"):
                 return MagicMock(), _MockStdout("", exit_code=1), _MockStderr("")
             return MagicMock(), _MockStdout(""), _MockStderr("")

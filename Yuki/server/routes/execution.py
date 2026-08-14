@@ -10,7 +10,6 @@ from ...kernel.container_job import ContainerJob
 from ...kernel.impression_storage import ImpressionStorage
 from ...kernel.status_constants import (
     SILENCE, PRELUDE, TUNING, FAILED, DISSONANCE,
-    translate_to_musical
 )
 from ..config import config
 from ..tasks import task_exec_impression
@@ -132,7 +131,7 @@ def outputs(project_uuid, impression, machine):
 
 
 @bp.route("/file-status/<project_uuid>/<impression>/<machine>", methods=['GET'])
-def file_status(project_uuid, impression, machine):
+def file_status(project_uuid, impression, machine):  # pylint: disable=unused-argument
     """Return merged runner + Storage file listing for an impression."""
     kind = request.args.get("kind", "stageout")
     storage = ImpressionStorage(project_uuid, impression)

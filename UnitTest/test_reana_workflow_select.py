@@ -1,5 +1,5 @@
+"""Tests for ReanaWorkflow file selection and download helpers."""
 import os
-import tempfile
 from unittest import mock
 
 from Yuki.kernel import reana_workflow
@@ -17,6 +17,7 @@ def _make_wf():
 
 
 def test_list_runner_files_strips_prefix_and_keeps_size():
+    """REANA listing prefixes are stripped, sizes preserved."""
     wf = _make_wf()
     fake = [
         {"name": "imp1234567/stageout/mass.png", "size": 10},
@@ -33,6 +34,7 @@ def test_list_runner_files_strips_prefix_and_keeps_size():
 
 
 def test_download_outputs_creates_subdirectories(tmp_path):
+    """download_outputs recreates nested stageout directories locally."""
     wf = _make_wf()
     home = tmp_path
     storage = home / ".Yuki" / "Storage" / "proj-1" / "imp7" / "runner-1"
@@ -54,6 +56,7 @@ def test_download_outputs_creates_subdirectories(tmp_path):
 
 
 def test_download_selected_matches_relative_path(tmp_path):
+    """download_selected matches predicates against relative paths."""
     wf = _make_wf()
     home = tmp_path
     storage = home / ".Yuki" / "Storage" / "proj-1" / "imp7" / "runner-1" / "stageout"
@@ -126,11 +129,12 @@ def test_list_runner_files_returns_empty_when_all_retries_fail():
          mock.patch.object(reana_workflow.time, "sleep", lambda *_a: None):
         cli.list_files.side_effect = RuntimeError("[SSL: UNEXPECTED_EOF_WHILE_READING]")
         out = wf.list_runner_files("1234567abc", "stageout")
-    assert out == []
+    assert not out
     assert cli.list_files.call_count == 3        # bounded retry, then give up
 
 
 def test_download_selected_only_matching_and_skips_existing(tmp_path):
+    """download_selected downloads only matches and skips existing files."""
     wf = _make_wf()
     home = tmp_path
     storage = home / ".Yuki" / "Storage" / "proj-1" / "imp7" / "runner-1" / "stageout"

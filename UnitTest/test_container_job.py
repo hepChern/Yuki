@@ -1,6 +1,4 @@
-import os
-from unittest import mock
-
+"""Tests for ContainerJob output discovery."""
 from Yuki.kernel.container_job import ContainerJob
 
 
@@ -12,6 +10,7 @@ def _make_container(path, machine_id="runner-1"):
 
 
 def test_outputs_returns_relative_paths_for_nested_stageout(tmp_path):
+    """Outputs under a nested stageout directory come back relative."""
     c = _make_container(tmp_path)
     stageout = tmp_path / "runner-1" / "stageout"
     (stageout / "plots").mkdir(parents=True)
@@ -22,6 +21,7 @@ def test_outputs_returns_relative_paths_for_nested_stageout(tmp_path):
 
 
 def test_outputs_returns_relative_paths_for_nested_rawdata(tmp_path):
+    """Outputs under a nested rawdata directory come back relative."""
     c = _make_container(tmp_path, machine_id=None)
     rawdata = tmp_path / "rawdata"
     (rawdata / "data").mkdir(parents=True)
@@ -31,5 +31,6 @@ def test_outputs_returns_relative_paths_for_nested_rawdata(tmp_path):
 
 
 def test_outputs_returns_empty_when_missing(tmp_path):
+    """A container with no stageout or rawdata yields no outputs."""
     c = _make_container(tmp_path)
     assert c.outputs() == []

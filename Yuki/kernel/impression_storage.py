@@ -9,7 +9,7 @@ from CelebiChrono.utils.metadata import ConfigFile
 from . import file_types
 from .vjob import VJob
 from .vworkflow import VWorkflow
-from .status_constants import CODA, FAILED, DISSONANCE, translate_to_musical
+from .status_constants import CODA, FAILED, DISSONANCE
 
 class ImpressionStorage:
     """Storage manager for impression workflow operations and status tracking."""
@@ -55,8 +55,9 @@ class ImpressionStorage:
         for report in reports:
             if not report:
                 continue
-            for key in merged:
-                merged[key].extend(report.get(key, []))
+            for key, value in report.items():
+                if key in merged:
+                    merged[key].extend(value)
         return merged
 
     def collect(self):
@@ -89,7 +90,7 @@ class ImpressionStorage:
                 report[name] = {"collected": [], "skipped": [], "failed": []}
         return report
 
-    def file_status(self, kind="stageout"):
+    def file_status(self, kind="stageout"):  # pylint: disable=too-many-locals
         """Merge runner listing with downloaded Storage state for <kind>.
 
         The runner listing of a finished job is immutable, so it is cached to
@@ -134,7 +135,7 @@ class ImpressionStorage:
                 })
         return result
 
-    def _remote_hosted_files(self, kind):
+    def _remote_hosted_files(self, kind):  # pylint: disable=too-many-locals,too-many-branches
         """List files of a remote-hosted data impression (register-data).
 
         Files live in the host runner's managed impressions dir. The listing
@@ -264,7 +265,7 @@ class ImpressionStorage:
 
     def collect_engine_logs(self):
         """Retrieves engine logs from runners."""
-        for name, job, workflow in self._get_runner_contexts():
+        for name, _job, workflow in self._get_runner_contexts():
             print(f"[{name}] Collecting engine logs...")
             workflow.get_workflow_logs()
 

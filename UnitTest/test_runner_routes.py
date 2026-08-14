@@ -29,6 +29,7 @@ def _temp_config(monkeypatch):
 
 
 def test_register_runner_stores_ssh_config(monkeypatch):
+    """Registering an ssh runner persists host, user, key, and port."""
     _temp_config(monkeypatch)
 
     app = _app(runner_routes.bp)
@@ -48,7 +49,8 @@ def test_register_runner_stores_ssh_config(monkeypatch):
     assert r.status_code == 200
     assert b"successful" in r.data
 
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     runner_id = cfg["runners_id"]["mycluster"]
     assert cfg["backend_types"][runner_id] == "ssh"
     assert cfg["ssh_hosts"][runner_id] == "cluster.example.com"
@@ -59,6 +61,7 @@ def test_register_runner_stores_ssh_config(monkeypatch):
 
 
 def test_runners_config_includes_ssh_fields(monkeypatch):
+    """runners-config exposes ssh fields for ssh runners."""
     _temp_config(monkeypatch)
     runner_id = "r-uuid"
     with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
@@ -86,6 +89,7 @@ def test_runners_config_includes_ssh_fields(monkeypatch):
 
 
 def test_update_runner_switches_to_ssh_and_stores_fields(monkeypatch):
+    """Updating a runner to ssh persists the new ssh fields."""
     _temp_config(monkeypatch)
     runner_id = "r-uuid"
     with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
@@ -108,13 +112,15 @@ def test_update_runner_switches_to_ssh_and_stores_fields(monkeypatch):
     })
     assert r.status_code == 200
 
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     assert cfg["backend_types"][runner_id] == "ssh"
     assert cfg["ssh_hosts"][runner_id] == "cluster.example.com"
     assert cfg["remote_workdirs"][runner_id] == "/data/yuki"
 
 
 def test_remove_runner_cleans_ssh_config(monkeypatch):
+    """Removing a runner drops its legacy ssh_* entries."""
     _temp_config(monkeypatch)
     runner_id = "r-uuid"
     with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
@@ -135,13 +141,15 @@ def test_remove_runner_cleans_ssh_config(monkeypatch):
     r = app.test_client().get("/remove-runner/mycluster")
     assert r.status_code == 200
 
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     assert "mycluster" not in cfg["runners"]
     assert runner_id not in cfg.get("ssh_hosts", {})
     assert runner_id not in cfg.get("ssh_users", {})
 
 
 def test_runner_connection_ssh_uses_paramiko_ping(monkeypatch):
+    """runner-connection pings ssh runners via paramiko."""
     _temp_config(monkeypatch)
     runner_id = "r-uuid"
     with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
@@ -162,7 +170,8 @@ def test_runner_connection_ssh_uses_paramiko_ping(monkeypatch):
         ssh_cls.return_value = mock_client
         mock_client.exec_command.return_value = (
             mock.MagicMock(),
-            mock.MagicMock(**{"read.return_value": b"ok", "channel.recv_exit_status.return_value": 0}),
+            mock.MagicMock(**{"read.return_value": b"ok",
+                              "channel.recv_exit_status.return_value": 0}),
             mock.MagicMock(**{"read.return_value": b""}),
         )
 
@@ -173,6 +182,7 @@ def test_runner_connection_ssh_uses_paramiko_ping(monkeypatch):
 
 
 def test_register_runner_stores_native_settings(monkeypatch):
+    """Registering a native runner persists its runner_settings."""
     _temp_config(monkeypatch)
     c = _app(runner_routes.bp).test_client()
     r = c.post("/register-runner", data={
@@ -181,7 +191,8 @@ def test_register_runner_stores_native_settings(monkeypatch):
         "conda_path": "/opt/conda/bin/conda",
     })
     assert r.status_code == 200
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     runner_id = cfg["runners_id"]["local"]
     assert cfg["runner_settings"][runner_id] == {
         "workdir": "/data/yuki", "cores": 8, "mem_mb": 4096,
@@ -190,6 +201,7 @@ def test_register_runner_stores_native_settings(monkeypatch):
 
 
 def test_register_runner_duplicate_name_409(monkeypatch):
+    """Registering a duplicate runner name returns 409."""
     _temp_config(monkeypatch)
     c = _app(runner_routes.bp).test_client()
     c.post("/register-runner", data={"runner": "local", "url": "",
@@ -197,11 +209,13 @@ def test_register_runner_duplicate_name_409(monkeypatch):
     r = c.post("/register-runner", data={"runner": "local", "url": "",
                                          "token": "", "backend_type": "native"})
     assert r.status_code == 409
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     assert cfg["runners"].count("local") == 1
 
 
 def test_register_runner_missing_field_400(monkeypatch):
+    """A register request missing the runner name is rejected."""
     _temp_config(monkeypatch)
     r = _app(runner_routes.bp).test_client().post(
         "/register-runner", data={"runner": "local"})
@@ -209,6 +223,7 @@ def test_register_runner_missing_field_400(monkeypatch):
 
 
 def test_register_runner_ssh_double_writes_settings(monkeypatch):
+    """Ssh runner registration writes both legacy maps and new settings."""
     _temp_config(monkeypatch)
     c = _app(runner_routes.bp).test_client()
     c.post("/register-runner", data={
@@ -216,7 +231,8 @@ def test_register_runner_ssh_double_writes_settings(monkeypatch):
         "ssh_host": "h", "ssh_user": "u", "ssh_key_path": "/k",
         "ssh_port": "2222", "remote_workdir": "/remote",
     })
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     runner_id = cfg["runners_id"]["cluster"]
     # legacy maps still written
     assert cfg["ssh_hosts"][runner_id] == "h"
@@ -227,6 +243,7 @@ def test_register_runner_ssh_double_writes_settings(monkeypatch):
 
 
 def test_update_runner_stores_settings(monkeypatch):
+    """Updating a runner persists partial settings changes."""
     _temp_config(monkeypatch)
     runner_id = "r-uuid"
     with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
@@ -235,18 +252,21 @@ def test_update_runner_stores_settings(monkeypatch):
     r = _app(runner_routes.bp).test_client().patch(
         "/update-runner/local", json={"cores": 16, "snakemake_path": "/usr/bin/snakemake"})
     assert r.status_code == 200
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     assert cfg["runner_settings"][runner_id]["cores"] == 16
     assert cfg["runner_settings"][runner_id]["snakemake_path"] == "/usr/bin/snakemake"
 
 
 def test_machine_id_unknown_404(monkeypatch):
+    """An unknown machine id gives 404."""
     _temp_config(monkeypatch)
     r = _app(runner_routes.bp).test_client().get("/machine-id/ghost")
     assert r.status_code == 404
 
 
 def test_runners_url_tolerates_missing_entries(monkeypatch):
+    """runners-url tolerates runners without ids or urls."""
     _temp_config(monkeypatch)
     with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
         json.dump({"runners": ["a", "b"], "runners_id": {"a": "id-a"},
@@ -256,6 +276,7 @@ def test_runners_url_tolerates_missing_entries(monkeypatch):
 
 
 def test_runners_config_includes_settings_and_health(monkeypatch):
+    """runners-config includes runner_settings and runner_health."""
     _temp_config(monkeypatch)
     runner_id = "r-uuid"
     with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
@@ -272,6 +293,7 @@ def test_runners_config_includes_settings_and_health(monkeypatch):
 
 
 def test_runners_config_defaults_without_new_maps(monkeypatch):
+    """runners-config defaults settings and health when maps are absent."""
     _temp_config(monkeypatch)
     runner_id = "r-uuid"
     with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
@@ -284,6 +306,7 @@ def test_runners_config_defaults_without_new_maps(monkeypatch):
 
 
 def test_remove_runner_cleans_settings_health_and_stale_ssh(monkeypatch):
+    """Removing a runner drops settings, health, and stale ssh maps."""
     _temp_config(monkeypatch)
     runner_id = "r-uuid"
     # backend flipped reana after ssh: stale ssh_* entries must still go
@@ -298,7 +321,8 @@ def test_remove_runner_cleans_settings_health_and_stale_ssh(monkeypatch):
         }, f)
     r = _app(runner_routes.bp).test_client().get("/remove-runner/cluster")
     assert r.status_code == 200
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     assert runner_id not in cfg.get("ssh_hosts", {})
     assert runner_id not in cfg.get("runner_settings", {})
     assert runner_id not in cfg.get("runner_health", {})
@@ -315,7 +339,8 @@ def test_update_runner_partial_ssh_preserves_existing_fields(monkeypatch):
     })
     r = c.patch("/update-runner/cluster", json={"ssh_key_path": "/newkey"})
     assert r.status_code == 200
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     runner_id = cfg["runners_id"]["cluster"]
     assert cfg["ssh_key_paths"][runner_id] == "/newkey"   # updated
     assert cfg["ssh_hosts"][runner_id] == "h"             # preserved
@@ -325,6 +350,7 @@ def test_update_runner_partial_ssh_preserves_existing_fields(monkeypatch):
 
 
 def test_register_runner_uploads_ssh_key(monkeypatch):
+    """An uploaded ssh key is stored server-side with 600 permissions."""
     _temp_config(monkeypatch)
     c = _app(runner_routes.bp).test_client()
     r = c.post("/register-runner", data={
@@ -333,20 +359,22 @@ def test_register_runner_uploads_ssh_key(monkeypatch):
         "ssh_key_data": "-----BEGIN KEY-----\nfake\n-----END KEY-----",
     })
     assert r.status_code == 200
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     runner_id = cfg["runners_id"]["cluster"]
     keys_dir = os.path.join(os.path.dirname(runner_routes.config.config_path), "keys")
     key_file = os.path.join(keys_dir, runner_id)
     # key stored server-side with 600 perms
-    assert open(key_file, encoding="utf-8").read().startswith("-----BEGIN KEY-----")
+    with open(key_file, encoding="utf-8") as f:
+        assert f.read().startswith("-----BEGIN KEY-----")
     assert os.stat(key_file).st_mode & 0o777 == 0o600
     # ssh_key_path points at the stored key, in both maps
     assert cfg["ssh_key_paths"][runner_id] == key_file
     assert cfg["runner_settings"][runner_id]["ssh_key_path"] == key_file
 
 
-def test_update_runner_uploads_ssh_key(monkeypatch):
-    _temp_config(monkeypatch)
+def test_update_runner_uploads_ssh_key(monkeypatch):  # pylint: disable=unused-argument
+    """Updating a runner with ssh_key_data rewrites the stored key."""
     c = _app(runner_routes.bp).test_client()
     c.post("/register-runner", data={
         "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
@@ -355,23 +383,26 @@ def test_update_runner_uploads_ssh_key(monkeypatch):
     r = c.patch("/update-runner/cluster",
                 json={"ssh_key_data": "new-key-content"})
     assert r.status_code == 200
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     runner_id = cfg["runners_id"]["cluster"]
     keys_dir = os.path.join(os.path.dirname(runner_routes.config.config_path), "keys")
     key_file = os.path.join(keys_dir, runner_id)
-    assert open(key_file, encoding="utf-8").read().startswith("new-key-content")
+    with open(key_file, encoding="utf-8") as f:
+        assert f.read().startswith("new-key-content")
     assert cfg["runner_settings"][runner_id]["ssh_key_path"] == key_file
     assert cfg["ssh_hosts"][runner_id] == "h"  # untouched
 
 
-def test_remove_runner_deletes_stored_key(monkeypatch):
-    _temp_config(monkeypatch)
+def test_remove_runner_deletes_stored_key(monkeypatch):  # pylint: disable=unused-argument
+    """Removing a runner deletes its stored ssh key file."""
     c = _app(runner_routes.bp).test_client()
     c.post("/register-runner", data={
         "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
         "ssh_host": "h", "ssh_user": "u", "ssh_key_data": "key-content",
     })
-    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     runner_id = cfg["runners_id"]["cluster"]
     key_file = os.path.join(
         os.path.dirname(runner_routes.config.config_path), "keys", runner_id)

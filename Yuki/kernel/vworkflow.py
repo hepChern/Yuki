@@ -22,7 +22,7 @@ from Yuki.kernel.image_job import ImageJob
 from Yuki.kernel.status_constants import (
     SILENCE, PRELUDE, IN_MOVEMENT, DISSONANCE, FAILED,
     CODA, FINAL_NOTE,
-    translate_to_musical, get_detailed_status_message
+    translate_to_musical
 )
 from Yuki.utils import snakefile
 from .file_staging import walk_files
@@ -142,7 +142,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         snake_file.addline("container:", indent)
         snake_file.addline(f'"docker://{environment}"', indent + 1)
 
-    def run(self):  # pylint: disable=too-many-branches
+    def run(self):  # pylint: disable=too-many-branches,too-many-statements
         """Common execution flow for workflows.
 
         High level steps:
@@ -184,7 +184,10 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                 continue
             if job.job_type() == "algorithm":
                 continue
-            job.set_status(PRELUDE, "Constructing the workflow: 1/3. waiting for the unfinished dependencies")
+            job.set_status(
+                PRELUDE,
+                "Constructing the workflow: 1/3. waiting for the unfinished dependencies"
+            )
 
         # Wait for dependencies
         if not self._wait_for_dependencies():

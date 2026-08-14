@@ -7,10 +7,10 @@ import tarfile
 from logging import getLogger
 
 from flask import Blueprint, request, send_from_directory, jsonify
+from CelebiChrono.utils import metadata
 
 from ..config import config
 from ..resumable_upload_handler import get_upload_manager
-from CelebiChrono.utils import metadata
 
 bp = Blueprint('upload', __name__)
 logger = getLogger("YukiLogger")
@@ -150,7 +150,10 @@ def fileview(project_uuid, impression, runner_id, filename):
     path = os.path.join(job_path, runner_id, "stageout")
     return _safe_send_from_directory(path, filename)
 
-@bp.route("/watermark-view/<project_uuid>/<impression>/<runner_id>/<path:filename>", methods=['GET'])
+@bp.route(
+    "/watermark-view/<project_uuid>/<impression>/<runner_id>/<path:filename>",
+    methods=['GET']
+)
 def watermarkview(project_uuid, impression, runner_id, filename):
     """View a specific file."""
     job_path = config.get_job_path(project_uuid, impression)
@@ -209,7 +212,7 @@ def create_resumable_upload():
         })
 
     except Exception as e:
-        logger.error(f"Failed to create upload: {e}")
+        logger.error("Failed to create upload: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -254,11 +257,10 @@ def upload_chunk(upload_id, chunk_index):
                 "chunk_index": chunk_index,
                 "received_bytes": len(chunk_data)
             })
-        else:
-            return jsonify({"error": "Chunk verification failed"}), 400
+        return jsonify({"error": "Chunk verification failed"}), 400
 
     except Exception as e:
-        logger.error(f"Failed to store chunk {chunk_index} for upload {upload_id}: {e}")
+        logger.error("Failed to store chunk %s for upload %s: %s", chunk_index, upload_id, e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -288,7 +290,7 @@ def get_upload_status(upload_id):
         })
 
     except Exception as e:
-        logger.error(f"Failed to get upload status for {upload_id}: {e}")
+        logger.error("Failed to get upload status for %s: %s", upload_id, e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -328,11 +330,10 @@ def complete_upload(upload_id):
                 "status": "completed",
                 "extract_path": extract_path
             })
-        else:
-            return jsonify({"error": "Failed to finalize upload"}), 500
+        return jsonify({"error": "Failed to finalize upload"}), 500
 
     except Exception as e:
-        logger.error(f"Failed to complete upload {upload_id}: {e}")
+        logger.error("Failed to complete upload %s: %s", upload_id, e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -352,7 +353,7 @@ def cancel_upload(upload_id):
         return jsonify({"status": "cancelled"})
 
     except Exception as e:
-        logger.error(f"Failed to cancel upload {upload_id}: {e}")
+        logger.error("Failed to cancel upload %s: %s", upload_id, e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -383,11 +384,11 @@ def upload_config(project_uuid, impression_uuid):
         config_path = os.path.join(target_dir, "config.json")
         config_file.save(config_path)
 
-        logger.info(f"Saved config.json for {project_uuid}/{impression_uuid}")
+        logger.info("Saved config.json for %s/%s", project_uuid, impression_uuid)
         return jsonify({"status": "ok"})
 
     except Exception as e:
-        logger.error(f"Failed to upload config: {e}")
+        logger.error("Failed to upload config: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

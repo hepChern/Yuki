@@ -12,6 +12,7 @@ from Yuki.utils.env_interpreter import EnvInterpreter
 
 class TestEnvInterpreter(unittest.TestCase):
     """Test cases for EnvInterpreter static methods."""
+    # pylint: disable=too-many-public-methods
 
     def setUp(self):
         """Create a temporary directory for config files."""

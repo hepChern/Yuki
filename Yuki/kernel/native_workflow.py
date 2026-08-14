@@ -14,7 +14,7 @@ from Yuki.utils.env_interpreter import EnvInterpreter
 from Yuki.kernel import runner_config
 from .vworkflow import VWorkflow
 from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
-from . import file_types
+from . import file_types  # pylint: disable=unused-import  # re-exported for tests
 from .file_staging import walk_files
 
 DEFAULT_ENVIRONMENT = "docker.io/reanahub/reana-env-root6:6.18.04"
@@ -308,7 +308,7 @@ class NativeWorkflow(VWorkflow):
             return ""
         return content[-max_chars:]
 
-    def update_workflow_status(self):
+    def update_workflow_status(self):  # pylint: disable=too-many-locals
         """Update workflow status from local execution."""
         try:
             # Check if all output files exist
@@ -448,9 +448,9 @@ class NativeWorkflow(VWorkflow):
             logs_report = self._collect_artifacts(
                 impression, "logs", "logs.downloaded", "log"
             )
-            for key in report:
-                report[key].extend(stageout_report.get(key, []))
-                report[key].extend(logs_report.get(key, []))
+            for key, value in report.items():
+                value.extend(stageout_report.get(key, []))
+                value.extend(logs_report.get(key, []))
         return report
 
     def download_outputs(self, impression=None):

@@ -44,6 +44,7 @@ def _write_runner(config_obj, name="local", backend="native", settings=None):
 
 
 def test_probe_native_all_ok(monkeypatch, tmp_path):
+    """A native runner with all tools present passes every check."""
     monkeypatch.setattr(runner_probe.shutil, "which",
                         lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(runner_probe.subprocess, "run",
@@ -56,6 +57,7 @@ def test_probe_native_all_ok(monkeypatch, tmp_path):
 
 
 def test_probe_native_missing_tools(monkeypatch, tmp_path):
+    """A native runner without tools reports not-found errors."""
     monkeypatch.setattr(runner_probe.shutil, "which", lambda name: None)
     checks = runner_probe.probe_native({"workdir": str(tmp_path)})
     assert checks["snakemake"]["ok"] is False
@@ -65,6 +67,7 @@ def test_probe_native_missing_tools(monkeypatch, tmp_path):
 
 
 def test_test_runner_native_persists_health(monkeypatch, tmp_path):
+    """A passing native probe persists runner_health status ok."""
     config_obj = _temp_config(monkeypatch)
     runner_id = _write_runner(config_obj, settings={"workdir": str(tmp_path)})
     monkeypatch.setattr(runner_probe.shutil, "which",
@@ -78,11 +81,13 @@ def test_test_runner_native_persists_health(monkeypatch, tmp_path):
     assert body["status"] == "ok"
     assert "checked_at" in body
 
-    cfg = json.load(open(config_obj.config_path, encoding="utf-8"))
+    with open(config_obj.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     assert cfg["runner_health"][runner_id]["status"] == "ok"
 
 
 def test_test_runner_ssh_failure_marks_failed(monkeypatch):
+    """An ssh connect failure persists runner health as failed."""
     config_obj = _temp_config(monkeypatch)
     _write_runner(config_obj, name="cluster", backend="ssh",
                   settings={"ssh_host": "h", "ssh_user": "u"})
@@ -95,6 +100,7 @@ def test_test_runner_ssh_failure_marks_failed(monkeypatch):
 
 
 def test_test_runner_ssh_mid_probe_failure_marks_failed(monkeypatch):
+    """A probe failing mid-run still marks the runner failed with details."""
     config_obj = _temp_config(monkeypatch)
     _write_runner(config_obj, name="cluster", backend="ssh",
                   settings={"ssh_host": "h", "ssh_user": "u"})
@@ -117,17 +123,20 @@ def test_test_runner_ssh_mid_probe_failure_marks_failed(monkeypatch):
     assert "channel closed" in body["checks"]["conda"]["error"]
     assert body["checks"]["workdir_writable"]["ok"] is False
 
-    cfg = json.load(open(config_obj.config_path, encoding="utf-8"))
+    with open(config_obj.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
     assert cfg["runner_health"]["r-uuid"]["status"] == "failed"
 
 
 def test_test_runner_unknown_404(monkeypatch):
+    """An unknown runner name gives 404 from test-runner."""
     _temp_config(monkeypatch)
     r = _app(runner_routes.bp).test_client().get("/test-runner/ghost")
     assert r.status_code == 404
 
 
 def test_runner_health_untested_and_persisted(monkeypatch, tmp_path):
+    """Runner health is untested until a probe persists its status."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     config_obj = _temp_config(monkeypatch)
     _write_runner(config_obj)
@@ -139,21 +148,17 @@ def test_runner_health_untested_and_persisted(monkeypatch, tmp_path):
     assert client.get("/runner-health/local").get_json()["status"] == "failed"
 
 
-def test_probe_ssh_abort_error_names_exception_type(monkeypatch):
+def test_probe_ssh_abort_error_names_exception_type(monkeypatch):  # pylint: disable=unused-argument
     """Exceptions with empty str() must still produce a readable error."""
-    import paramiko
-
     class EmptyStrException(Exception):
+        """An exception whose str() is empty."""
+
         def __str__(self):
             return ""
 
     mock_client = mock.MagicMock()
-    responses = iter([
-        (mock.MagicMock(**{"read.return_value": b"9.0"}),
-         mock.MagicMock(**{"read.return_value": b""})),
-    ])
 
-    def exec_side_effect(cmd, timeout=None):
+    def exec_side_effect(cmd, timeout=None):  # pylint: disable=unused-argument
         if "snakemake" in cmd:
             return (mock.MagicMock(),
                     mock.MagicMock(**{"read.return_value": b"9.0"}),

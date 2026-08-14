@@ -1,4 +1,5 @@
 """Tests for the register-remote-data celery job."""
+import importlib
 import json
 import os
 from unittest import mock
@@ -8,7 +9,7 @@ import pytest
 from CelebiChrono.utils.file_utils import dir_md5
 from CelebiChrono.utils.metadata import ConfigFile
 from Yuki.kernel import remote_data_ops
-import importlib
+
 config_module = importlib.import_module("Yuki.server.config")
 
 
@@ -26,9 +27,11 @@ class FakeSsh:
         return False
 
     def mkdir_p(self, path):
+        """Record the created directory."""
         self.made_dirs.append(path)
 
-    def exec(self, command, timeout=None):
+    def exec(self, command, timeout=None):  # pylint: disable=unused-argument
+        """Record the command and answer md5 queries from the fixture."""
         self.commands.append(command)
         if command.startswith("python3 -c"):
             return self.md5_out, "", 0
@@ -38,14 +41,15 @@ class FakeSsh:
 def _fixture_data(tmp_path):
     data = tmp_path / "data"
     os.makedirs(data / "sub")
-    with open(data / "a.txt", "w") as f:
+    with open(data / "a.txt", "w", encoding="utf-8") as f:
         f.write("alpha")
-    with open(data / "sub" / "b.txt", "w") as f:
+    with open(data / "sub" / "b.txt", "w", encoding="utf-8") as f:
         f.write("beta")
     return data
 
 
 def test_register_remote_data_job_end_to_end(monkeypatch, tmp_path):
+    """A full register run hashes, copies, and synthesizes an impression."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     data = _fixture_data(tmp_path)
     md5 = dir_md5(str(data))
@@ -91,12 +95,13 @@ def test_register_remote_data_job_end_to_end(monkeypatch, tmp_path):
 
 
 def test_register_remote_data_job_copy_failure_marks_failed(monkeypatch, tmp_path):
+    """A failed copy marks the impression status failed."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     data = _fixture_data(tmp_path)
     md5 = dir_md5(str(data))
     fake = FakeSsh(md5)
 
-    def failing_exec(command, timeout=None):
+    def failing_exec(command, timeout=None):  # pylint: disable=unused-argument
         fake.commands.append(command)
         if command.startswith("python3 -c"):
             return md5, "", 0
@@ -120,10 +125,11 @@ def test_register_remote_data_job_copy_failure_marks_failed(monkeypatch, tmp_pat
 
 
 def test_register_remote_data_job_hash_failure(monkeypatch, tmp_path):
+    """A failed remote md5 raises with an actionable message."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     fake = FakeSsh("")
 
-    def failing_exec(command, timeout=None):
+    def failing_exec(command, timeout=None):  # pylint: disable=unused-argument
         fake.commands.append(command)
         if command.startswith("python3 -c"):
             return "", "no such dir", 1
@@ -141,6 +147,7 @@ def test_register_remote_data_job_hash_failure(monkeypatch, tmp_path):
 
 
 def test_task_register_remote_data_writes_done_state(monkeypatch, tmp_path):
+    """The celery task wrapper writes a done state record."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     from Yuki.server import tasks
     data = _fixture_data(tmp_path)
@@ -198,20 +205,26 @@ def test_register_remote_data_job_too_old_celebichrono(monkeypatch, tmp_path):
 
 
 class _StubConfig:
+    """A config shim pointing at the test YUKIDIR."""
+
     def __init__(self, root):
         self.root = root
 
     def get_job_path(self, project, impression):
+        """Return the job path under the test Storage root."""
         return str(self.root / "Storage" / project / impression)
 
     def get_config_file(self):
+        """Return a ConfigFile rooted at the test YUKIDIR."""
         return ConfigFile(str(self.root / "config.json"))
 
     def get_job_config_path(self, project, impression):
+        """Return the config path for the given job."""
         return str(self.root / "Storage" / project / impression / "config.json")
 
 
 def test_file_status_lists_remote_hosted_files(monkeypatch, tmp_path):
+    """file_status lists files over ssh and serves them from cache."""
     from Yuki.kernel.impression_storage import ImpressionStorage
 
     job_dir = tmp_path / "Storage" / "proj" / "imp-1"
@@ -223,7 +236,9 @@ def test_file_status_lists_remote_hosted_files(monkeypatch, tmp_path):
 
     calls = []
 
-    class FakeSsh:
+    class _WalkFakeSsh:
+        """Ssh shim that yields a fixed remote file listing."""
+
         def __enter__(self):
             return self
 
@@ -231,12 +246,13 @@ def test_file_status_lists_remote_hosted_files(monkeypatch, tmp_path):
             return False
 
         def walk_files(self, path):
+            """Record the walked path and yield the fixture files."""
             calls.append(path)
             yield "a.txt", "/remote/imp/a.txt", 10
             yield "sub/b.root", "/remote/imp/sub/b.root", 20
 
     with mock.patch("Yuki.kernel.remote_data_ops._ssh_connection",
-                    return_value=FakeSsh()):
+                    return_value=_WalkFakeSsh()):
         rows = ImpressionStorage("proj", "imp-1").file_status("stageout")
     assert calls == ["/remote/imp"]
     assert [r["name"] for r in rows] == ["a.txt", "sub/b.root"]
@@ -251,9 +267,10 @@ def test_file_status_lists_remote_hosted_files(monkeypatch, tmp_path):
 
 
 def test_file_status_no_remote_marker_returns_empty(monkeypatch, tmp_path):
+    """A job without a remote marker yields an empty listing."""
     from Yuki.kernel.impression_storage import ImpressionStorage
     job_dir = tmp_path / "Storage" / "proj" / "imp-1"
     job_dir.mkdir(parents=True)
     monkeypatch.setattr(config_module, "config", _StubConfig(tmp_path))
     rows = ImpressionStorage("proj", "imp-1").file_status("stageout")
-    assert rows == []
+    assert not rows

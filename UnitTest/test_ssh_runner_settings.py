@@ -1,6 +1,6 @@
 """Tests for ssh runner settings consumption."""
+# pylint: disable=protected-access
 import json
-import os
 from unittest import mock
 
 import pytest
@@ -21,6 +21,7 @@ def _workflow(tmp_path, monkeypatch, config_data):
 
 
 def test_load_ssh_config_merges_new_and_legacy(tmp_path, monkeypatch):
+    """_load_ssh_config merges runner_settings over legacy ssh_* maps."""
     wf = _workflow(tmp_path, monkeypatch, {
         "ssh_hosts": {"m1": "legacy-host"},
         "runner_settings": {"m1": {"ssh_user": "new-user", "cores": 16}},
@@ -32,6 +33,7 @@ def test_load_ssh_config_merges_new_and_legacy(tmp_path, monkeypatch):
 
 
 def test_wrapper_uses_cores_and_paths(tmp_path, monkeypatch):
+    """The remote snakemake wrapper embeds cores and conda paths."""
     wf = _workflow(tmp_path, monkeypatch, {
         "runner_settings": {"m1": {
             "ssh_host": "h", "ssh_user": "u", "cores": 8,
@@ -47,10 +49,21 @@ def test_wrapper_uses_cores_and_paths(tmp_path, monkeypatch):
     written = {}
 
     class FakeSsh:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def put_text(self, text, path): written[path] = text
-        def exec(self, cmd): return "", "", 0
+        """Ssh shim recording wrapper files written remotely."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def put_text(self, text, path):
+            """Record the written wrapper file."""
+            written[path] = text
+
+        def exec(self, _cmd):
+            """Report a successful remote command."""
+            return "", "", 0
 
     with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
         wf._start_remote_snakemake()
@@ -83,7 +96,7 @@ def test_remote_exec_path_has_workflows_and_project(tmp_path, monkeypatch):
 
     from Yuki.kernel.vworkflow import VWorkflow
 
-    def fake_init(self, project_uuid, jobs, uuid=None):
+    def fake_init(self, project_uuid, _jobs, uuid=None):
         self.project_uuid = project_uuid
         self.uuid = uuid
         self.machine_id = "m1"
@@ -106,10 +119,20 @@ def test_create_remote_structure_creates_impressions_dir(tmp_path, monkeypatch):
     made_dirs = []
 
     class FakeSsh:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def mkdir_p(self, path): made_dirs.append(path)
-        def put_text(self, text, path): pass
+        """Ssh shim recording the directories created remotely."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def mkdir_p(self, path):
+            """Record the created directory."""
+            made_dirs.append(path)
+
+        def put_text(self, text, path):
+            """No-op text upload."""
 
     with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()), \
             mock.patch.object(SshWorkflow, "get_name", return_value="wf"):
@@ -151,12 +174,24 @@ def test_stage_remote_hosted_input_copies_locally(tmp_path, monkeypatch):
     commands = []
 
     class FakeSsh:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def mkdir_p(self, path): commands.append(("mkdir", path))
+        """Ssh shim recording every remote operation."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def mkdir_p(self, path):
+            """Record the created directory."""
+            commands.append(("mkdir", path))
+
         def put(self, local_path, remote_path):
+            """Record the sftp upload."""
             commands.append(("put", f"{local_path} -> {remote_path}"))
-        def exec(self, command, timeout=None):
+
+        def exec(self, command, timeout=None):  # pylint: disable=unused-argument
+            """Record the remote command and report success."""
             commands.append(("exec", command))
             return "", "", 0
 
@@ -175,6 +210,7 @@ def test_stage_remote_hosted_input_copies_locally(tmp_path, monkeypatch):
 
 
 def test_stage_remote_hosted_input_wrong_runner_raises(tmp_path, monkeypatch):
+    """Remote-hosted data on another runner raises with a clear error."""
     yuki_dir = tmp_path / ".Yuki"
     marker_dir = yuki_dir / "Storage" / "proj-123" / "imp-abc"
     marker_dir.mkdir(parents=True)
@@ -244,16 +280,31 @@ def test_input_cache_hit_skips_sftp(tmp_path, monkeypatch):
     puts = []
 
     class FakeSsh:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def mkdir_p(self, path): commands.append(("mkdir", path))
-        def exec(self, command, timeout=None):
+        """Ssh shim answering the cache-hit probe positively."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def mkdir_p(self, path):
+            """Record the created directory."""
+            commands.append(("mkdir", path))
+
+        def exec(self, command, timeout=None):  # pylint: disable=unused-argument
+            """Record the command; probe answers as a cache hit."""
             commands.append(("exec", command))
             if command.startswith("test -d"):
                 return "", "", 0  # cache hit
             return "", "", 0
-        def put(self, src, dst): puts.append((src, dst))
-        def put_text(self, text, path): pass
+
+        def put(self, src, dst):
+            """Record the sftp upload."""
+            puts.append((src, dst))
+
+        def put_text(self, text, path):
+            """No-op text upload."""
 
     with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
         wf._upload_files_remote()
@@ -272,7 +323,7 @@ def test_input_cache_miss_writes_through(tmp_path, monkeypatch):
     yuki_dir = tmp_path / ".Yuki"
     src_stageout = yuki_dir / "Storage" / "proj-123" / "imp-abc" / "m1" / "stageout"
     src_stageout.mkdir(parents=True)
-    with open(src_stageout / "data.txt", "w") as f:
+    with open(src_stageout / "data.txt", "w", encoding="utf-8") as f:
         f.write("payload")
     monkeypatch.setenv("HOME", str(tmp_path))
     fake_job = _input_job_stub(yuki_dir / "Storage" / "proj-123" / "imp-abc",
@@ -282,16 +333,31 @@ def test_input_cache_miss_writes_through(tmp_path, monkeypatch):
     commands = []
 
     class FakeSsh:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def mkdir_p(self, path): commands.append(("mkdir", path))
-        def exec(self, command, timeout=None):
+        """Ssh shim answering the cache-hit probe negatively."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def mkdir_p(self, path):
+            """Record the created directory."""
+            commands.append(("mkdir", path))
+
+        def exec(self, command, timeout=None):  # pylint: disable=unused-argument
+            """Record the command; probe answers as a cache miss."""
             commands.append(("exec", command))
             if command.startswith("test -d"):
                 return "", "", 1  # cache miss
             return "", "", 0
-        def put(self, src, dst): commands.append(("put", f"{src}->{dst}"))
-        def put_text(self, text, path): pass
+
+        def put(self, src, dst):
+            """Record the sftp upload."""
+            commands.append(("put", f"{src}->{dst}"))
+
+        def put_text(self, text, path):
+            """No-op text upload."""
 
     with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
         wf._upload_files_remote()

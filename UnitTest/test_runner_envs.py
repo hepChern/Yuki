@@ -52,6 +52,7 @@ celebi                   /opt/miniconda3/envs/celebi
 
 
 def test_parse_conda_env_list():
+    """conda env -l output parses into name/path/active rows."""
     envs = runner_probe.parse_conda_env_list(CONDA_ENV_LIST)
     assert envs == [
         {"name": "base", "path": "/opt/miniconda3", "active": True},
@@ -61,6 +62,7 @@ def test_parse_conda_env_list():
 
 
 def test_runner_envs_native(monkeypatch):
+    """A native runner's conda envs are listed via subprocess."""
     config_obj = _temp_config(monkeypatch)
     _write_runner(config_obj)
     monkeypatch.setattr(runner_probe.shutil, "which", lambda name: "/usr/bin/conda")
@@ -76,6 +78,7 @@ def test_runner_envs_native(monkeypatch):
 
 
 def test_runner_envs_native_no_conda(monkeypatch):
+    """A runner without conda reports an empty env list and error."""
     config_obj = _temp_config(monkeypatch)
     _write_runner(config_obj)
     monkeypatch.setattr(runner_probe.shutil, "which", lambda name: None)
@@ -85,6 +88,7 @@ def test_runner_envs_native_no_conda(monkeypatch):
 
 
 def test_runner_envs_ssh(monkeypatch):
+    """An ssh runner's conda envs are listed over the ssh channel."""
     config_obj = _temp_config(monkeypatch)
     _write_runner(config_obj, name="cluster", backend="ssh",
                   settings={"ssh_host": "h", "ssh_user": "u"})
@@ -103,6 +107,7 @@ def test_runner_envs_ssh(monkeypatch):
 
 
 def test_runner_envs_ssh_connect_failure(monkeypatch):
+    """An ssh connect failure surfaces as an error body."""
     config_obj = _temp_config(monkeypatch)
     _write_runner(config_obj, name="cluster", backend="ssh",
                   settings={"ssh_host": "h", "ssh_user": "u"})
@@ -114,6 +119,7 @@ def test_runner_envs_ssh_connect_failure(monkeypatch):
 
 
 def test_runner_envs_reana_rejected(monkeypatch):
+    """REANA runners do not support env listing."""
     config_obj = _temp_config(monkeypatch)
     _write_runner(config_obj, name="cern", backend="reana")
     body = _app(runner_routes.bp).test_client().get("/runner-envs/cern").get_json()
@@ -122,6 +128,7 @@ def test_runner_envs_reana_rejected(monkeypatch):
 
 
 def test_runner_envs_unknown_404(monkeypatch):
+    """An unknown runner name gives 404."""
     _temp_config(monkeypatch)
     r = _app(runner_routes.bp).test_client().get("/runner-envs/ghost")
     assert r.status_code == 404

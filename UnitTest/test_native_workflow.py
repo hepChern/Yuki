@@ -1,4 +1,5 @@
 """Unit tests for NativeWorkflow per-job status propagation."""
+# pylint: disable=protected-access
 import os
 import shutil
 import tempfile
@@ -68,6 +69,7 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
     # -- scaffolding sanity check ----------------------------------------
 
     def test_scaffolding_constructs_workflow(self):
+        """The workflow scaffold lands in the patched temp HOME."""
         self.assertTrue(os.path.isdir(self.workflow.local_exec_path))
         self.assertEqual(self.workflow.uuid, self.workflow_uuid)
 
@@ -87,6 +89,7 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         job_b.set_status.assert_called_once_with("finished", "Local execution completed")
 
     def test_propagate_in_flight_leaves_jobs_unchanged(self):
+        """Jobs without a .done marker are left untouched."""
         job = self._make_job("a" * 32, status_value="in movement")
         self.workflow.jobs = [job]
         # No .done file written.
@@ -96,6 +99,7 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         job.set_status.assert_not_called()
 
     def test_propagate_missing_done_no_logs_becomes_failed_with_skip_message(self):
+        """A terminal workflow marks a never-run job as failed with skip detail."""
         from Yuki.kernel.status_constants import FAILED
         job = self._make_job("a" * 32)
         self.workflow.jobs = [job]
@@ -109,11 +113,13 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         )
 
     def test_read_job_log_tail_returns_empty_when_no_logs(self):
+        """Reading a log tail for a job with no logs yields an empty string."""
         # imp<short>/logs/ does not exist.
         tail = self.workflow._read_job_log_tail("a" * 7)
         self.assertEqual(tail, "")
 
     def test_read_job_log_tail_picks_highest_step_index(self):
+        """The log tail comes from the highest-numbered step log."""
         short = "a" * 7
         self._write_user_log(short, 0, "first step output")
         self._write_user_log(short, 1, "second step output")
@@ -124,6 +130,7 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         self.assertNotIn("first step", tail)
 
     def test_propagate_missing_done_terminal_becomes_failed(self):
+        """A job that ran and failed carries the traceback into its status."""
         from Yuki.kernel.status_constants import FAILED
         short = "a" * 7
         # 32-char uuid whose first 7 chars match `short`.
@@ -145,6 +152,7 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         self.assertIn("ZeroDivisionError", detail_arg)
 
     def test_propagate_skips_input_and_algorithm_jobs(self):
+        """Input and algorithm jobs are never promoted by propagation."""
         input_job = self._make_job("a" * 32, is_input=True)
         algo_job = self._make_job("b" * 32, job_type_value="algorithm")
         self.workflow.jobs = [input_job, algo_job]
@@ -159,6 +167,7 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         algo_job.set_status.assert_not_called()
 
     def test_propagate_does_not_churn_terminal_status(self):
+        """Terminal statuses are never overwritten by propagation."""
         from Yuki.kernel.status_constants import CODA, FINAL_NOTE, FAILED, STOPPED, DELETED
         coda_job = self._make_job("a" * 32, status_value=CODA)
         final_job = self._make_job("b" * 32, status_value=FINAL_NOTE)

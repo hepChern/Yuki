@@ -1,3 +1,5 @@
+"""Tests for ReanaBooker upload-mode selection."""
+# pylint: disable=protected-access
 import os
 from unittest import mock
 
@@ -37,6 +39,7 @@ def _run(booker, tmp_path, mode):
 
 
 def test_default_plots_and_logs(tmp_path):
+    """plots+logs mode uploads plots and logs but excludes data."""
     _layout(tmp_path)
     names = _run(_booker(), tmp_path, "plots+logs")
     assert any(n.endswith("stageout/mass.png") for n in names)
@@ -45,12 +48,14 @@ def test_default_plots_and_logs(tmp_path):
 
 
 def test_all_includes_data(tmp_path):
+    """all mode uploads data files alongside plots and logs."""
     _layout(tmp_path)
     names = _run(_booker(), tmp_path, "all")
     assert any(n.endswith("stageout/ntuple.root") for n in names)
 
 
 def test_nested_stageout_uploaded_with_relative_path(tmp_path):
+    """Nested stageout files keep their relative paths when uploaded."""
     _layout(tmp_path)
     names = _run(_booker(), tmp_path, "plots+logs")
     assert "impression_data/imp-abc/stageout/plots/fit.png" in names

@@ -37,7 +37,7 @@ DEFAULT_IGNORE_PATTERNS = [
 ]
 
 
-class ReanaBooker:
+class ReanaBooker:  # pylint: disable=too-few-public-methods
     """Handles booking (uploading) a project to REANA."""
 
     def __init__(self, server_url: str, access_token: str, verify_ssl: bool = True,
@@ -93,7 +93,7 @@ class ReanaBooker:
         except Exception:
             pass
 
-    def book_project(self, project_path: str, project_name: str,
+    def book_project(self, project_path: str, project_name: str,  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
                      upload_mode: str = "plots+logs") -> Message:
         """Book a project to REANA.
 
@@ -131,7 +131,9 @@ class ReanaBooker:
         else:
             self._notify(f"Using existing REANA workflow '{workflow_name}'\n", "success")
 
-        workflow_id = workflow.get("workflow_id", workflow.get("id", workflow.get("name", workflow_name)))
+        workflow_id = workflow.get(
+            "workflow_id", workflow.get("id", workflow.get("name", workflow_name))
+        )
 
         # Download existing reana_repo.yaml for comparison
         old_metadata = None
@@ -249,7 +251,7 @@ class ReanaBooker:
 
         return result
 
-    def _build_repo_metadata(self, project_path: str) -> dict:
+    def _build_repo_metadata(self, project_path: str) -> dict:  # pylint: disable=too-many-locals
         """Build project structure metadata for the reana_repo field.
 
         Walks the project directory and records Celebi objects
@@ -267,7 +269,7 @@ class ReanaBooker:
             "objects": [],
         }
 
-        for root, dirs, _files in os.walk(project_path):
+        for root, dirs, _files in os.walk(project_path):  # pylint: disable=too-many-nested-blocks
             # Skip ignored directories
             dirs[:] = [
                 d for d in dirs
@@ -362,7 +364,7 @@ class ReanaBooker:
         sanitized.append(parts[-1])  # Keep file name unchanged
         return "/".join(sanitized)
 
-    def _upload_files(self, workflow_id: str, project_path: str,
+    def _upload_files(self, workflow_id: str, project_path: str,  # pylint: disable=too-many-locals,too-many-branches
                       skip_prefixes: set = None, object_paths: list = None):
         """Upload project files to REANA workflow workspace.
 
@@ -398,12 +400,18 @@ class ReanaBooker:
 
         if total_files == 0:
             if skipped_files:
-                self._notify(f"No files to upload ({skipped_files} files unchanged, skipped).\n", "normal")
+                self._notify(
+                    f"No files to upload ({skipped_files} files unchanged, skipped).\n",
+                    "normal"
+                )
             else:
                 self._notify("No files to upload.\n", "normal")
             return
 
-        self._notify(f"Uploading {total_files} files ({skipped_files} unchanged, skipped)...\n", "normal")
+        self._notify(
+            f"Uploading {total_files} files ({skipped_files} unchanged, skipped)...\n",
+            "normal"
+        )
         uploaded_count = 0
         failed_count = 0
 
@@ -482,7 +490,7 @@ class ReanaBooker:
         except Exception as e:
             logger.warning("Failed to upload reana_repo.yaml: %s", e)
 
-    def _upload_stageout_files(self, workflow_id: str, project_path: str,
+    def _upload_stageout_files(self, workflow_id: str, project_path: str,  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
                                 repo_metadata: dict, upload_mode: str = "plots+logs"):
         """Upload stageout files from Yuki storage to REANA workspace.
 
@@ -558,9 +566,12 @@ class ReanaBooker:
             stageout_spec = "plots"
         else:
             stageout_spec = None     # logs-only mode uploads no stageout
-        stage_pred = file_types.make_predicate(stageout_spec) if stageout_spec else (lambda n: False)
+        stage_pred = (
+            file_types.make_predicate(stageout_spec)
+            if stageout_spec else (lambda n: False)
+        )
 
-        for impression_id in impressions:
+        for impression_id in impressions:  # pylint: disable=too-many-nested-blocks
             impression_dir = os.path.join(storage_base, impression_id)
             if not os.path.isdir(impression_dir):
                 continue
@@ -647,7 +658,7 @@ class ReanaBooker:
         else:
             self._notify("No stageout files found to upload.\n", "normal")
 
-    def _clear_old_folders(self, workflow_id: str, old_metadata: dict = None,
+    def _clear_old_folders(self, workflow_id: str, old_metadata: dict = None,  # pylint: disable=too-many-locals,too-many-branches
                            new_metadata: dict = None) -> bool:
         """Clear old folders from REANA workspace before re-uploading.
 

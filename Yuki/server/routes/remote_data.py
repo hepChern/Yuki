@@ -15,7 +15,7 @@ bp = Blueprint('remote_data', __name__)
 
 
 @bp.route("/register-remote-data", methods=['POST'])
-def register_remote_data():
+def register_remote_data():  # pylint: disable=too-many-return-statements
     """Start a remote data registration job."""
     data = request.get_json(silent=True) or request.form
     runner = data.get("runner", "")
@@ -37,7 +37,7 @@ def register_remote_data():
     descriptor = data.get("descriptor") or os.path.basename(
         os.path.normpath(remote_path))
 
-    yuki_dir = remote_data_ops._yuki_dir()
+    yuki_dir = remote_data_ops._yuki_dir()  # pylint: disable=protected-access
     existing = remote_data_ops.find_existing_registration(
         yuki_dir, runner_id, remote_path)
     if existing:
@@ -67,7 +67,8 @@ def register_remote_data():
 @bp.route("/register-remote-data/<job_id>", methods=['GET'])
 def register_remote_data_status(job_id):
     """Poll a registration job's state."""
-    state = remote_data_ops.read_job_state(remote_data_ops._yuki_dir(), job_id)
+    state = remote_data_ops.read_job_state(
+        remote_data_ops._yuki_dir(), job_id)  # pylint: disable=protected-access
     if state is None:
         return jsonify({"error": "job not found"}), 404
     return jsonify(state)
@@ -76,7 +77,7 @@ def register_remote_data_status(job_id):
 @bp.route("/verify-data/<project_uuid>/<impression>", methods=['GET'])
 def verify_data(project_uuid, impression):
     """Recompute the data md5 and compare with the registered uuid."""
-    yuki_dir = remote_data_ops._yuki_dir()
+    yuki_dir = remote_data_ops._yuki_dir()  # pylint: disable=protected-access
     imp_dir = os.path.join(yuki_dir, "Storage", project_uuid, impression)
     if not os.path.isdir(imp_dir):
         return jsonify({"error": f"Impression '{impression}' not found"}), 404

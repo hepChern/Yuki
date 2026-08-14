@@ -34,6 +34,7 @@ def _register_runner(config_obj, name="cluster", backend="ssh"):
 
 
 def test_job_state_roundtrip(tmp_path):
+    """Job state written by the route is readable back."""
     yuki_dir = tmp_path
     assert remote_data_ops.read_job_state(yuki_dir, "j1") is None
     remote_data_ops.write_job_state(yuki_dir, "j1",
@@ -46,6 +47,7 @@ def test_job_state_roundtrip(tmp_path):
 
 
 def test_read_job_state_corrupt(tmp_path):
+    """A corrupt job state file reads back as None."""
     jobs_dir = tmp_path / "register-jobs"
     os.makedirs(str(jobs_dir))
     with open(str(jobs_dir / "j1.json"), "w", encoding="utf-8") as f:
@@ -64,6 +66,7 @@ def test_read_job_state_valid_non_dict_json_returns_none(tmp_path):
 
 
 def test_find_existing_registration_skips_failed(tmp_path):
+    """Failed registrations are not offered as existing matches."""
     yuki_dir = tmp_path
     imp_dir = yuki_dir / "Storage" / "proj" / "imp-failed"
     os.makedirs(imp_dir / "contents")
@@ -80,6 +83,7 @@ def test_find_existing_registration_skips_failed(tmp_path):
 
 
 def test_find_existing_registration(tmp_path):
+    """An archived registration is returned as the existing match."""
     yuki_dir = tmp_path
     imp_dir = yuki_dir / "Storage" / "proj" / "imp-123"
     os.makedirs(imp_dir / "contents")
@@ -98,6 +102,7 @@ def test_find_existing_registration(tmp_path):
 
 
 def test_find_inflight_job(tmp_path):
+    """An in-flight job for the same runner and path is found."""
     remote_data_ops.write_job_state(
         str(tmp_path), "job-9",
         {"status": "hashing", "result": None, "error": None,
@@ -107,6 +112,7 @@ def test_find_inflight_job(tmp_path):
 
 
 def test_register_remote_data_starts_job(monkeypatch, tmp_path):
+    """A register request enqueues the celery task and records state."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     _register_runner(config_obj)
     with mock.patch.object(remote_data_routes, "task_register_remote_data") as task:
@@ -123,6 +129,7 @@ def test_register_remote_data_starts_job(monkeypatch, tmp_path):
 
 
 def test_register_remote_data_unknown_runner(monkeypatch, tmp_path):
+    """An unknown runner name is rejected with 404."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     _register_runner(config_obj)
     r = _app(remote_data_routes.bp).test_client().post(
@@ -132,6 +139,7 @@ def test_register_remote_data_unknown_runner(monkeypatch, tmp_path):
 
 
 def test_register_remote_data_non_ssh_runner(monkeypatch, tmp_path):
+    """Registering against a non-ssh runner is rejected."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     _register_runner(config_obj, name="local", backend="native")
     r = _app(remote_data_routes.bp).test_client().post(
@@ -142,6 +150,7 @@ def test_register_remote_data_non_ssh_runner(monkeypatch, tmp_path):
 
 
 def test_register_remote_data_idempotent(monkeypatch, tmp_path):
+    """Re-registering existing data is idempotent and skips enqueue."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     _register_runner(config_obj)
     imp_dir = tmp_path / "Storage" / "proj" / "imp-123"
@@ -163,6 +172,7 @@ def test_register_remote_data_idempotent(monkeypatch, tmp_path):
 
 
 def test_register_remote_data_missing_field(monkeypatch, tmp_path):
+    """A request missing required fields is rejected with 400."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     _register_runner(config_obj)
     r = _app(remote_data_routes.bp).test_client().post(
@@ -173,6 +183,7 @@ def test_register_remote_data_missing_field(monkeypatch, tmp_path):
 
 
 def test_register_remote_data_form_body(monkeypatch, tmp_path):
+    """The route also accepts a form-encoded body."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     _register_runner(config_obj)
     with mock.patch.object(remote_data_routes, "task_register_remote_data") as task:
@@ -186,6 +197,7 @@ def test_register_remote_data_form_body(monkeypatch, tmp_path):
 
 
 def test_register_remote_data_inflight(monkeypatch, tmp_path):
+    """An in-flight job is returned instead of enqueueing a duplicate."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     runner_id = _register_runner(config_obj)
     remote_data_ops.write_job_state(
@@ -203,6 +215,7 @@ def test_register_remote_data_inflight(monkeypatch, tmp_path):
 
 
 def test_register_remote_data_enqueue_failure(monkeypatch, tmp_path):
+    """A broker failure marks the job failed and returns 500."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     _register_runner(config_obj)
     with mock.patch.object(remote_data_routes, "task_register_remote_data") as task:
@@ -219,6 +232,7 @@ def test_register_remote_data_enqueue_failure(monkeypatch, tmp_path):
 
 
 def test_register_remote_data_status(monkeypatch, tmp_path):
+    """Job status is served by id; unknown ids give 404."""
     _temp_config(monkeypatch, tmp_path)
     remote_data_ops.write_job_state(
         str(tmp_path), "job-9",
@@ -247,6 +261,7 @@ def _impression_fixture(tmp_path, project="proj", imp="imp-1", md5="abc123",
 
 
 def test_verify_data_remote_match(monkeypatch, tmp_path):
+    """verify-data reports a match when the remote md5 agrees."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     config_obj.config_path = str(tmp_path / "config.json")
     data = {"runners": ["cluster"], "runners_id": {"cluster": "r1"}}
@@ -255,9 +270,16 @@ def test_verify_data_remote_match(monkeypatch, tmp_path):
     _impression_fixture(tmp_path)
 
     class FakeSsh:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def exec(self, command, timeout=None):
+        """Ssh shim answering md5 queries with the expected digest."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def exec(self, command, timeout=None):  # pylint: disable=unused-argument
+            """Answer md5 queries with the expected digest."""
             return "abc123", "", 0
 
     with mock.patch("Yuki.kernel.remote_data_ops._ssh_connection",
@@ -271,6 +293,7 @@ def test_verify_data_remote_match(monkeypatch, tmp_path):
 
 
 def test_verify_data_remote_mismatch(monkeypatch, tmp_path):
+    """verify-data reports a mismatch with the actual remote md5."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     config_obj.config_path = str(tmp_path / "config.json")
     with open(config_obj.config_path, "w", encoding="utf-8") as f:
@@ -278,9 +301,16 @@ def test_verify_data_remote_mismatch(monkeypatch, tmp_path):
     _impression_fixture(tmp_path)
 
     class FakeSsh:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def exec(self, command, timeout=None):
+        """Ssh shim answering md5 queries with a different digest."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def exec(self, command, timeout=None):  # pylint: disable=unused-argument
+            """Answer md5 queries with the mismatch digest."""
             return "different", "", 0
 
     with mock.patch("Yuki.kernel.remote_data_ops._ssh_connection",
@@ -293,13 +323,14 @@ def test_verify_data_remote_mismatch(monkeypatch, tmp_path):
 
 
 def test_verify_data_local_match(monkeypatch, tmp_path):
+    """verify-data checks local rawdata against the recorded uuid."""
     _temp_config(monkeypatch, tmp_path)
     imp_dir = _impression_fixture(tmp_path, remote=False)
     data_dir = imp_dir / "rawdata"
     (data_dir / "sub").mkdir(parents=True)
-    with open(data_dir / "a.txt", "w") as f:
+    with open(data_dir / "a.txt", "w", encoding="utf-8") as f:
         f.write("alpha")
-    with open(data_dir / "sub" / "b.txt", "w") as f:
+    with open(data_dir / "sub" / "b.txt", "w", encoding="utf-8") as f:
         f.write("beta")
     from CelebiChrono.utils.file_utils import dir_md5
     expected = dir_md5(str(data_dir))
@@ -313,6 +344,7 @@ def test_verify_data_local_match(monkeypatch, tmp_path):
 
 
 def test_verify_data_local_missing_dir(monkeypatch, tmp_path):
+    """verify-data errors when the local rawdata directory is absent."""
     _temp_config(monkeypatch, tmp_path)
     _impression_fixture(tmp_path, remote=False)
     r = _app(remote_data_routes.bp).test_client().get("/verify-data/proj/imp-1")
@@ -320,12 +352,14 @@ def test_verify_data_local_missing_dir(monkeypatch, tmp_path):
 
 
 def test_verify_data_unknown_impression_404(monkeypatch, tmp_path):
+    """verify-data for an unknown impression gives 404."""
     _temp_config(monkeypatch, tmp_path)
     r = _app(remote_data_routes.bp).test_client().get("/verify-data/proj/ghost")
     assert r.status_code == 404
 
 
 def test_verify_data_ssh_retry_succeeds(monkeypatch, tmp_path):
+    """A transient ssh banner error is retried before succeeding."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     config_obj.config_path = str(tmp_path / "config.json")
     with open(config_obj.config_path, "w", encoding="utf-8") as f:
@@ -333,6 +367,8 @@ def test_verify_data_ssh_retry_succeeds(monkeypatch, tmp_path):
     _impression_fixture(tmp_path)
 
     class FakeSsh:
+        """Ssh shim counting connections for the retry assertion."""
+
         def __init__(self):
             self.calls = 0
 
@@ -343,13 +379,14 @@ def test_verify_data_ssh_retry_succeeds(monkeypatch, tmp_path):
         def __exit__(self, *a):
             return False
 
-        def exec(self, command, timeout=None):
+        def exec(self, command, timeout=None):  # pylint: disable=unused-argument
+            """Answer md5 queries with the expected digest."""
             return "abc123", "", 0
 
     attempts = {"n": 0}
     fake = FakeSsh()
 
-    def flaky_conn(runner_id):
+    def flaky_conn(_runner_id):
         attempts["n"] += 1
         if attempts["n"] == 1:
             raise ConnectionError("Error reading SSH protocol banner")
@@ -365,13 +402,14 @@ def test_verify_data_ssh_retry_succeeds(monkeypatch, tmp_path):
 
 
 def test_verify_data_ssh_failure_returns_error(monkeypatch, tmp_path):
+    """A persistent ssh failure yields a match=False body with the error."""
     config_obj = _temp_config(monkeypatch, tmp_path)
     config_obj.config_path = str(tmp_path / "config.json")
     with open(config_obj.config_path, "w", encoding="utf-8") as f:
         json.dump({"runners": ["cluster"], "runners_id": {"cluster": "r1"}}, f)
     _impression_fixture(tmp_path)
 
-    def failing_conn(runner_id):
+    def failing_conn(_runner_id):
         raise ConnectionError("Error reading SSH protocol banner")
 
     with mock.patch.object(remote_data_ops, "_ssh_connection",

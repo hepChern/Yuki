@@ -12,8 +12,9 @@ def _cfg():
 
 
 def test_runner_settings_roundtrip():
+    """Runner settings merge incrementally and read back whole."""
     cfg = _cfg()
-    assert runner_config.get_runner_settings(cfg, "r1") == {}
+    assert not runner_config.get_runner_settings(cfg, "r1")
     runner_config.merge_runner_settings(cfg, "r1", {"workdir": "/data", "cores": 8})
     runner_config.merge_runner_settings(cfg, "r1", {"mem_mb": 4096})
     assert runner_config.get_runner_settings(cfg, "r1") == {
@@ -22,6 +23,7 @@ def test_runner_settings_roundtrip():
 
 
 def test_ssh_settings_prefer_new_map():
+    """The runner_settings map wins over the legacy ssh_* maps."""
     cfg = _cfg()
     cfg.write_variable("ssh_hosts", {"r1": "old.example.com"})
     cfg.write_variable("ssh_users", {"r1": "olduser"})
@@ -36,6 +38,7 @@ def test_ssh_settings_prefer_new_map():
 
 
 def test_ssh_settings_old_runner_no_migration():
+    """Legacy ssh_* maps are consumed without rewriting the config."""
     cfg = _cfg()
     cfg.write_variable("ssh_hosts", {"r1": "h"})
     cfg.write_variable("ssh_users", {"r1": "u"})
@@ -49,6 +52,7 @@ def test_ssh_settings_old_runner_no_migration():
 
 
 def test_runner_health_roundtrip():
+    """Runner health defaults to untested and persists updates."""
     cfg = _cfg()
     assert runner_config.get_runner_health(cfg, "r1") == {"status": "untested"}
     runner_config.set_runner_health(cfg, "r1", {"status": "ok", "checks": {}})

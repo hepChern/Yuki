@@ -4,7 +4,6 @@ This module provides the SshWorkflow class which implements workflow execution
 by copying files to a remote host over SFTP and running Snakemake there over SSH.
 """
 # pylint: disable=cyclic-import
-import io
 import json
 import os
 import shlex
@@ -16,7 +15,6 @@ from Yuki.kernel import runner_config
 from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
 from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
-from . import file_types
 from .file_staging import walk_files
 
 logger = getLogger("YukiLogger")
@@ -297,7 +295,7 @@ class SshWorkflow(VWorkflow):
             remote_info_path = f"{self.remote_exec_path}/workflow_info.json"
             ssh.put_text(json.dumps(workflow_info, indent=2), remote_info_path)
 
-    def _upload_files_remote(self):  # pylint: disable=too-many-locals
+    def _upload_files_remote(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Upload all files to the remote execution directory.
 
         Unlike the native backend, the remote host has no FileStager to resolve
@@ -456,13 +454,13 @@ echo $? > yuki.exit
                 raise RuntimeError(
                     f"Failed to start remote Snakemake: {detail} (exit {code})"
                 )
-            self.logger(f"[SSH] Remote Snakemake started")
+            self.logger("[SSH] Remote Snakemake started")
 
     def _sync_external_job_status(self, job):
         """Poll remote status for an external dependency."""
         job.update_status_from_workflow(self.path, self.logger)
 
-    def _read_remote_log_tail(self, ssh, short_uuid, max_chars=500):
+    def _read_remote_log_tail(self, ssh, short_uuid, max_chars=500):  # pylint: disable=too-many-locals
         """Return tail of the highest-indexed celebi_user_step*.log on the remote host."""
         import re
 
@@ -511,7 +509,8 @@ echo $? > yuki.exit
                 has_logs = bool(list(ssh.walk_files(logs_dir)))
                 if has_logs:
                     tail = self._read_remote_log_tail(ssh, short)
-                    detail = f"Remote execution failed: {tail}" if tail else "Remote execution failed"
+                    detail = (f"Remote execution failed: {tail}"
+                              if tail else "Remote execution failed")
                     job.set_status(FAILED, detail)
                 else:
                     job.set_status(
@@ -666,9 +665,9 @@ echo $? > yuki.exit
             logs_report = self._collect_remote_artifacts(
                 impression, "logs", "logs.downloaded", "log"
             )
-            for key in report:
-                report[key].extend(stageout_report.get(key, []))
-                report[key].extend(logs_report.get(key, []))
+            for key, value in report.items():
+                value.extend(stageout_report.get(key, []))
+                value.extend(logs_report.get(key, []))
         return report
 
     def download_outputs(self, impression=None):
@@ -698,7 +697,7 @@ echo $? > yuki.exit
                 filelist = list(ssh.walk_files(src_path))
             except FileNotFoundError:
                 return []
-            for rel_path, remote_file, size in filelist:
+            for rel_path, _remote_file, size in filelist:
                 result.append({"name": rel_path, "size": size})
         return result
 
@@ -706,7 +705,7 @@ echo $? > yuki.exit
     def _sftp_file_size(ssh, remote_path):
         """Return the size of a remote file via SFTP stat."""
         try:
-            return ssh._sftp.stat(remote_path).st_size
+            return ssh._sftp.stat(remote_path).st_size  # pylint: disable=protected-access
         except Exception:
             return 0
 
@@ -783,7 +782,7 @@ echo $? > yuki.exit
         """Ping remote SSH host."""
         try:
             with self._ssh() as ssh:
-                out, err, code = ssh.exec("echo ok")
+                _out, err, code = ssh.exec("echo ok")
                 if code == 0:
                     self.logger("[SSH] Remote host is reachable")
                     return True

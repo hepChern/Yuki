@@ -1,3 +1,5 @@
+"""Tests for impression storage selection helpers."""
+# pylint: disable=protected-access
 import os
 from unittest import mock
 
@@ -16,8 +18,10 @@ def _storage(tmp_path):
 
 
 def test_collect_light_downloads_plots_and_logs(tmp_path):
+    """collect() pulls plots and logs for a finished job."""
     s, ims = _storage(tmp_path)
-    job = mock.Mock(); job.status.return_value = CODA
+    job = mock.Mock()
+    job.status.return_value = CODA
     wf = mock.Mock()
     wf.download_selected.return_value = {"collected": [], "skipped": [], "failed": []}
     wf.download_logs.return_value = {"collected": [], "skipped": [], "failed": []}
@@ -31,7 +35,8 @@ def test_collect_light_downloads_plots_and_logs(tmp_path):
 
 
 def test_collect_files_uses_predicate(tmp_path):
-    s, ims = _storage(tmp_path)
+    """collect_files filters downloads by the given predicate."""
+    s, _ims = _storage(tmp_path)
     job = mock.Mock()
     job.status.return_value = CODA
     wf = mock.Mock()
@@ -42,7 +47,8 @@ def test_collect_files_uses_predicate(tmp_path):
 
 
 def test_file_status_merges(tmp_path):
-    s, ims = _storage(tmp_path)
+    """file_status merges runner listings with local download state."""
+    s, _ims = _storage(tmp_path)
     stageout = tmp_path / "job" / "runner-1" / "stageout"
     stageout.mkdir(parents=True)
     (stageout / "mass.png").write_bytes(b"img")        # downloaded
@@ -66,7 +72,8 @@ def _finished_job(wid="wf-1"):
 
 
 def test_file_status_merges_nested_files(tmp_path):
-    s, ims = _storage(tmp_path)
+    """file_status merges nested files from runner and local stageout."""
+    s, _ims = _storage(tmp_path)
     stageout = tmp_path / "job" / "runner-1" / "stageout"
     stageout.mkdir(parents=True)
     (stageout / "mass.png").write_bytes(b"img")

@@ -19,7 +19,7 @@ logger = getLogger("YukiLogger")
 
 
 @dataclass
-class ServerUploadState:
+class ServerUploadState:  # pylint: disable=too-many-instance-attributes
     """Server-side upload state for tracking chunked uploads.
 
     Attributes:
@@ -77,14 +77,14 @@ class ResumableUploadManager:
             base_storage_path: Base path for Yuki storage
         """
         self.base_storage_path = base_storage_path
-        self.STATE_DIR = Path(base_storage_path) / ".uploads" / "state"
-        self.CHUNK_DIR = Path(base_storage_path) / ".uploads" / "chunks"
+        self.state_dir = Path(base_storage_path) / ".uploads" / "state"
+        self.chunk_dir = Path(base_storage_path) / ".uploads" / "chunks"
 
         # Ensure directories exist
-        self.STATE_DIR.mkdir(parents=True, exist_ok=True)
-        self.CHUNK_DIR.mkdir(parents=True, exist_ok=True)
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.chunk_dir.mkdir(parents=True, exist_ok=True)
 
-    def create_upload(
+    def create_upload(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         upload_id: str,
         file_size: int,
@@ -115,7 +115,7 @@ class ResumableUploadManager:
             chunk_size=chunk_size,
             total_chunks=total_chunks,
             completed_chunks=set(),
-            storage_path=str(self.CHUNK_DIR / upload_id),
+            storage_path=str(self.chunk_dir / upload_id),
             project_uuid=project_uuid,
             impression_uuid=impression_uuid,
             finalized=False
@@ -126,7 +126,7 @@ class ResumableUploadManager:
         chunk_dir.mkdir(parents=True, exist_ok=True)
 
         self._save_state(state)
-        logger.info(f"Created upload session {upload_id} for {project_uuid}/{impression_uuid}")
+        logger.info("Created upload session %s for %s/%s", upload_id, project_uuid, impression_uuid)
 
         return state
 
@@ -139,7 +139,7 @@ class ResumableUploadManager:
         Returns:
             ServerUploadState if found, None otherwise
         """
-        state_file = self.STATE_DIR / f"{upload_id}.json"
+        state_file = self.state_dir / f"{upload_id}.json"
         if not state_file.exists():
             return None
 
@@ -148,7 +148,7 @@ class ResumableUploadManager:
                 data = json.load(f)
                 return ServerUploadState.from_dict(data)
         except (json.JSONDecodeError, KeyError, OSError) as e:
-            logger.error(f"Failed to load upload state {upload_id}: {e}")
+            logger.error("Failed to load upload state %s: %s", upload_id, e)
             return None
 
     def store_chunk(
@@ -172,17 +172,17 @@ class ResumableUploadManager:
         # Verify chunk MD5
         actual_md5 = hashlib.md5(chunk_data).hexdigest()
         if actual_md5 != chunk_md5:
-            logger.warning(f"Chunk {chunk_index} MD5 mismatch for upload {upload_id}")
+            logger.warning("Chunk %s MD5 mismatch for upload %s", chunk_index, upload_id)
             return False
 
         # Get upload state
         state = self.get_upload(upload_id)
         if state is None:
-            logger.error(f"Upload {upload_id} not found")
+            logger.error("Upload %s not found", upload_id)
             return False
 
         if state.finalized:
-            logger.error(f"Upload {upload_id} already finalized")
+            logger.error("Upload %s already finalized", upload_id)
             return False
 
         # Store chunk
@@ -195,11 +195,11 @@ class ResumableUploadManager:
             state.completed_chunks.add(chunk_index)
             self._save_state(state)
 
-            logger.debug(f"Stored chunk {chunk_index} for upload {upload_id}")
+            logger.debug("Stored chunk %s for upload %s", chunk_index, upload_id)
             return True
 
         except OSError as e:
-            logger.error(f"Failed to store chunk {chunk_index} for upload {upload_id}: {e}")
+            logger.error("Failed to store chunk %s for upload %s: %s", chunk_index, upload_id, e)
             return False
 
     def get_completed_chunks(self, upload_id: str) -> Set[int]:
@@ -230,7 +230,7 @@ class ResumableUploadManager:
             return False
         return len(state.completed_chunks) == state.total_chunks
 
-    def finalize_upload(
+    def finalize_upload(  # pylint: disable=too-many-return-statements
         self,
         upload_id: str,
         project_uuid: str,
@@ -248,25 +248,27 @@ class ResumableUploadManager:
         """
         state = self.get_upload(upload_id)
         if state is None:
-            logger.error(f"Upload {upload_id} not found")
+            logger.error("Upload %s not found", upload_id)
             return None
 
         if not self.is_upload_complete(upload_id):
-            logger.error(f"Upload {upload_id} incomplete")
+            logger.error("Upload %s incomplete", upload_id)
             return None
 
         if state.finalized:
-            logger.info(f"Upload {upload_id} already finalized")
+            logger.info("Upload %s already finalized", upload_id)
             return self._get_extract_path(project_uuid, impression_uuid)
 
         # Assemble chunks into complete file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.tar.gz')
+        # (delete=False: the temp file must outlive the with-block; unlinked in finally)
+        temp_file = tempfile.NamedTemporaryFile(  # pylint: disable=consider-using-with
+            delete=False, suffix='.tar.gz')
         try:
             with open(temp_file.name, 'wb') as outfile:
                 for i in range(state.total_chunks):
                     chunk_path = Path(state.storage_path) / f"chunk_{i}"
                     if not chunk_path.exists():
-                        logger.error(f"Missing chunk {i} for upload {upload_id}")
+                        logger.error("Missing chunk %s for upload %s", i, upload_id)
                         return None
 
                     with open(chunk_path, 'rb') as infile:
@@ -275,7 +277,7 @@ class ResumableUploadManager:
             # Verify complete file MD5
             file_md5 = self._calculate_file_md5(temp_file.name)
             if file_md5 != state.file_md5:
-                logger.error(f"File MD5 mismatch for upload {upload_id}")
+                logger.error("File MD5 mismatch for upload %s", upload_id)
                 return None
 
             # Extract to target directory
@@ -289,11 +291,11 @@ class ResumableUploadManager:
             state.finalized = True
             self._save_state(state)
 
-            logger.info(f"Finalized upload {upload_id} to {extract_path}")
+            logger.info("Finalized upload %s to %s", upload_id, extract_path)
             return extract_path
 
         except Exception as e:
-            logger.error(f"Failed to finalize upload {upload_id}: {e}")
+            logger.error("Failed to finalize upload %s: %s", upload_id, e)
             return None
         finally:
             # Clean up temp file
@@ -323,14 +325,14 @@ class ResumableUploadManager:
                 shutil.rmtree(chunk_dir)
 
             # Remove state file
-            state_file = self.STATE_DIR / f"{upload_id}.json"
+            state_file = self.state_dir / f"{upload_id}.json"
             state_file.unlink(missing_ok=True)
 
-            logger.info(f"Cancelled upload {upload_id}")
+            logger.info("Cancelled upload %s", upload_id)
             return True
 
         except OSError as e:
-            logger.error(f"Failed to cancel upload {upload_id}: {e}")
+            logger.error("Failed to cancel upload %s: %s", upload_id, e)
             return False
 
     def cleanup_old_uploads(self, max_age_hours: int = 24) -> int:
@@ -347,7 +349,7 @@ class ResumableUploadManager:
         max_age_seconds = max_age_hours * 3600
 
         cleaned = 0
-        for state_file in self.STATE_DIR.glob("*.json"):
+        for state_file in self.state_dir.glob("*.json"):
             try:
                 mtime = state_file.stat().st_mtime
                 if current_time - mtime > max_age_seconds:
@@ -365,12 +367,12 @@ class ResumableUploadManager:
         Args:
             state: State to persist
         """
-        state_file = self.STATE_DIR / f"{state.upload_id}.json"
+        state_file = self.state_dir / f"{state.upload_id}.json"
         try:
             with open(state_file, 'w', encoding='utf-8') as f:
                 json.dump(state.to_dict(), f, indent=2)
         except OSError as e:
-            logger.error(f"Failed to save upload state: {e}")
+            logger.error("Failed to save upload state: %s", e)
 
     def _get_extract_path(self, project_uuid: str, impression_uuid: str) -> str:
         """Get the extraction path for an upload.
@@ -401,8 +403,8 @@ class ResumableUploadManager:
         return hash_md5.hexdigest()
 
 
-# Global upload manager instance
-_upload_manager: Optional[ResumableUploadManager] = None
+# Global upload manager instance (module-level singleton; kept mutable on purpose)
+_upload_manager: Optional[ResumableUploadManager] = None  # pylint: disable=invalid-name
 
 
 def get_upload_manager(storage_path: str) -> ResumableUploadManager:
@@ -414,7 +416,7 @@ def get_upload_manager(storage_path: str) -> ResumableUploadManager:
     Returns:
         ResumableUploadManager instance
     """
-    global _upload_manager
+    global _upload_manager  # pylint: disable=global-statement
     if _upload_manager is None:
         _upload_manager = ResumableUploadManager(storage_path)
     return _upload_manager

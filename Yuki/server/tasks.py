@@ -106,7 +106,7 @@ def task_update_workflow_status(project_uuid, workflow_id):
 def task_register_remote_data(job_id, runner_id, remote_path, project_uuid,
                               descriptor):
     """Register remote data on an ssh runner: hash, copy, register."""
-    yuki_dir = remote_data_ops._yuki_dir()
+    yuki_dir = remote_data_ops._yuki_dir()  # pylint: disable=protected-access
 
     def update(state):
         remote_data_ops.write_job_state(yuki_dir, job_id, state)

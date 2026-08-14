@@ -16,7 +16,7 @@ from .status_constants import (
     get_detailed_status_message, is_terminal_status,
     SILENCE, PRELUDE, IN_MOVEMENT, COMPOSING, ORCHESTRATING,
     TUNING, DISSONANCE, CODA, FINAL_NOTE,
-    FAILED, STOPPED, DELETED, ARCHIVED
+    FAILED, STOPPED, DELETED, PENDING, LEGACY_SUCCESS
 )
 
 class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public-methods
@@ -145,8 +145,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
 
         if not musical:
             return status
-        else:
-            return translate_to_musical(status)
+        return translate_to_musical(status)
 
     def set_cache_on_runner(self, use: bool):
         """Set whether the job's outputs should be cached on the runner."""
@@ -240,7 +239,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         if status == "PENDING":
             self.set_status(PENDING, detailed_message)
         elif status == "SUCCESS":
-            self.set_status(SUCCESS, detailed_message)
+            self.set_status(LEGACY_SUCCESS, detailed_message)
         else:
             # For other statuses, pass through with translation
             self.set_status(status, detailed_message)
@@ -273,7 +272,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
                 print("No log file found.")
         return None
 
-    def _write_step_logs(self, matched_step):
+    def _write_step_logs(self, matched_step):  # pylint: disable=too-many-locals
         """Write step logs to the job's log directory."""
         if matched_step and matched_step.get("status") in ("finished", "failed"):
             logs = matched_step.get("logs", "")
@@ -306,7 +305,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
             duration = int(end_epoch - start_epoch)
             config_file.write_variable("duration", duration)
 
-    def _update_job_status(self, config_file, current_status, step_status,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-branches
+    def _update_job_status(self, _config_file, current_status, step_status,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-branches
                            full_workflow_status, logger=None):
         """Update job status based on current status, step status, and workflow status."""
         if logger:
@@ -321,14 +320,9 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
 
         # Determine if this is a construction failure vs execution failure
         # Construction failures happen before execution starts (pre-submit statuses)
-        # Execution failures happen during or after execution
         is_construction_failure = (
             step_musical == FAILED and
             current_musical in (SILENCE, PRELUDE, COMPOSING, ORCHESTRATING, TUNING)
-        )
-        is_execution_failure = (
-            step_musical == FAILED and
-            current_musical == IN_MOVEMENT
         )
 
         if current_musical == SILENCE:
@@ -338,7 +332,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
             if step_musical == CODA:
                 self.set_status(step_status, "Workflow step completed successfully")
             elif step_musical == "finished":  # Legacy finished status
-                self.set_status(stap_status, "Workflow step finished")
+                self.set_status(step_status, "Workflow step finished")
             elif step_musical == FAILED:
                 # Execution failure during IN_MOVEMENT
                 self.set_status(FAILED, "Backend execution failed during runtime")
@@ -364,8 +358,8 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
                 self.set_status("unknown", "Status cannot be determined")
 
     def update_status_from_workflow(self, workflow_path, logger=None):
-        print("workflow_path", workflow_path)
         """Update job status based on workflow status."""
+        print("workflow_path", workflow_path)
         if self.job_type() == "algorithm":
             return
 

@@ -76,7 +76,8 @@ def build_impression_config(project_uuid: str, impression_uuid: str, temp_dir: s
     }
 
 
-def main() -> int:
+def main() -> int:  # pylint: disable=too-many-locals
+    """Create a rawdata impression in Yuki storage without HTTP upload."""
     parser = argparse.ArgumentParser(
         description="Create a rawdata impression in Yuki storage without HTTP upload."
     )

@@ -1,6 +1,5 @@
 """Tests for submit-time validation of remote-hosted data runner binding."""
 import json
-import os
 from unittest import mock
 
 from Yuki.server import tasks
@@ -23,6 +22,7 @@ def _input_job(impression, is_input=True):
 
 
 def test_mismatched_runner_marks_workflow_failed(monkeypatch, tmp_path):
+    """A workflow bound to the wrong runner is failed before execution."""
     monkeypatch.setenv("HOME", str(tmp_path))
     _marker(tmp_path, "proj", "imp-abc", "runner-A")
     workflow = mock.MagicMock()
@@ -35,7 +35,7 @@ def test_mismatched_runner_marks_workflow_failed(monkeypatch, tmp_path):
     workflow.set_workflow_status.assert_called_once_with("failed")
     workflow.run.assert_not_called()
     # the workflow's own execution job carries the dissonance...
-    args, kwargs = workflow.jobs[1].set_status.call_args
+    args, _kwargs = workflow.jobs[1].set_status.call_args
     assert "imp-abc" in args[1]
     assert "collect" in args[1]
     # ...while the shared input impression stays untouched
@@ -43,6 +43,7 @@ def test_mismatched_runner_marks_workflow_failed(monkeypatch, tmp_path):
 
 
 def test_matching_runner_proceeds(monkeypatch, tmp_path):
+    """A workflow bound to the hosting runner proceeds normally."""
     monkeypatch.setenv("HOME", str(tmp_path))
     _marker(tmp_path, "proj", "imp-abc", "runner-A")
     workflow = mock.MagicMock()
@@ -56,6 +57,7 @@ def test_matching_runner_proceeds(monkeypatch, tmp_path):
 
 
 def test_no_marker_no_validation(monkeypatch, tmp_path):
+    """Impressions without a remote marker skip runner validation."""
     monkeypatch.setenv("HOME", str(tmp_path))
     workflow = mock.MagicMock()
     workflow.jobs = [_input_job("imp-no-marker")]
@@ -68,8 +70,9 @@ def test_no_marker_no_validation(monkeypatch, tmp_path):
     workflow.set_workflow_status.assert_not_called()
 
 
-def _write_impression(tmp_path, project, impression, object_type, deps,
+def _write_impression(tmp_path, project, impression, object_type, deps,  # pylint: disable=too-many-arguments,too-many-positional-arguments
                       environment=None):
+    """Write a complete impression fixture (config + yaml) under .Yuki."""
     imp_dir = tmp_path / ".Yuki" / "Storage" / project / impression
     (imp_dir / "contents").mkdir(parents=True)
     imp_dir.joinpath("config.json").write_text(json.dumps({
@@ -94,6 +97,7 @@ def _status(tmp_path, project, impression):
 
 def test_integration_mismatched_runner_marks_real_workflow_failed(
         monkeypatch, tmp_path):
+    """End-to-end: mismatched runner binding fails the real workflow."""
     monkeypatch.setenv("HOME", str(tmp_path))
     config_path = tmp_path / ".Yuki" / "config.json"
     config_path.parent.mkdir(parents=True)

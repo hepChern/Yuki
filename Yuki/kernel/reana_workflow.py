@@ -9,13 +9,10 @@ import os
 import time
 import json
 from CelebiChrono.utils import metadata
+from Yuki.kernel.status_constants import ORCHESTRATING
 from .vworkflow import VWorkflow
-from . import file_types
+from . import file_types  # pylint: disable=unused-import  # re-exported for tests
 from .file_staging import walk_files
-
-from Yuki.kernel.status_constants import (
-    PRELUDE, ORCHESTRATING, DISSONANCE, CODA, FINAL_NOTE
-    )
 
 # Try to import reana_client, but it might not be available
 try:
@@ -34,7 +31,7 @@ class ReanaWorkflow(VWorkflow):
         self.set_environment(self.machine_id)
         self.access_token = self.get_access_token(self.machine_id)
 
-    def _execute_backend(self):
+    def _execute_backend(self):  # pylint: disable=too-many-branches
         """Execute workflow using REANA backend."""
 
         for job in self.jobs:
@@ -317,7 +314,7 @@ class ReanaWorkflow(VWorkflow):
         except Exception as e:
             self.logger(f"Failed to update the workflow status: {e}")
 
-    def download(self, impression=None):
+    def download(self, impression=None):  # pylint: disable=too-many-locals
         """Download workflow results."""
         # self.logger("Downloading the files")
         if not REANA_AVAILABLE:
@@ -386,7 +383,7 @@ class ReanaWorkflow(VWorkflow):
             except Exception as e:
                 self.logger(f"Failed to download logs: {e}")
 
-    def download_outputs(self, impression=None):
+    def download_outputs(self, impression=None):  # pylint: disable=too-many-locals
         """Download workflow results."""
         # self.logger("Downloading the files")
         if not REANA_AVAILABLE:
@@ -438,7 +435,7 @@ class ReanaWorkflow(VWorkflow):
                     {"file": "<stageout>", "reason": str(e)})
         return report
 
-    def download_logs(self, impression=None):
+    def download_logs(self, impression=None):  # pylint: disable=too-many-locals
         """Download workflow logs."""
         # self.logger("Downloading the files")
         if not REANA_AVAILABLE:
@@ -601,6 +598,7 @@ class ReanaWorkflow(VWorkflow):
         return client.ping(self.access_token)
 
     def get_workflow_logs(self):
+        """Fetch engine logs from REANA and store them locally."""
         if not REANA_AVAILABLE:
             raise ImportError("reana_client is not available")
         self.set_environment(self.machine_id)

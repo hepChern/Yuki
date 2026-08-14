@@ -15,6 +15,7 @@ def _monitor(tmp):
 
 
 def test_execute_snakemake_settings(tmp_path):
+    """execute_snakemake honors snakemake/conda path and memory settings."""
     mon = _monitor(str(tmp_path))
     with mock.patch("subprocess.Popen") as popen:
         popen.return_value.wait.return_value = 0
@@ -34,6 +35,7 @@ def test_execute_snakemake_settings(tmp_path):
 
 
 def test_native_workflow_uses_workdir_setting(monkeypatch, tmp_path):
+    """Runner workdir setting is read from the runner config."""
     yuki_dir = tmp_path / ".Yuki"
     (yuki_dir / "Storage" / "proj").mkdir(parents=True)
     monkeypatch.setenv("YUKIDIR", str(yuki_dir))

@@ -1,3 +1,5 @@
+"""Tests for the file staging helpers."""
+# pylint: disable=protected-access
 import json
 import os
 
@@ -5,6 +7,7 @@ from Yuki.kernel.file_staging import FileStager, walk_files
 
 
 def test_walk_files_yields_relative_paths(tmp_path):
+    """walk_files yields paths relative to the walked root."""
     root = tmp_path / "root"
     root.mkdir()
     (root / "a.txt").write_text("a")
@@ -15,6 +18,7 @@ def test_walk_files_yields_relative_paths(tmp_path):
 
 
 def test_process_stage_manifest_reconstructs_nested_paths(tmp_path):
+    """Stage manifest entries restore nested rawdata and input trees."""
     home = tmp_path / "home"
     yuki_home = home / ".Yuki"
     workflow_path = tmp_path / "workflow"

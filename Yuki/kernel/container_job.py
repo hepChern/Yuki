@@ -9,8 +9,6 @@ environment management, command execution, and input/output handling.
 # pylint: disable=cyclic-import
 import os
 import time
-import textwrap
-from CelebiChrono.utils import csys
 from CelebiChrono.utils import metadata
 from .vjob import VJob
 from .image_job import ImageJob
@@ -420,7 +418,7 @@ class ContainerJob(VJob):
                     + f"/{self.project_uuid}/{self.impression()}/")
         return None
 
-    def _cache_commands(self, request_machine_id, backend_type):
+    def _cache_commands(self, _request_machine_id, backend_type):
         """Cache stageout outputs on the runner (EOS for reana, the
         runner's impressions dir for ssh). Empty for native/dry."""
         if self.is_input or not self.cache_on_runner():

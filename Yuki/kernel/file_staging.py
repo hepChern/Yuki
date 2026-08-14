@@ -8,7 +8,6 @@ import os
 import sys
 import json
 import shutil
-from pathlib import Path
 
 
 def walk_files(top_dir):
@@ -73,7 +72,7 @@ class FileStager:
         # Linux: FICLONE ioctl (btrfs / XFS reflink)
         if sys.platform == "linux":
             import fcntl
-            FICLONE = 0x40049409
+            FICLONE = 0x40049409  # pylint: disable=invalid-name
             try:
                 with open(src, 'rb') as s:
                     with open(dst, 'wb') as d:
@@ -163,7 +162,7 @@ class FileStager:
         """
         count = 0
         try:
-            for root, dirs, files in os.walk(src_dir):
+            for root, _dirs, files in os.walk(src_dir):
                 rel_root = os.path.relpath(root, src_dir)
                 dst_root = os.path.join(dst_dir, rel_root) if rel_root != '.' else dst_dir
                 os.makedirs(dst_root, exist_ok=True)
@@ -183,7 +182,7 @@ class FileStager:
             self._log(f"[FILE_STAGING] Error staging directory: {e}")
             return count
 
-    def stage_in(self):
+    def stage_in(self):  # pylint: disable=too-many-locals,too-many-nested-blocks
         """
         Stage input files from Storage to LocalWorkflows.
 
@@ -195,7 +194,7 @@ class FileStager:
         """
         self._log("[FILE_STAGING] Starting stage-in...")
 
-        try:
+        try:  # pylint: disable=too-many-nested-blocks
             # Read workflow config to get actual job UUIDs
             config_path = os.path.join(self.workflow_path, "config.json")
             if not os.path.exists(config_path):
@@ -213,7 +212,7 @@ class FileStager:
             total_jobs = len(jobs_info)
             self._log(f"[FILE_STAGING] Found {total_jobs} jobs in workflow")
 
-            for job_idx, (job_uuid, job_data) in enumerate(jobs_info.items()):
+            for job_idx, (job_uuid, _job_data) in enumerate(jobs_info.items()):
                 self._log(f"[FILE_STAGING] [{job_idx + 1}/{total_jobs}] Processing job: {job_uuid}")
 
                 # Copy job files from Storage
@@ -235,7 +234,9 @@ class FileStager:
                         # Copy rawdata if it exists
                         rawdata_dir = os.path.join(impression_dir, "rawdata")
                         if os.path.isdir(rawdata_dir):
-                            staging_stageout = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}", "stageout")
+                            staging_stageout = os.path.join(
+                                self.local_exec_path, f"imp{job_uuid[:7]}", "stageout"
+                            )
                             count = self._stage_directory(rawdata_dir, staging_stageout)
                             self._log(f"[FILE_STAGING] Copied {count} rawdata files")
 
@@ -249,10 +250,15 @@ class FileStager:
 
                             stageout_dir = os.path.join(machine_path, "stageout")
                             if os.path.isdir(stageout_dir):
-                                staging_stageout = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}", "stageout")
+                                staging_stageout = os.path.join(
+                                    self.local_exec_path, f"imp{job_uuid[:7]}", "stageout"
+                                )
                                 count = self._stage_directory(stageout_dir, staging_stageout)
                                 if count > 0:
-                                    self._log(f"[FILE_STAGING] Copied {count} input files from {machine_id}")
+                                    self._log(
+                                        f"[FILE_STAGING] Copied {count} input files "
+                                        f"from {machine_id}"
+                                    )
 
             self._log("[FILE_STAGING] Stage-in completed")
 
@@ -335,7 +341,7 @@ class FileStager:
             self._log(f"[FILE_STAGING] Failed to process stage manifest: {e}")
             self._log(f"[FILE_STAGING] Traceback: {traceback.format_exc()}")
 
-    def stage_out(self):
+    def stage_out(self):  # pylint: disable=too-many-locals
         """
         Copy execution results from LocalWorkflows back to Storage.
 
@@ -367,8 +373,11 @@ class FileStager:
 
             total_jobs = len(jobs_info)
 
-            for job_idx, (job_uuid, job_data) in enumerate(jobs_info.items()):
-                self._log(f"[FILE_STAGING] [{job_idx + 1}/{total_jobs}] Collecting results for: {job_uuid}")
+            for job_idx, (job_uuid, _job_data) in enumerate(jobs_info.items()):
+                self._log(
+                    f"[FILE_STAGING] [{job_idx + 1}/{total_jobs}] "
+                    f"Collecting results for: {job_uuid}"
+                )
 
                 # Get the execution directory for this job
                 exec_job_dir = os.path.join(self.local_exec_path, f"imp{job_uuid[:7]}")
@@ -388,7 +397,9 @@ class FileStager:
                     self._log(f"[FILE_STAGING] Copied {count} output files")
 
                     # Create downloaded marker
-                    downloaded_marker = os.path.join(impression_dir, machine_id, "stageout.downloaded")
+                    downloaded_marker = os.path.join(
+                        impression_dir, machine_id, "stageout.downloaded"
+                    )
                     os.makedirs(os.path.dirname(downloaded_marker), exist_ok=True)
                     with open(downloaded_marker, 'w', encoding='utf-8') as f:
                         pass

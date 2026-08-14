@@ -1,16 +1,18 @@
 """Unit tests for ReanaBooker."""
+# pylint: disable=protected-access
 import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from colored import Fore, Style
-from Yuki.kernel.reana_booker import ReanaBooker, DEFAULT_IGNORE_PATTERNS
+from Yuki.kernel.reana_booker import ReanaBooker
 
 
 class TestReanaBooker(unittest.TestCase):
     """Test cases for ReanaBooker."""
+    # pylint: disable=too-many-public-methods
 
     def setUp(self):
         """Set up test fixtures."""
@@ -90,8 +92,8 @@ class TestReanaBooker(unittest.TestCase):
         result = self.booker._get_workflow("celebi-test-project")
 
         self.assertIsNotNone(result)
-        self.assertEqual(result["name"], "celebi-test-project")
-        self.assertEqual(result["id"], "workflow-123")
+        self.assertEqual(result["name"], "celebi-test-project")  # pylint: disable=unsubscriptable-object
+        self.assertEqual(result["id"], "workflow-123")  # pylint: disable=unsubscriptable-object
         mock_get_status.assert_called_once()
         call_kwargs = mock_get_status.call_args.kwargs
         self.assertEqual(call_kwargs["workflow"], "celebi-test-project")
@@ -150,9 +152,9 @@ class TestReanaBooker(unittest.TestCase):
             task_dir = os.path.join(tmpdir, "tasks", "taskA")
             os.makedirs(task_dir)
             os.makedirs(os.path.join(task_dir, ".celebi"))
-            with open(os.path.join(task_dir, ".celebi", "config.json"), "w") as f:
+            with open(os.path.join(task_dir, ".celebi", "config.json"), "w", encoding="utf-8") as f:
                 json.dump({"object_type": "task", "impression": "imp-abc-123"}, f)
-            with open(os.path.join(task_dir, "celebi.yaml"), "w") as f:
+            with open(os.path.join(task_dir, "celebi.yaml"), "w", encoding="utf-8") as f:
                 f.write("descriptor: taskA\nenvironment: alpine\n")
 
             result = self.booker._create_workflow("celebi-test", tmpdir)
@@ -182,10 +184,11 @@ class TestReanaBooker(unittest.TestCase):
             os.makedirs(task_dir)
             os.makedirs(os.path.join(task_dir, ".celebi"))
             # config.json has one impression
-            with open(os.path.join(task_dir, ".celebi", "config.json"), "w") as f:
+            with open(os.path.join(task_dir, ".celebi", "config.json"), "w", encoding="utf-8") as f:
                 json.dump({"object_type": "task", "impression": "imp-from-config"}, f)
             # config.local.json overrides it
-            with open(os.path.join(task_dir, ".celebi", "config.local.json"), "w") as f:
+            with open(os.path.join(task_dir, ".celebi", "config.local.json"),
+                      "w", encoding="utf-8") as f:
                 json.dump({"impression": "imp-from-local"}, f)
 
             result = self.booker._create_workflow("celebi-test", tmpdir)
@@ -231,18 +234,19 @@ class TestReanaBooker(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create files
-            with open(os.path.join(tmpdir, "README.md"), "w") as f:
+            with open(os.path.join(tmpdir, "README.md"), "w", encoding="utf-8") as f:
                 f.write("# Test")
             os.makedirs(os.path.join(tmpdir, "src"))
-            with open(os.path.join(tmpdir, "src", "analysis.py"), "w") as f:
+            with open(os.path.join(tmpdir, "src", "analysis.py"), "w", encoding="utf-8") as f:
                 f.write("print('hello')")
             # Create file in hidden dir (should be sanitized)
             os.makedirs(os.path.join(tmpdir, ".celebi"))
-            with open(os.path.join(tmpdir, ".celebi", "config.json"), "w") as f:
+            with open(os.path.join(tmpdir, ".celebi", "config.json"), "w", encoding="utf-8") as f:
                 f.write('{"test": true}')
             # Create ignored file
             os.makedirs(os.path.join(tmpdir, ".celebi", "impressions"))
-            with open(os.path.join(tmpdir, ".celebi", "impressions", "cache.tar"), "w") as f:
+            with open(os.path.join(tmpdir, ".celebi", "impressions", "cache.tar"),
+                      "w", encoding="utf-8") as f:
                 f.write("ignored")
 
             self.booker._upload_files("workflow-123", tmpdir)
@@ -277,7 +281,7 @@ class TestReanaBooker(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create project structure
             os.makedirs(os.path.join(tmpdir, ".celebi"))
-            with open(os.path.join(tmpdir, ".celebi", "config.json"), "w") as f:
+            with open(os.path.join(tmpdir, ".celebi", "config.json"), "w", encoding="utf-8") as f:
                 json.dump({"object_type": "project", "project_uuid": "proj-123"}, f)
 
             # Create Yuki storage with stageout files
@@ -287,9 +291,9 @@ class TestReanaBooker(unittest.TestCase):
             stageout_dir = os.path.join(yuki_home, "Storage", "proj-123",
                                         "imp-abc", "runner-1", "stageout")
             os.makedirs(stageout_dir)
-            with open(os.path.join(stageout_dir, "output.root"), "w") as f:
+            with open(os.path.join(stageout_dir, "output.root"), "w", encoding="utf-8") as f:
                 f.write("root data")
-            with open(os.path.join(stageout_dir, "plots.pdf"), "w") as f:
+            with open(os.path.join(stageout_dir, "plots.pdf"), "w", encoding="utf-8") as f:
                 f.write("pdf data")
 
             repo_metadata = {
@@ -298,7 +302,9 @@ class TestReanaBooker(unittest.TestCase):
                 ]
             }
 
-            self.booker._upload_stageout_files("workflow-123", tmpdir, repo_metadata, upload_mode="all")
+            self.booker._upload_stageout_files(
+                "workflow-123", tmpdir, repo_metadata, upload_mode="all"
+            )
 
         calls = mock_upload_file.call_args_list
         uploaded_files = [c.kwargs.get("file_name", "") for c in calls]
@@ -321,17 +327,17 @@ class TestReanaBooker(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # taskA - unchanged (should be skipped)
-            taskA_dir = os.path.join(tmpdir, "taskA")
-            os.makedirs(taskA_dir)
-            with open(os.path.join(taskA_dir, "script.py"), "w") as f:
+            task_a_dir = os.path.join(tmpdir, "taskA")
+            os.makedirs(task_a_dir)
+            with open(os.path.join(task_a_dir, "script.py"), "w", encoding="utf-8") as f:
                 f.write("print('taskA')")
             # taskB - changed (should be uploaded)
-            taskB_dir = os.path.join(tmpdir, "taskB")
-            os.makedirs(taskB_dir)
-            with open(os.path.join(taskB_dir, "script.py"), "w") as f:
+            task_b_dir = os.path.join(tmpdir, "taskB")
+            os.makedirs(task_b_dir)
+            with open(os.path.join(task_b_dir, "script.py"), "w", encoding="utf-8") as f:
                 f.write("print('taskB')")
             # Top-level file (always uploaded)
-            with open(os.path.join(tmpdir, "README.md"), "w") as f:
+            with open(os.path.join(tmpdir, "README.md"), "w", encoding="utf-8") as f:
                 f.write("# Test")
 
             skip_prefixes = {"taskA"}
@@ -377,7 +383,9 @@ class TestReanaBooker(unittest.TestCase):
     @patch("Yuki.kernel.reana_booker.reana_client.upload_file")
     @patch("Yuki.kernel.reana_booker.reana_client.create_workflow")
     @patch("Yuki.kernel.reana_booker.reana_client.get_workflow_status")
-    def test_book_project_existing_workflow(self, mock_get_status, mock_create_workflow, mock_upload_file):
+    def test_book_project_existing_workflow(
+        self, mock_get_status, mock_create_workflow, mock_upload_file
+    ):
         """Test booking with existing workflow."""
         print(Fore.BLUE + "Testing Book Project Existing..." + Style.RESET)
         # Mock existing workflow
@@ -385,7 +393,7 @@ class TestReanaBooker(unittest.TestCase):
         mock_upload_file.return_value = {"message": "File uploaded"}
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with open(os.path.join(tmpdir, "README.md"), "w") as f:
+            with open(os.path.join(tmpdir, "README.md"), "w", encoding="utf-8") as f:
                 f.write("# Test")
 
             result = self.booker.book_project(tmpdir, "test")
@@ -398,17 +406,21 @@ class TestReanaBooker(unittest.TestCase):
     @patch("Yuki.kernel.reana_booker.reana_client.upload_file")
     @patch("Yuki.kernel.reana_booker.reana_client.create_workflow")
     @patch("Yuki.kernel.reana_booker.reana_client.get_workflow_status")
-    def test_book_project_new_workflow(self, mock_get_status, mock_create_workflow, mock_upload_file):
+    def test_book_project_new_workflow(
+        self, mock_get_status, mock_create_workflow, mock_upload_file
+    ):
         """Test booking creating new workflow."""
         print(Fore.BLUE + "Testing Book Project New..." + Style.RESET)
         # Mock no existing workflow
         mock_get_status.side_effect = Exception("Workflow does not exist")
         # Mock create workflow
-        mock_create_workflow.return_value = {"workflow_id": "wf-456", "workflow_name": "celebi-test"}
+        mock_create_workflow.return_value = {
+            "workflow_id": "wf-456", "workflow_name": "celebi-test"
+        }
         mock_upload_file.return_value = {"message": "File uploaded"}
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            with open(os.path.join(tmpdir, "README.md"), "w") as f:
+            with open(os.path.join(tmpdir, "README.md"), "w", encoding="utf-8") as f:
                 f.write("# Test")
 
             result = self.booker.book_project(tmpdir, "test")

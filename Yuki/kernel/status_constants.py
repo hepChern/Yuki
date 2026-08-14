@@ -166,9 +166,10 @@ def get_detailed_status_message(status: str, context: dict = None) -> str:
     if context:
         if "dependency" in context:
             return f"{default_msg}. Waiting for dependent job '{context['dependency']}' to complete"
-        elif "step" in context and "total_steps" in context:
-            return f"{default_msg}. Executing workflow step {context['step']}/{context['total_steps']}"
-        elif "error" in context:
+        if "step" in context and "total_steps" in context:
+            return (f"{default_msg}. Executing workflow step "
+                    f"{context['step']}/{context['total_steps']}")
+        if "error" in context:
             return f"{default_msg}. Error: {context['error']}"
 
     return default_msg

@@ -9,7 +9,10 @@ from logging import getLogger
 from flask import Flask, render_template, redirect, url_for, request
 
 from .tasks import celeryapp
-from .routes import upload, execution, status, runner, workflow, transfer, impression, booking, remote_data
+from .routes import (
+    upload, execution, status, runner, workflow,
+    transfer, impression, booking, remote_data,
+)
 
 
 def create_app():

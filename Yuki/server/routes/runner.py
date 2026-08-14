@@ -278,7 +278,7 @@ def register_machine(machine, machine_uuid):
 
 
 @bp.route("/update-runner/<runner>", methods=['PATCH'])
-def update_runner(runner):
+def update_runner(runner):  # pylint: disable=too-many-locals
     """Update settings for an existing runner."""
     config_file = config.get_config_file()
     runners_list = config_file.read_variable("runners", [])
@@ -340,7 +340,7 @@ def update_runner(runner):
 
 
 @bp.route("/runners-config", methods=['GET'])
-def runners_config():
+def runners_config():  # pylint: disable=too-many-locals
     """Get full configuration for all registered runners."""
     config_file = config.get_config_file()
     runners_list = config_file.read_variable("runners", [])

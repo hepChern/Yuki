@@ -1,3 +1,4 @@
+"""Tests for select route handlers."""
 from unittest import mock
 
 from Yuki.server.routes import workflow as wf_routes
@@ -6,9 +7,10 @@ from Yuki.server.routes import upload as up_routes
 
 
 def test_collect_files_route_passes_spec():
+    """collect-files forwards kind and pattern to ImpressionStorage."""
     app = _app(wf_routes.bp)
-    with mock.patch.object(wf_routes, "ImpressionStorage") as S:
-        inst = S.return_value
+    with mock.patch.object(wf_routes, "ImpressionStorage") as storage_cls:
+        inst = storage_cls.return_value
         inst.collect_files.return_value = {
             "runner": {"collected": [], "skipped": [], "failed": []}
         }
@@ -20,17 +22,19 @@ def test_collect_files_route_passes_spec():
 
 
 def test_collect_files_route_type_keyword():
+    """collect-files accepts the type keyword shorthand."""
     app = _app(wf_routes.bp)
-    with mock.patch.object(wf_routes, "ImpressionStorage") as S:
+    with mock.patch.object(wf_routes, "ImpressionStorage") as storage_cls:
         c = app.test_client()
         c.get("/collect-files/proj/imp?type=plots")
-        S.return_value.collect_files.assert_called_once_with("stageout", "plots")
+        storage_cls.return_value.collect_files.assert_called_once_with("stageout", "plots")
 
 
 def test_file_status_route_returns_json():
+    """file-status returns the ImpressionStorage file_status payload."""
     app = _app(ex_routes.bp)
-    with mock.patch.object(ex_routes, "ImpressionStorage") as S:
-        S.return_value.file_status.return_value = [
+    with mock.patch.object(ex_routes, "ImpressionStorage") as storage_cls:
+        storage_cls.return_value.file_status.return_value = [
             {"name": "mass.png", "size": 3, "type": "plot",
              "in_runner": True, "in_yuki": True}]
         c = app.test_client()
@@ -47,6 +51,7 @@ def _app(bp):
 
 
 def test_fileview_serves_nested_file(tmp_path):
+    """file-view serves files from nested stageout directories."""
     app = _app(up_routes.bp)
     with mock.patch.object(up_routes.config, "get_job_path", return_value=str(tmp_path)):
         stageout = tmp_path / "runner-1" / "stageout"
@@ -59,6 +64,7 @@ def test_fileview_serves_nested_file(tmp_path):
 
 
 def test_export_serves_nested_stageout_file(tmp_path):
+    """export serves files from nested stageout directories."""
     app = _app(up_routes.bp)
     with mock.patch.object(up_routes.config, "get_job_path", return_value=str(tmp_path)), \
          mock.patch.object(up_routes.config, "get_config_file") as cfg:
@@ -75,6 +81,7 @@ def test_export_serves_nested_stageout_file(tmp_path):
 
 
 def test_export_blocks_path_traversal(tmp_path):
+    """export refuses paths escaping the job directory."""
     app = _app(up_routes.bp)
     with mock.patch.object(up_routes.config, "get_job_path", return_value=str(tmp_path)):
         (tmp_path / "rawdata").mkdir()

@@ -47,6 +47,7 @@ def test_docker_run_rootless_runs_as_root_with_root_storage(tmp_path):
 
 
 def test_docker_run_default_image_and_port():
+    """A bare `docker run` uses yuki:latest and maps port 3315."""
     result, m_run = _run(["docker", "run"])
 
     assert result.exit_code == 0, result.output
@@ -56,6 +57,7 @@ def test_docker_run_default_image_and_port():
 
 
 def test_docker_run_celebi_dir_mount(tmp_path):
+    """A local CelebiChrono checkout is bind-mounted into the container."""
     celebi = tmp_path / "CelebiChrono"
     celebi.mkdir()
     result, m_run = _run(["docker", "run", "--celebi-dir", str(celebi)])
@@ -77,6 +79,7 @@ def test_docker_run_precreates_missing_yuki_dir(tmp_path):
 
 
 def test_docker_run_rejects_missing_dev_dir():
+    """A nonexistent --dev-dir is rejected with a clear error."""
     result, _ = _run(["docker", "run", "--dev-dir", "/nonexistent-xyz"])
 
     assert result.exit_code != 0

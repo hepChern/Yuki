@@ -13,7 +13,7 @@ from CelebiChrono.utils import metadata
 from .status_constants import IN_MOVEMENT, CODA, FAILED, translate_to_musical
 
 
-class SnakemakeMonitor:
+class SnakemakeMonitor:  # pylint: disable=too-many-instance-attributes,too-few-public-methods
     """Monitor snakemake execution and update workflow status."""
 
     def __init__(self, workflow_path, local_exec_path,
@@ -86,21 +86,20 @@ class SnakemakeMonitor:
         try:
             # Execute snakemake with output capture
             with open(self.snakemake_log, "w", encoding='utf-8') as log_f:
-                process = subprocess.Popen(
+                with subprocess.Popen(
                     cmd,
                     cwd=self.local_exec_path,
                     stdout=log_f,
                     stderr=subprocess.STDOUT,
                     text=True,
                     env=env
-                )
+                ) as process:
+                    # Monitor execution
+                    while process.poll() is None:
+                        time.sleep(2)  # Check every 2 seconds
+                        self._update_progress(logger)
 
-                # Monitor execution
-                while process.poll() is None:
-                    time.sleep(2)  # Check every 2 seconds
-                    self._update_progress(logger)
-
-                exit_code = process.returncode
+                    exit_code = process.returncode
 
         except Exception as e:
             if logger:
@@ -112,9 +111,8 @@ class SnakemakeMonitor:
         if exit_code == 0:
             self._finalize_results(logger)
             return 0
-        else:
-            self._handle_failure(logger)
-            return exit_code
+        self._handle_failure(logger)
+        return exit_code
 
     def _update_progress(self, logger=None):
         """Update progress from snakemake execution."""
@@ -232,7 +230,9 @@ class SnakemakeMonitor:
             if os.path.exists(workflow_info_path):
                 with open(workflow_info_path, 'r', encoding='utf-8') as f:
                     workflow_info = json.load(f)
-                    steps = workflow_info.get("workflow", {}).get("specification", {}).get("steps", [])
+                    steps = workflow_info.get("workflow", {}).get(
+                        "specification", {}
+                    ).get("steps", [])
                     total_jobs = len(steps)
 
             # Read snakemake log
@@ -256,7 +256,7 @@ class SnakemakeMonitor:
             results_file.write_variable("results", results)
 
             if logger:
-                logger(f"[SNAKEMAKE] Execution completed successfully")
+                logger("[SNAKEMAKE] Execution completed successfully")
 
             self._propagate_per_job_status(logger)
 
@@ -264,7 +264,7 @@ class SnakemakeMonitor:
             if logger:
                 logger(f"[SNAKEMAKE] Error finalizing results: {e}")
 
-    def _handle_failure(self, logger=None):
+    def _handle_failure(self, logger=None):  # pylint: disable=too-many-locals
         """Handle snakemake execution failure."""
         try:
             # Read snakemake log for error details
@@ -280,7 +280,9 @@ class SnakemakeMonitor:
             if os.path.exists(workflow_info_path):
                 with open(workflow_info_path, 'r', encoding='utf-8') as f:
                     workflow_info = json.load(f)
-                    steps = workflow_info.get("workflow", {}).get("specification", {}).get("steps", [])
+                    steps = workflow_info.get("workflow", {}).get(
+                        "specification", {}
+                    ).get("steps", [])
                     total_jobs = len(steps)
                     for step in steps:
                         job_uuid = step.get("name", "")[4:]
