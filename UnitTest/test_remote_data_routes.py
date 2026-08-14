@@ -230,3 +230,96 @@ def test_register_remote_data_status(monkeypatch, tmp_path):
     r2 = _app(remote_data_routes.bp).test_client().get(
         "/register-remote-data/ghost")
     assert r2.status_code == 404
+
+
+def _impression_fixture(tmp_path, project="proj", imp="imp-1", md5="abc123",
+                        remote=True):
+    imp_dir = tmp_path / "Storage" / project / imp
+    (imp_dir / "contents").mkdir(parents=True)
+    with open(imp_dir / "contents" / "celebi.yaml", "w", encoding="utf-8") as f:
+        f.write(f"environment: rawdata\nuuid: {md5}\ndescriptor: d\n")
+    if remote:
+        marker = ConfigFile(str(imp_dir / "remote.json"))
+        marker.write_variable("host_runner_id", "r1")
+        marker.write_variable("source_path", "/src")
+        marker.write_variable("remote_path", "/remote/imp")
+    return imp_dir
+
+
+def test_verify_data_remote_match(monkeypatch, tmp_path):
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    config_obj.config_path = str(tmp_path / "config.json")
+    data = {"runners": ["cluster"], "runners_id": {"cluster": "r1"}}
+    with open(config_obj.config_path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    _impression_fixture(tmp_path)
+
+    class FakeSsh:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def exec(self, command, timeout=None):
+            return "abc123", "", 0
+
+    with mock.patch("Yuki.kernel.remote_data_ops._ssh_connection",
+                    return_value=FakeSsh()):
+        r = _app(remote_data_routes.bp).test_client().get(
+            "/verify-data/proj/imp-1")
+    body = r.get_json()
+    assert body["match"] is True
+    assert body["expected"] == "abc123"
+    assert body["location"] == "runner cluster"
+
+
+def test_verify_data_remote_mismatch(monkeypatch, tmp_path):
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    config_obj.config_path = str(tmp_path / "config.json")
+    with open(config_obj.config_path, "w", encoding="utf-8") as f:
+        json.dump({"runners": ["cluster"], "runners_id": {"cluster": "r1"}}, f)
+    _impression_fixture(tmp_path)
+
+    class FakeSsh:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def exec(self, command, timeout=None):
+            return "different", "", 0
+
+    with mock.patch("Yuki.kernel.remote_data_ops._ssh_connection",
+                    return_value=FakeSsh()):
+        r = _app(remote_data_routes.bp).test_client().get(
+            "/verify-data/proj/imp-1")
+    body = r.get_json()
+    assert body["match"] is False
+    assert body["actual"] == "different"
+
+
+def test_verify_data_local_match(monkeypatch, tmp_path):
+    _temp_config(monkeypatch, tmp_path)
+    imp_dir = _impression_fixture(tmp_path, remote=False)
+    data_dir = imp_dir / "rawdata"
+    (data_dir / "sub").mkdir(parents=True)
+    with open(data_dir / "a.txt", "w") as f:
+        f.write("alpha")
+    with open(data_dir / "sub" / "b.txt", "w") as f:
+        f.write("beta")
+    from CelebiChrono.utils.file_utils import dir_md5
+    expected = dir_md5(str(data_dir))
+    with open(imp_dir / "contents" / "celebi.yaml", "w", encoding="utf-8") as f:
+        f.write(f"environment: rawdata\nuuid: {expected}\ndescriptor: d\n")
+
+    r = _app(remote_data_routes.bp).test_client().get("/verify-data/proj/imp-1")
+    body = r.get_json()
+    assert body["match"] is True
+    assert body["location"] == "yuki storage"
+
+
+def test_verify_data_local_missing_dir(monkeypatch, tmp_path):
+    _temp_config(monkeypatch, tmp_path)
+    _impression_fixture(tmp_path, remote=False)
+    r = _app(remote_data_routes.bp).test_client().get("/verify-data/proj/imp-1")
+    assert "error" in r.get_json()
+
+
+def test_verify_data_unknown_impression_404(monkeypatch, tmp_path):
+    _temp_config(monkeypatch, tmp_path)
+    r = _app(remote_data_routes.bp).test_client().get("/verify-data/proj/ghost")
+    assert r.status_code == 404

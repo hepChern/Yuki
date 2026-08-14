@@ -177,6 +177,58 @@ def list_managed_files(runner_id, managed_path):
                 for rel, _rpath, size in ssh.walk_files(managed_path)]
 
 
+def _runner_name(runner_id):
+    """Runner name for a runner id (fallback: the id itself)."""
+    from Yuki.kernel import runner_config
+    cfg = runner_config.open_config()
+    runners_id = cfg.read_variable("runners_id", {})
+    for name, rid in runners_id.items():
+        if rid == runner_id:
+            return name
+    return runner_id
+
+
+def verify_registered_data(project_uuid, impression_uuid):
+    """Recompute the data md5 and compare it with the registered uuid.
+
+    Remote-hosted data is hashed on the host runner's managed dir; local
+    data is hashed from Storage/<project>/<impression>/rawdata/.
+    Returns {"match", "expected", "actual", "location", "error"}.
+    """
+    yuki_dir = _yuki_dir()
+    imp_dir = os.path.join(yuki_dir, "Storage", project_uuid, impression_uuid)
+    expected = _impression_md5(imp_dir)
+    if not expected:
+        return {"match": False, "expected": "", "actual": "",
+                "location": "", "error": "no uuid registered for impression"}
+
+    marker_path = os.path.join(imp_dir, "remote.json")
+    if os.path.exists(marker_path):
+        marker = ConfigFile(marker_path)
+        host_runner = marker.read_variable("host_runner_id", "")
+        managed_path = marker.read_variable("remote_path", "")
+        with _ssh_connection(host_runner) as ssh:
+            out, err, code = ssh.exec(remote_md5_command(managed_path),
+                                      timeout=3600)
+        if code != 0:
+            return {"match": False, "expected": expected, "actual": "",
+                    "location": "", "error": f"remote md5 failed: {err or out}"}
+        actual = out.strip()
+        return {"match": actual == expected, "expected": expected,
+                "actual": actual, "location": f"runner {_runner_name(host_runner)}",
+                "error": None}
+
+    data_dir = os.path.join(imp_dir, "rawdata")
+    if not os.path.isdir(data_dir):
+        return {"match": False, "expected": expected, "actual": "",
+                "location": "yuki storage",
+                "error": f"no local data directory: {data_dir}"}
+    from CelebiChrono.utils.file_utils import dir_md5
+    actual = dir_md5(data_dir)
+    return {"match": actual == expected, "expected": expected,
+            "actual": actual, "location": "yuki storage", "error": None}
+
+
 def synthesize_impression(project_uuid, impression_uuid, data_md5, descriptor,
                           runner_id, source_path, managed_dir,
                           status="running"):

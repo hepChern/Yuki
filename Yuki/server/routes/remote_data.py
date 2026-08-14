@@ -71,3 +71,14 @@ def register_remote_data_status(job_id):
     if state is None:
         return jsonify({"error": "job not found"}), 404
     return jsonify(state)
+
+
+@bp.route("/verify-data/<project_uuid>/<impression>", methods=['GET'])
+def verify_data(project_uuid, impression):
+    """Recompute the data md5 and compare with the registered uuid."""
+    yuki_dir = remote_data_ops._yuki_dir()
+    imp_dir = os.path.join(yuki_dir, "Storage", project_uuid, impression)
+    if not os.path.isdir(imp_dir):
+        return jsonify({"error": f"Impression '{impression}' not found"}), 404
+    return jsonify(remote_data_ops.verify_registered_data(
+        project_uuid, impression))
