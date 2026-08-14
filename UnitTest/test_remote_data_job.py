@@ -135,7 +135,7 @@ def test_register_remote_data_job_without_project_context(monkeypatch, tmp_path)
     monkeypatch.setattr("CelebiChrono.utils.csys.project_path",
                         lambda: None)
     updates = []
-    with mock.patch("Yuki.kernel.remote_data_ops._SshConnection",
+    with mock.patch("Yuki.kernel.ssh_workflow._SshConnection",
                     return_value=fake):
         result = remote_data_ops.register_remote_data_job(
             "r1", str(data), "proj", "mydata", updates.append)
