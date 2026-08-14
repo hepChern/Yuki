@@ -142,7 +142,7 @@ def test_stage_remote_hosted_input_copies_locally(tmp_path, monkeypatch):
 
     fake_job = mock.MagicMock()
     fake_job.files.return_value = []
-    fake_job.environment.return_value = "analysis"
+    fake_job.environment.return_value = "rawdata"
     fake_job.is_input = True
     fake_job.short_uuid.return_value = "abc1234"
     fake_job.path = f"{marker_dir.parent}/imp-abc"  # parent = Storage/proj-123
@@ -194,7 +194,7 @@ def test_stage_remote_hosted_input_wrong_runner_raises(tmp_path, monkeypatch):
     wf.logger = lambda msg: None
     fake_job = mock.MagicMock()
     fake_job.files.return_value = []
-    fake_job.environment.return_value = "analysis"
+    fake_job.environment.return_value = "rawdata"
     fake_job.is_input = True
     fake_job.short_uuid.return_value = "abc1234"
     fake_job.path = f"{marker_dir.parent}/imp-abc"

@@ -113,9 +113,14 @@ def find_existing_registration(yuki_dir, runner_id, remote_path):
             marker = ConfigFile(marker_path)
             if marker.read_variable("host_runner_id", "") == runner_id and \
                     marker.read_variable("source_path", "") == remote_path:
+                imp_dir = os.path.join(proj_dir, imp)
+                from CelebiChrono.utils import metadata
+                yaml_file = metadata.YamlFile(
+                    os.path.join(imp_dir, "contents", "celebi.yaml"))
                 return {"result": {
-                    "uuid": _impression_md5(os.path.join(proj_dir, imp)),
+                    "uuid": _impression_md5(imp_dir),
                     "impression_uuid": imp,
+                    "descriptor": yaml_file.read_variable("descriptor", ""),
                 }}
     return None
 

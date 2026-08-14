@@ -297,23 +297,11 @@ class SshWorkflow(VWorkflow):
                             f"{f_idx+1}/{total_files}: {name}"
                         )
 
-                if job.environment() == "rawdata":
-                    rawdata_path = os.path.join(job.path, "rawdata")
-                    if os.path.exists(rawdata_path):
-                        filelist = list(walk_files(rawdata_path))
-                        total_raw = len(filelist)
-                        for f_idx, (rel_path, src_path) in enumerate(filelist):
-                            dst_path = (
-                                f"{self.remote_exec_path}/"
-                                f"imp{job.short_uuid()}/stageout/{rel_path}"
-                            )
-                            ssh.put(src_path, dst_path)
-                            self.logger(
-                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded rawdata "
-                                f"{f_idx+1}/{total_raw}: {rel_path}"
-                            )
-
-                elif job.is_input:
+                # Remote-hosted impressions must be staged with a remote cp
+                # regardless of environment classification: rawdata jobs also
+                # have is_input=True, so this check has to run before the
+                # rawdata branch below.
+                if job.is_input:
                     impression = job.path.split("/")[-1]
                     remote_marker = os.path.join(
                         os.environ["HOME"], ".Yuki", "Storage",
@@ -342,6 +330,24 @@ class SshWorkflow(VWorkflow):
                                 raise RuntimeError(
                                     f"Remote data staging failed: {err or out}")
                         continue
+
+                if job.environment() == "rawdata":
+                    rawdata_path = os.path.join(job.path, "rawdata")
+                    if os.path.exists(rawdata_path):
+                        filelist = list(walk_files(rawdata_path))
+                        total_raw = len(filelist)
+                        for f_idx, (rel_path, src_path) in enumerate(filelist):
+                            dst_path = (
+                                f"{self.remote_exec_path}/"
+                                f"imp{job.short_uuid()}/stageout/{rel_path}"
+                            )
+                            ssh.put(src_path, dst_path)
+                            self.logger(
+                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded rawdata "
+                                f"{f_idx+1}/{total_raw}: {rel_path}"
+                            )
+
+                elif job.is_input:
                     src_stageout = os.path.join(
                         os.environ["HOME"],
                         ".Yuki",

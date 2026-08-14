@@ -75,7 +75,8 @@ def test_find_existing_registration(tmp_path):
     marker.write_variable("remote_path", "/remote/imp")
 
     hit = remote_data_ops.find_existing_registration(str(yuki_dir), "r1", "/src/data")
-    assert hit == {"result": {"uuid": "abcdef", "impression_uuid": "imp-123"}}
+    assert hit == {"result": {"uuid": "abcdef", "impression_uuid": "imp-123",
+                              "descriptor": "d"}}
     assert remote_data_ops.find_existing_registration(
         str(yuki_dir), "r1", "/other") is None
 
@@ -142,6 +143,7 @@ def test_register_remote_data_idempotent(monkeypatch, tmp_path):
                   "project_uuid": "proj"})
     task.apply_async.assert_not_called()
     assert r.get_json()["result"]["uuid"] == "abcdef"
+    assert r.get_json()["result"]["descriptor"] == "d"
 
 
 def test_register_remote_data_missing_field(monkeypatch, tmp_path):
