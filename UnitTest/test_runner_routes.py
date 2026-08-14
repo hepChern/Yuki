@@ -322,3 +322,59 @@ def test_update_runner_partial_ssh_preserves_existing_fields(monkeypatch):
     assert cfg["ssh_users"][runner_id] == "u"             # preserved
     assert cfg["ssh_ports"][runner_id] == 2222            # preserved
     assert cfg["remote_workdirs"][runner_id] == "/remote"  # preserved
+
+
+def test_register_runner_uploads_ssh_key(monkeypatch):
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    r = c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u",
+        "ssh_key_data": "-----BEGIN KEY-----\nfake\n-----END KEY-----",
+    })
+    assert r.status_code == 200
+    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    runner_id = cfg["runners_id"]["cluster"]
+    keys_dir = os.path.join(os.path.dirname(runner_routes.config.config_path), "keys")
+    key_file = os.path.join(keys_dir, runner_id)
+    # key stored server-side with 600 perms
+    assert open(key_file, encoding="utf-8").read().startswith("-----BEGIN KEY-----")
+    assert os.stat(key_file).st_mode & 0o777 == 0o600
+    # ssh_key_path points at the stored key, in both maps
+    assert cfg["ssh_key_paths"][runner_id] == key_file
+    assert cfg["runner_settings"][runner_id]["ssh_key_path"] == key_file
+
+
+def test_update_runner_uploads_ssh_key(monkeypatch):
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u", "ssh_key_path": "/server/side/key",
+    })
+    r = c.patch("/update-runner/cluster",
+                json={"ssh_key_data": "new-key-content"})
+    assert r.status_code == 200
+    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    runner_id = cfg["runners_id"]["cluster"]
+    keys_dir = os.path.join(os.path.dirname(runner_routes.config.config_path), "keys")
+    key_file = os.path.join(keys_dir, runner_id)
+    assert open(key_file, encoding="utf-8").read().startswith("new-key-content")
+    assert cfg["runner_settings"][runner_id]["ssh_key_path"] == key_file
+    assert cfg["ssh_hosts"][runner_id] == "h"  # untouched
+
+
+def test_remove_runner_deletes_stored_key(monkeypatch):
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u", "ssh_key_data": "key-content",
+    })
+    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    runner_id = cfg["runners_id"]["cluster"]
+    key_file = os.path.join(
+        os.path.dirname(runner_routes.config.config_path), "keys", runner_id)
+    assert os.path.exists(key_file)
+    c.get("/remove-runner/cluster")
+    assert not os.path.exists(key_file)

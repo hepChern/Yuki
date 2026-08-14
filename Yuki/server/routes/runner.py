@@ -136,6 +136,12 @@ def registerrunner():
     settings = _collect_settings(request.form)
     if settings:
         runner_config.merge_runner_settings(config_file, runner_id, settings)
+
+    if request.form.get("ssh_key_data"):
+        key_path = _store_ssh_key(runner_id, request.form["ssh_key_data"])
+        _write_ssh_config(config_file, runner_id, {"ssh_key_path": key_path})
+        runner_config.merge_runner_settings(
+            config_file, runner_id, {"ssh_key_path": key_path})
     return "successful"
 
 
@@ -157,6 +163,20 @@ def _collect_settings(data):
             except (ValueError, TypeError):
                 pass
     return settings
+
+
+def _store_ssh_key(runner_id, key_data):
+    """Persist an uploaded ssh private key under $YUKIDIR/keys/ (mode 600).
+
+    Returns the server-side path of the stored key.
+    """
+    keys_dir = os.path.join(os.path.dirname(config.config_path), "keys")
+    os.makedirs(keys_dir, exist_ok=True)
+    key_path = os.path.join(keys_dir, runner_id)
+    with open(key_path, "w", encoding="utf-8") as f:
+        f.write(key_data if key_data.endswith("\n") else key_data + "\n")
+    os.chmod(key_path, 0o600)
+    return key_path
 
 
 def _write_ssh_config(config_file, runner_id, data):
@@ -231,6 +251,10 @@ def removerunner(runner):
     config_file.write_variable("backend_types", backend_types)
 
     _remove_ssh_config(config_file, runner_id)
+    stored_key = os.path.join(os.path.dirname(config.config_path),
+                              "keys", runner_id)
+    if os.path.exists(stored_key):
+        os.remove(stored_key)
     for key in ("runner_settings", "runner_health"):
         data = config_file.read_variable(key, {})
         if runner_id in data:
@@ -291,6 +315,12 @@ def update_runner(runner):
     settings = _collect_settings(data)
     if settings:
         runner_config.merge_runner_settings(config_file, runner_id, settings)
+
+    if data.get("ssh_key_data"):
+        key_path = _store_ssh_key(runner_id, data["ssh_key_data"])
+        _write_ssh_config(config_file, runner_id, {"ssh_key_path": key_path})
+        runner_config.merge_runner_settings(
+            config_file, runner_id, {"ssh_key_path": key_path})
 
     new_backend_type = backend_types.get(runner_id, "reana")
 
