@@ -3,12 +3,14 @@ import json
 import os
 from unittest import mock
 
+import pytest
+
 from Yuki.kernel.ssh_workflow import SshWorkflow
 
 
 def _workflow(tmp_path, monkeypatch, config_data):
     yuki_dir = tmp_path / ".Yuki"
-    yuki_dir.mkdir(parents=True)
+    yuki_dir.mkdir(parents=True, exist_ok=True)
     (yuki_dir / "config.json").write_text(json.dumps(config_data))
     monkeypatch.setenv("YUKIDIR", str(yuki_dir))
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -115,3 +117,90 @@ def test_create_remote_structure_creates_impressions_dir(tmp_path, monkeypatch):
 
     assert "/remote/workflows/proj-123/wf-456" in made_dirs
     assert "/remote/impressions/proj-123" in made_dirs
+
+
+def test_stage_remote_hosted_input_copies_locally(tmp_path, monkeypatch):
+    """Remote-hosted data on the same runner: one remote cp, no SFTP."""
+    yuki_dir = tmp_path / ".Yuki"
+    marker_dir = yuki_dir / "Storage" / "proj-123" / "imp-abc"
+    marker_dir.mkdir(parents=True)
+    with open(marker_dir / "remote.json", "w", encoding="utf-8") as f:
+        json.dump({"host_runner_id": "m1", "source_path": "/src",
+                   "remote_path": "/remote/impressions/proj-123/imp-abc"}, f)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    wf = _workflow(tmp_path, monkeypatch, {
+        "runner_settings": {"m1": {"ssh_host": "h", "ssh_user": "u"}},
+    })
+    wf.ssh_config = wf._load_ssh_config()
+    wf.remote_exec_path = "/remote/workflows/proj-123/wf-456"
+    wf.project_uuid = "proj-123"
+    wf.uuid = "wf-456"
+    wf.machine_id = "m1"
+    wf.snakefile_path = "/local/Snakefile"
+    wf.logger = lambda msg: None
+
+    fake_job = mock.MagicMock()
+    fake_job.files.return_value = []
+    fake_job.environment.return_value = "rawdata"
+    fake_job.is_input = True
+    fake_job.short_uuid.return_value = "abc1234"
+    fake_job.path = f"{marker_dir.parent}/imp-abc"  # parent = Storage/proj-123
+    wf.jobs = [fake_job]
+
+    commands = []
+
+    class FakeSsh:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def mkdir_p(self, path): commands.append(("mkdir", path))
+        def put(self, local_path, remote_path):
+            commands.append(("put", f"{local_path} -> {remote_path}"))
+        def exec(self, command, timeout=None):
+            commands.append(("exec", command))
+            return "", "", 0
+
+    with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
+        wf._upload_files_remote()
+
+    execs = [c for kind, c in commands if kind == "exec"]
+    copy_cmd = [c for c in execs if "cp -a --reflink=auto" in c]
+    assert copy_cmd, f"expected a remote cp, got: {execs}"
+    assert "/remote/impressions/proj-123/imp-abc/." in copy_cmd[0]
+    assert "impabc1234/stageout" in copy_cmd[0]
+    puts = [c for kind, c in commands if kind == "put"]
+    data_puts = [c for c in puts if "impabc1234/stageout" in c]
+    assert not data_puts, \
+        f"expected no SFTP put of remote-hosted data, got: {data_puts}"
+
+
+def test_stage_remote_hosted_input_wrong_runner_raises(tmp_path, monkeypatch):
+    yuki_dir = tmp_path / ".Yuki"
+    marker_dir = yuki_dir / "Storage" / "proj-123" / "imp-abc"
+    marker_dir.mkdir(parents=True)
+    with open(marker_dir / "remote.json", "w", encoding="utf-8") as f:
+        json.dump({"host_runner_id": "OTHER-RUNNER", "source_path": "/src",
+                   "remote_path": "/remote/impressions/proj-123/imp-abc"}, f)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    wf = _workflow(tmp_path, monkeypatch, {
+        "runner_settings": {"m1": {"ssh_host": "h", "ssh_user": "u"}},
+    })
+    wf.ssh_config = wf._load_ssh_config()
+    wf.remote_exec_path = "/remote/workflows/proj-123/wf-456"
+    wf.project_uuid = "proj-123"
+    wf.machine_id = "m1"
+    wf.snakefile_path = "/local/Snakefile"
+    wf.logger = lambda msg: None
+    fake_job = mock.MagicMock()
+    fake_job.files.return_value = []
+    fake_job.environment.return_value = "rawdata"
+    fake_job.is_input = True
+    fake_job.short_uuid.return_value = "abc1234"
+    fake_job.path = f"{marker_dir.parent}/imp-abc"
+    wf.jobs = [fake_job]
+
+    with mock.patch.object(SshWorkflow, "_ssh", return_value=mock.MagicMock()):
+        with pytest.raises(RuntimeError) as exc:
+            wf._upload_files_remote()
+    assert "another runner" in str(exc.value)

@@ -493,6 +493,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
           and push its dependencies; on the second visit we append it to self.jobs.
         - This avoids recursion and handles DAGs safely.
         """
+        self.jobs = []  # rebuild the full job set; keeps repeated walks idempotent
         visited = set()
         # Initialize stack with all root jobs, marked as not expanded
         stack = [(job, False) for job in root_jobs]
