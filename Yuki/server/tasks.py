@@ -4,6 +4,7 @@ Celery tasks for Yuki server.
 import os
 from celery import Celery
 from CelebiChrono.utils import metadata
+from ..kernel import remote_data_ops
 from ..kernel.vjob import VJob
 from ..kernel.vworkflow import VWorkflow
 
@@ -50,3 +51,21 @@ def task_update_workflow_status(project_uuid, workflow_id):
     workflow = VWorkflow.create(project_uuid, [], workflow_id)
     workflow.update_workflow_status()
     print("# <<< task_update_workflow_status")
+
+
+@celeryapp.task
+def task_register_remote_data(job_id, runner_id, remote_path, project_uuid,
+                              descriptor):
+    """Register remote data on an ssh runner: hash, copy, register."""
+    yuki_dir = remote_data_ops._yuki_dir()
+
+    def update(state):
+        remote_data_ops.write_job_state(yuki_dir, job_id, state)
+
+    try:
+        result = remote_data_ops.register_remote_data_job(
+            runner_id, remote_path, project_uuid, descriptor, update)
+        update({"status": "done", "result": result, "error": None})
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        update({"status": "failed", "result": None,
+                "error": str(e) or type(e).__name__})

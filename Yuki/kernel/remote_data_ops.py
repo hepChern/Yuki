@@ -6,6 +6,8 @@ local Yuki-side storage paths for registration job state.
 import json
 import os
 import shlex
+import shutil
+import tempfile
 
 from CelebiChrono.utils.metadata import ConfigFile
 
@@ -79,8 +81,11 @@ def read_job_state(yuki_dir, job_id):
     path = os.path.join(_jobs_dir(yuki_dir), f"{job_id}.json")
     if not os.path.exists(path):
         return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except ValueError:
+        return None
 
 
 def _impression_md5(imp_dir):
@@ -128,3 +133,97 @@ def find_inflight_job(yuki_dir, runner_id, remote_path):
                 state.get("status") not in ("done", "failed"):
             return name[:-5]
     return None
+
+
+def _ssh_settings(runner_id):
+    """Merged ssh settings for a runner."""
+    from Yuki.kernel import runner_config
+    return runner_config.get_ssh_settings(runner_config.open_config(), runner_id)
+
+
+def _ssh_connection(runner_id):
+    """An _SshConnection for the runner (paramiko import stays lazy)."""
+    from Yuki.kernel.ssh_workflow import _SshConnection
+    settings = _ssh_settings(runner_id)
+    return _SshConnection(host=settings.get("host", ""),
+                          user=settings.get("user", ""),
+                          key_path=settings.get("key_path"),
+                          port=settings.get("port", 22))
+
+
+def synthesize_impression(project_uuid, impression_uuid, data_md5, descriptor,
+                          runner_id, source_path, managed_dir):
+    """Create the impression record in Yuki Storage (data stays remote).
+
+    Replicates yuki_create_data's layout (contents/ + config.json +
+    status.json) and adds remote.json marking the hosting runner.
+    """
+    from CelebiChrono.utils import metadata
+    from Yuki.cli.yuki_create_data import (
+        create_canonical_rawdata_task, build_impression_config,
+    )
+
+    impression_dir = os.path.join(_yuki_dir(), "Storage",
+                                  project_uuid, impression_uuid)
+    os.makedirs(impression_dir, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="yuki_register_") as tmp:
+        create_canonical_rawdata_task(tmp, descriptor, data_md5)
+        contents_dir = os.path.join(impression_dir, "contents")
+        if os.path.exists(contents_dir):
+            shutil.rmtree(contents_dir)
+        shutil.copytree(tmp, contents_dir)
+        impression_config = build_impression_config(
+            project_uuid, impression_uuid, tmp)
+
+    config_file = metadata.ConfigFile(os.path.join(impression_dir, "config.json"))
+    for key, value in impression_config.items():
+        config_file.write_variable(key, value)
+
+    status_file = metadata.ConfigFile(os.path.join(impression_dir, "status.json"))
+    status_file.write_variable("status", "pending")
+
+    remote_file = metadata.ConfigFile(os.path.join(impression_dir, "remote.json"))
+    remote_file.write_variable("host_runner_id", runner_id)
+    remote_file.write_variable("source_path", source_path)
+    remote_file.write_variable("remote_path", managed_dir)
+
+
+def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,
+                             update):
+    """Run the registration pipeline: hash -> copy -> register.
+
+    ``update(state: dict)`` is called with each progress state.
+    """
+    from CelebiChrono.kernel.vimpression import VImpression
+    from Yuki.cli.yuki_create_data import create_canonical_rawdata_task
+
+    update({"status": "hashing", "result": None, "error": None})
+    with _ssh_connection(runner_id) as ssh:
+        out, err, code = ssh.exec(remote_md5_command(remote_path), timeout=3600)
+        if code != 0:
+            raise RuntimeError(f"remote md5 failed: {err or out}")
+        data_md5 = out.strip()
+        if not data_md5:
+            raise RuntimeError("remote md5 returned empty result")
+
+        with tempfile.TemporaryDirectory(prefix="yuki_register_") as tmp:
+            create_canonical_rawdata_task(tmp, descriptor, data_md5)
+            impression_uuid = VImpression().generate_imp_uuid(
+                project_uuid, tmp, [])
+
+        settings = _ssh_settings(runner_id)
+        managed_dir = (f"{settings.get('remote_workdir', '/tmp/yuki-workflows')}"
+                       f"/impressions/{project_uuid}/{impression_uuid}")
+        update({"status": "copying", "result": None, "error": None})
+        out, err, code = ssh.exec(
+            build_remote_fast_copy_command(remote_path, managed_dir),
+            timeout=10800)
+        if code != 0:
+            raise RuntimeError(f"remote copy failed: {err or out}")
+
+        update({"status": "registering", "result": None, "error": None})
+        synthesize_impression(project_uuid, impression_uuid, data_md5,
+                              descriptor, runner_id, remote_path, managed_dir)
+        return {"uuid": data_md5, "impression_uuid": impression_uuid,
+                "descriptor": descriptor}

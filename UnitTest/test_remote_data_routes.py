@@ -1,7 +1,6 @@
 """Tests for register-remote-data routes and job state."""
 import json
 import os
-import tempfile
 from unittest import mock
 
 from CelebiChrono.utils.metadata import ConfigFile
@@ -44,6 +43,14 @@ def test_job_state_roundtrip(tmp_path):
     state = remote_data_ops.read_job_state(yuki_dir, "j1")
     assert state["status"] == "hashing"
     assert state["runner_id"] == "r1"
+
+
+def test_read_job_state_corrupt(tmp_path):
+    jobs_dir = tmp_path / "register-jobs"
+    os.makedirs(str(jobs_dir))
+    with open(str(jobs_dir / "j1.json"), "w", encoding="utf-8") as f:
+        f.write("{not valid json")
+    assert remote_data_ops.read_job_state(str(tmp_path), "j1") is None
 
 
 def test_find_existing_registration(tmp_path):
@@ -125,6 +132,62 @@ def test_register_remote_data_idempotent(monkeypatch, tmp_path):
                   "project_uuid": "proj"})
     task.apply_async.assert_not_called()
     assert r.get_json()["result"]["uuid"] == "abcdef"
+
+
+def test_register_remote_data_missing_field(monkeypatch, tmp_path):
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    r = _app(remote_data_routes.bp).test_client().post(
+        "/register-remote-data",
+        json={"runner": "cluster", "remote_path": "/p"})
+    assert r.status_code == 400
+    assert "missing required field" in r.get_json()["error"]
+
+
+def test_register_remote_data_form_body(monkeypatch, tmp_path):
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    with mock.patch.object(remote_data_routes, "task_register_remote_data") as task:
+        r = _app(remote_data_routes.bp).test_client().post(
+            "/register-remote-data",
+            data={"runner": "cluster", "remote_path": "/src/data",
+                  "project_uuid": "proj", "descriptor": "mydata"})
+    assert r.status_code == 200
+    assert r.get_json()["job_id"]
+    task.apply_async.assert_called_once()
+
+
+def test_register_remote_data_inflight(monkeypatch, tmp_path):
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    runner_id = _register_runner(config_obj)
+    remote_data_ops.write_job_state(
+        str(tmp_path), "job-7",
+        {"status": "hashing", "result": None, "error": None,
+         "runner_id": runner_id, "remote_path": "/src/data"})
+    with mock.patch.object(remote_data_routes, "task_register_remote_data") as task:
+        r = _app(remote_data_routes.bp).test_client().post(
+            "/register-remote-data",
+            json={"runner": "cluster", "remote_path": "/src/data",
+                  "project_uuid": "proj"})
+    assert r.status_code == 200
+    assert r.get_json() == {"job_id": "job-7"}
+    task.apply_async.assert_not_called()
+
+
+def test_register_remote_data_enqueue_failure(monkeypatch, tmp_path):
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    with mock.patch.object(remote_data_routes, "task_register_remote_data") as task:
+        task.apply_async.side_effect = RuntimeError("broker down")
+        r = _app(remote_data_routes.bp).test_client().post(
+            "/register-remote-data",
+            json={"runner": "cluster", "remote_path": "/src/data",
+                  "project_uuid": "proj"})
+    assert r.status_code == 500
+    job_id = r.get_json()["job_id"]
+    state = remote_data_ops.read_job_state(str(tmp_path), job_id)
+    assert state["status"] == "failed"
+    assert "broker down" in state["error"]
 
 
 def test_register_remote_data_status(monkeypatch, tmp_path):

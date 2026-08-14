@@ -7,17 +7,11 @@ GET  /register-remote-data/<job_id>   poll job state
 import os
 from flask import Blueprint, request, jsonify
 from CelebiChrono.utils import csys
-from CelebiChrono.utils.metadata import ConfigFile
 from ...kernel import remote_data_ops
 from ..config import config
+from ..tasks import task_register_remote_data
 
 bp = Blueprint('remote_data', __name__)
-
-# NOTE: task_register_remote_data is defined in Task 3 (Yuki/server/tasks.py).
-# Until then, keep this module-level stub so the module imports; the route
-# tests mock this attribute either way. Task 3 replaces the stub with:
-#   from ..tasks import task_register_remote_data
-task_register_remote_data = None
 
 
 @bp.route("/register-remote-data", methods=['POST'])
@@ -57,8 +51,16 @@ def register_remote_data():
         "status": "hashing", "result": None, "error": None,
         "runner_id": runner_id, "remote_path": remote_path,
     })
-    task_register_remote_data.apply_async(
-        args=[job_id, runner_id, remote_path, project_uuid, descriptor])
+    try:
+        task_register_remote_data.apply_async(
+            args=[job_id, runner_id, remote_path, project_uuid, descriptor])
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # Record the failure so find_inflight_job never wedges on this job.
+        remote_data_ops.write_job_state(yuki_dir, job_id, {
+            "status": "failed", "result": None, "error": str(e),
+            "runner_id": runner_id, "remote_path": remote_path,
+        })
+        return jsonify({"job_id": job_id, "error": str(e)}), 500
     return jsonify({"job_id": job_id})
 
 
