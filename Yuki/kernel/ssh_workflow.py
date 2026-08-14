@@ -7,6 +7,7 @@ by copying files to a remote host over SFTP and running Snakemake there over SSH
 import io
 import json
 import os
+import shlex
 import stat
 from logging import getLogger
 
@@ -314,6 +315,33 @@ class SshWorkflow(VWorkflow):
 
                 elif job.is_input:
                     impression = job.path.split("/")[-1]
+                    remote_marker = os.path.join(
+                        os.environ["HOME"], ".Yuki", "Storage",
+                        self.project_uuid, impression, "remote.json")
+                    if os.path.exists(remote_marker):
+                        marker_cfg = metadata.ConfigFile(remote_marker)
+                        host_runner = marker_cfg.read_variable(
+                            "host_runner_id", "")
+                        if host_runner != (self.machine_id or ""):
+                            raise RuntimeError(
+                                f"Data impression {impression} is hosted on "
+                                f"another runner ({host_runner}); cannot stage "
+                                "remotely")
+                        managed_path = marker_cfg.read_variable(
+                            "remote_path", "")
+                        dst_path = (f"{self.remote_exec_path}/"
+                                    f"imp{job.short_uuid()}/stageout")
+                        with self._ssh() as ssh:
+                            ssh.mkdir_p(dst_path)
+                            out, err, code = ssh.exec(
+                                f"cp -a --reflink=auto "
+                                f"{shlex.quote(managed_path)}/. "
+                                f"{shlex.quote(dst_path)}/",
+                                timeout=3600)
+                            if code != 0:
+                                raise RuntimeError(
+                                    f"Remote data staging failed: {err or out}")
+                        continue
                     src_stageout = os.path.join(
                         os.environ["HOME"],
                         ".Yuki",
