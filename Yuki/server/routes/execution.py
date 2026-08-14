@@ -28,11 +28,11 @@ def execute():
         print(request)
         machine = request.form["machine"]
         project_uuid = request.form['project_uuid']
-        use_eos_dict = request.form["cache_on_runner"]
-        use_eos_dict = json.loads(use_eos_dict)
+        cache_dict = request.form["cache_on_runner"]
+        cache_dict = json.loads(cache_dict)
         contents = request.files["impressions"].read().decode()
         start_jobs = []
-        print("use_eos:", use_eos_dict)
+        print("cache_on_runner:", cache_dict)
         print("machine:", machine)
         print("contents:", contents.split(" "))
 
@@ -50,7 +50,7 @@ def execute():
                 job.set_status(PRELUDE, "Job queued for execution")
                 # Redefine, only aim for write use_eos variable
                 start_job = VJob(job_path, machine)
-                use_eos = use_eos_dict.get(impression, False)
+                use_eos = cache_dict.get(impression, False)
                 start_job.set_cache_on_runner(use_eos)
                 start_jobs.append(job)
             elif job.job_type() == "algorithm":
