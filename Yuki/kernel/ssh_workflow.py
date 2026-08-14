@@ -180,9 +180,12 @@ class SshWorkflow(VWorkflow):
         """Initialize remote SSH workflow."""
         super().__init__(project_uuid, jobs, uuid)
         self.ssh_config = self._load_ssh_config()
+        base = self.ssh_config.get("remote_workdir", "/tmp/yuki-workflows")
         self.remote_exec_path = os.path.join(
-            self.ssh_config.get("remote_workdir", "/tmp/yuki-workflows"),
-            self.uuid,
+            base, "workflows", self.project_uuid, self.uuid,
+        ).replace(os.sep, "/")
+        self.remote_impressions_path = os.path.join(
+            base, "impressions", self.project_uuid,
         ).replace(os.sep, "/")
 
     def _load_ssh_config(self):
@@ -265,6 +268,8 @@ class SshWorkflow(VWorkflow):
         }
         with self._ssh() as ssh:
             ssh.mkdir_p(self.remote_exec_path)
+            # Reserved for future output caching (à la EOS in reana_workflow)
+            ssh.mkdir_p(self.remote_impressions_path)
             remote_info_path = f"{self.remote_exec_path}/workflow_info.json"
             ssh.put_text(json.dumps(workflow_info, indent=2), remote_info_path)
 
