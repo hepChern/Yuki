@@ -65,6 +65,17 @@ def test_docker_run_celebi_dir_mount(tmp_path):
     assert f"{celebi}:/app/CelebiChrono" in cmd
 
 
+def test_docker_run_precreates_missing_yuki_dir(tmp_path):
+    """The CLI must create a missing host storage dir as the invoking user.
+    Otherwise the Docker daemon creates it as root at mount time and the
+    non-root container (uid 1000) cannot write to it."""
+    target = tmp_path / "fresh-yuki-dir"
+    result, _ = _run(["docker", "run", "--yuki-dir", str(target)])
+
+    assert result.exit_code == 0, result.output
+    assert target.is_dir()
+
+
 def test_docker_run_rejects_missing_dev_dir():
     result, _ = _run(["docker", "run", "--dev-dir", "/nonexistent-xyz"])
 

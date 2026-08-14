@@ -72,6 +72,10 @@ def docker_run(image, yuki_dir, port, dev_dir, celebi_dir):
     IMAGE is the Docker image name (default: yuki:latest).
     """
     yuki_dir = os.path.expanduser(yuki_dir)
+    # Create the storage dir as the invoking user before `docker run`.
+    # Otherwise the Docker daemon creates a missing bind-mount source as
+    # root, and the non-root container (uid 1000) cannot write to it.
+    os.makedirs(yuki_dir, exist_ok=True)
     if _docker_is_rootless():
         # Rootless Docker maps container uid 1000 to an unprivileged host
         # subuid that cannot write the bind-mounted host dir. Container root
