@@ -137,3 +137,34 @@ def test_runner_health_untested_and_persisted(monkeypatch, tmp_path):
     monkeypatch.setattr(runner_probe.shutil, "which", lambda name: None)
     client.get("/test-runner/local")
     assert client.get("/runner-health/local").get_json()["status"] == "failed"
+
+
+def test_probe_ssh_abort_error_names_exception_type(monkeypatch):
+    """Exceptions with empty str() must still produce a readable error."""
+    import paramiko
+
+    class EmptyStrException(Exception):
+        def __str__(self):
+            return ""
+
+    mock_client = mock.MagicMock()
+    responses = iter([
+        (mock.MagicMock(**{"read.return_value": b"9.0"}),
+         mock.MagicMock(**{"read.return_value": b""})),
+    ])
+
+    def exec_side_effect(cmd, timeout=None):
+        if "snakemake" in cmd:
+            return (mock.MagicMock(),
+                    mock.MagicMock(**{"read.return_value": b"9.0"}),
+                    mock.MagicMock(**{"read.return_value": b""}))
+        raise EmptyStrException()
+
+    mock_client.exec_command.side_effect = exec_side_effect
+    with mock.patch("paramiko.SSHClient") as ssh_cls:
+        ssh_cls.return_value = mock_client
+        checks = runner_probe.probe_ssh({"host": "h", "user": "u"})
+    assert checks["connectivity"]["ok"] is True
+    assert checks["snakemake"]["ok"] is True
+    assert checks["conda"]["ok"] is False
+    assert "EmptyStrException" in checks["conda"]["error"]

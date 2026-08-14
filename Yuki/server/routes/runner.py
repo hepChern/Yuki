@@ -163,27 +163,26 @@ def _write_ssh_config(config_file, runner_id, data):
     """Store SSH-specific runner settings in config.
 
     ``data`` may be a werkzeug MultiDict (request.form) or a plain dict.
+    Merge semantics: only keys present in ``data`` are written, so a
+    partial update (e.g. only ssh_key_path) never wipes sibling fields.
     """
-    ssh_hosts = config_file.read_variable("ssh_hosts", {})
-    ssh_users = config_file.read_variable("ssh_users", {})
-    ssh_key_paths = config_file.read_variable("ssh_key_paths", {})
-    ssh_ports = config_file.read_variable("ssh_ports", {})
-    remote_workdirs = config_file.read_variable("remote_workdirs", {})
+    for field, key in (("ssh_host", "ssh_hosts"),
+                       ("ssh_user", "ssh_users"),
+                       ("ssh_key_path", "ssh_key_paths"),
+                       ("remote_workdir", "remote_workdirs")):
+        if data.get(field):
+            mapping = config_file.read_variable(key, {})
+            mapping[runner_id] = data.get(field)
+            config_file.write_variable(key, mapping)
 
-    ssh_hosts[runner_id] = data.get("ssh_host", "")
-    ssh_users[runner_id] = data.get("ssh_user", "")
-    ssh_key_paths[runner_id] = data.get("ssh_key_path", "")
-    try:
-        ssh_ports[runner_id] = int(data.get("ssh_port", 22))
-    except (ValueError, TypeError):
-        ssh_ports[runner_id] = 22
-    remote_workdirs[runner_id] = data.get("remote_workdir", "/tmp/yuki-workflows")
-
-    config_file.write_variable("ssh_hosts", ssh_hosts)
-    config_file.write_variable("ssh_users", ssh_users)
-    config_file.write_variable("ssh_key_paths", ssh_key_paths)
-    config_file.write_variable("ssh_ports", ssh_ports)
-    config_file.write_variable("remote_workdirs", remote_workdirs)
+    if data.get("ssh_port") is not None:
+        try:
+            port = int(data.get("ssh_port"))
+        except (ValueError, TypeError):
+            port = 22
+        ssh_ports = config_file.read_variable("ssh_ports", {})
+        ssh_ports[runner_id] = port
+        config_file.write_variable("ssh_ports", ssh_ports)
 
 
 def _remove_ssh_config(config_file, runner_id):

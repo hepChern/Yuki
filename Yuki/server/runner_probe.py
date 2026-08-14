@@ -12,7 +12,10 @@ def _ok(**extra):
 
 
 def _err(error):
-    return {"ok": False, "error": str(error)}
+    # Some exceptions (e.g. paramiko.SSHException) have an empty str();
+    # fall back to the type name so the error stays readable.
+    text = str(error) or type(error).__name__
+    return {"ok": False, "error": text}
 
 
 def _probe_tool(path_setting, binary):
@@ -101,9 +104,10 @@ def probe_ssh(ssh_settings):  # pylint: disable=too-many-locals
         checks["workdir_writable"] = _err(err) if err else _ok(path=workdir)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         # A mid-probe transport failure must fail the record, not drop keys.
-        checks[current] = _err(f"probe aborted: {exc}")
+        detail = str(exc) or type(exc).__name__
+        checks[current] = _err(f"probe aborted: {detail}")
         for name in check_names:
-            checks.setdefault(name, _err(f"probe aborted: {exc}"))
+            checks.setdefault(name, _err(f"probe aborted: {detail}"))
     finally:
         client.close()
     return checks

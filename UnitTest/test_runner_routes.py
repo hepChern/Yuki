@@ -302,3 +302,23 @@ def test_remove_runner_cleans_settings_health_and_stale_ssh(monkeypatch):
     assert runner_id not in cfg.get("ssh_hosts", {})
     assert runner_id not in cfg.get("runner_settings", {})
     assert runner_id not in cfg.get("runner_health", {})
+
+
+def test_update_runner_partial_ssh_preserves_existing_fields(monkeypatch):
+    """PATCH with only some ssh fields must not wipe the others."""
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u", "ssh_key_path": "/k",
+        "ssh_port": "2222", "remote_workdir": "/remote",
+    })
+    r = c.patch("/update-runner/cluster", json={"ssh_key_path": "/newkey"})
+    assert r.status_code == 200
+    cfg = json.load(open(runner_routes.config.config_path, encoding="utf-8"))
+    runner_id = cfg["runners_id"]["cluster"]
+    assert cfg["ssh_key_paths"][runner_id] == "/newkey"   # updated
+    assert cfg["ssh_hosts"][runner_id] == "h"             # preserved
+    assert cfg["ssh_users"][runner_id] == "u"             # preserved
+    assert cfg["ssh_ports"][runner_id] == 2222            # preserved
+    assert cfg["remote_workdirs"][runner_id] == "/remote"  # preserved
