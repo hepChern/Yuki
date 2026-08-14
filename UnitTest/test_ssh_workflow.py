@@ -326,6 +326,13 @@ class TestSshWorkflow(unittest.TestCase):
         """
         mock_ssh_cls.return_value = self.mock_client
 
+        def exec_side_effect(command, timeout=300):
+            if command.startswith("test -d"):
+                return MagicMock(), _MockStdout("", exit_code=1), _MockStderr("")
+            return MagicMock(), _MockStdout(""), _MockStderr("")
+
+        self.mock_client.exec_command.side_effect = exec_side_effect
+
         job = self._make_job("a" * 32, is_input=True)
         job.machine_id = "runner-uuid"
         self.workflow.jobs = [job]
@@ -350,6 +357,13 @@ class TestSshWorkflow(unittest.TestCase):
     def test_upload_files_remote_preserves_nested_input_structure(self, mock_ssh_cls):
         """Nested subdirectories inside input stageout must be uploaded recursively."""
         mock_ssh_cls.return_value = self.mock_client
+
+        def exec_side_effect(command, timeout=300):
+            if command.startswith("test -d"):
+                return MagicMock(), _MockStdout("", exit_code=1), _MockStderr("")
+            return MagicMock(), _MockStdout(""), _MockStderr("")
+
+        self.mock_client.exec_command.side_effect = exec_side_effect
 
         job = self._make_job("a" * 32, is_input=True)
         job.machine_id = "runner-uuid"

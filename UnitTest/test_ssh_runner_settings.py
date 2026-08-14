@@ -204,3 +204,101 @@ def test_stage_remote_hosted_input_wrong_runner_raises(tmp_path, monkeypatch):
         with pytest.raises(RuntimeError) as exc:
             wf._upload_files_remote()
     assert "another runner" in str(exc.value)
+
+
+def _input_job_stub(marker_dir, env="rawdata"):
+    fake_job = mock.MagicMock()
+    fake_job.files.return_value = []
+    fake_job.environment.return_value = env
+    fake_job.is_input = True
+    fake_job.machine_id = "m1"
+    fake_job.short_uuid.return_value = "abc1234"
+    fake_job.path = str(marker_dir.parent / "imp-abc")
+    return fake_job
+
+
+def _wf_with_input(tmp_path, monkeypatch, fake_job):
+    wf = _workflow(tmp_path, monkeypatch, {
+        "runner_settings": {"m1": {"ssh_host": "h", "ssh_user": "u",
+                                   "remote_workdir": "/remote/work"}},
+    })
+    wf.ssh_config = wf._load_ssh_config()
+    wf.remote_exec_path = "/remote/work/workflows/proj-123/wf-456"
+    wf.project_uuid = "proj-123"
+    wf.machine_id = "m1"
+    wf.snakefile_path = "/local/Snakefile"
+    wf.jobs = [fake_job]
+    wf.logger = lambda msg: None
+    return wf
+
+
+def test_input_cache_hit_skips_sftp(tmp_path, monkeypatch):
+    """A non-empty impressions cache stages via remote cp, no SFTP upload."""
+    yuki_dir = tmp_path / ".Yuki"
+    (yuki_dir / "Storage" / "proj-123").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fake_job = _input_job_stub(yuki_dir / "Storage" / "proj-123" / "imp-abc")
+    wf = _wf_with_input(tmp_path, monkeypatch, fake_job)
+
+    commands = []
+    puts = []
+
+    class FakeSsh:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def mkdir_p(self, path): commands.append(("mkdir", path))
+        def exec(self, command, timeout=None):
+            commands.append(("exec", command))
+            if command.startswith("test -d"):
+                return "", "", 0  # cache hit
+            return "", "", 0
+        def put(self, src, dst): puts.append((src, dst))
+        def put_text(self, text, path): pass
+
+    with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
+        wf._upload_files_remote()
+
+    execs = [c for kind, c in commands if kind == "exec"]
+    cp_cmd = [c for c in execs if "cp -a --reflink=auto" in c][0]
+    assert "/remote/work/impressions/proj-123/imp-abc/." in cp_cmd
+    assert "impabc1234/stageout" in cp_cmd
+    # no SFTP put of data files (only the Snakefile put is allowed)
+    data_puts = [p for p in puts if "stageout" in p[1]]
+    assert data_puts == []
+
+
+def test_input_cache_miss_writes_through(tmp_path, monkeypatch):
+    """On a miss, data is SFTP-uploaded AND cached into impressions."""
+    yuki_dir = tmp_path / ".Yuki"
+    src_stageout = yuki_dir / "Storage" / "proj-123" / "imp-abc" / "m1" / "stageout"
+    src_stageout.mkdir(parents=True)
+    with open(src_stageout / "data.txt", "w") as f:
+        f.write("payload")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    fake_job = _input_job_stub(yuki_dir / "Storage" / "proj-123" / "imp-abc",
+                               env="analysis")
+    wf = _wf_with_input(tmp_path, monkeypatch, fake_job)
+
+    commands = []
+
+    class FakeSsh:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def mkdir_p(self, path): commands.append(("mkdir", path))
+        def exec(self, command, timeout=None):
+            commands.append(("exec", command))
+            if command.startswith("test -d"):
+                return "", "", 1  # cache miss
+            return "", "", 0
+        def put(self, src, dst): commands.append(("put", f"{src}->{dst}"))
+        def put_text(self, text, path): pass
+
+    with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
+        wf._upload_files_remote()
+
+    execs = [c for kind, c in commands if kind == "exec"]
+    puts = [c for kind, c in commands if kind == "put"]
+    assert any("data.txt" in p for p in puts), puts
+    write_through = [c for c in execs
+                     if "mkdir -p /remote/work/impressions/proj-123/imp-abc" in c]
+    assert write_through, execs

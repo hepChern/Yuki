@@ -207,6 +207,29 @@ class SshWorkflow(VWorkflow):
             port=cfg.get("port", DEFAULT_SSH_PORT),
         )
 
+    def _rawdata_cache_dir(self, impression):
+        """The runner-side rawdata cache dir for an impression."""
+        base = self.ssh_config.get("remote_workdir", "/tmp/yuki-workflows")
+        return f"{base}/impressions/{self.project_uuid}/{impression}"
+
+    def _cache_hit(self, ssh, cache_dir):
+        """True when the runner-side rawdata cache holds files."""
+        _, _, code = ssh.exec(
+            f"test -d {shlex.quote(cache_dir)} && "
+            f"test -n \"$(ls -A {shlex.quote(cache_dir)})\"")
+        return code == 0
+
+    def _write_through_cache(self, ssh, cache_dir, stageout_dir):
+        """Copy staged files into the runner-side rawdata cache."""
+        out, err, code = ssh.exec(
+            f"mkdir -p {shlex.quote(cache_dir)} && "
+            f"cp -a --reflink=auto {shlex.quote(stageout_dir)}/. "
+            f"{shlex.quote(cache_dir)}/",
+            timeout=3600)
+        if code != 0:
+            self.logger(f"[SSH] Write-through cache failed for "
+                        f"{cache_dir}: {err or out}")
+
     def _execute_backend(self):
         """Execute workflow using a remote SSH backend."""
         try:
@@ -331,6 +354,24 @@ class SshWorkflow(VWorkflow):
                                     f"Remote data staging failed: {err or out}")
                         continue
 
+                if job.is_input:
+                    cache_dir = self._rawdata_cache_dir(impression)
+                    if self._cache_hit(ssh, cache_dir):
+                        dst_path = (f"{self.remote_exec_path}/"
+                                    f"imp{job.short_uuid()}/stageout")
+                        ssh.mkdir_p(dst_path)
+                        out, err, code = ssh.exec(
+                            f"cp -a --reflink=auto "
+                            f"{shlex.quote(cache_dir)}/. "
+                            f"{shlex.quote(dst_path)}/",
+                            timeout=3600)
+                        if code != 0:
+                            raise RuntimeError(
+                                f"Rawdata cache staging failed: {err or out}")
+                        self.logger(f"[SSH] Cache hit: staged {impression} "
+                                    "from runner impressions")
+                        continue
+
                 if job.environment() == "rawdata":
                     rawdata_path = os.path.join(job.path, "rawdata")
                     if os.path.exists(rawdata_path):
@@ -346,6 +387,11 @@ class SshWorkflow(VWorkflow):
                                 f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded rawdata "
                                 f"{f_idx+1}/{total_raw}: {rel_path}"
                             )
+                        if total_raw:
+                            self._write_through_cache(
+                                ssh, cache_dir,
+                                f"{self.remote_exec_path}/"
+                                f"imp{job.short_uuid()}/stageout")
 
                 elif job.is_input:
                     src_stageout = os.path.join(
@@ -370,6 +416,11 @@ class SshWorkflow(VWorkflow):
                                 f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded input "
                                 f"{f_idx+1}/{total_input}: {rel_path}"
                             )
+                        if total_input:
+                            self._write_through_cache(
+                                ssh, cache_dir,
+                                f"{self.remote_exec_path}/"
+                                f"imp{job.short_uuid()}/stageout")
 
             ssh.put(self.snakefile_path, f"{self.remote_exec_path}/Snakefile")
             self.logger("[SSH] Uploaded: Snakefile")
