@@ -1,0 +1,58 @@
+"""Tests for ssh runner settings consumption."""
+import json
+import os
+from unittest import mock
+
+from Yuki.kernel.ssh_workflow import SshWorkflow
+
+
+def _workflow(tmp_path, monkeypatch, config_data):
+    yuki_dir = tmp_path / ".Yuki"
+    yuki_dir.mkdir(parents=True)
+    (yuki_dir / "config.json").write_text(json.dumps(config_data))
+    monkeypatch.setenv("YUKIDIR", str(yuki_dir))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with mock.patch.object(SshWorkflow, "__init__", lambda self, *a, **k: None):
+        wf = SshWorkflow.__new__(SshWorkflow)
+    wf.machine_id = "m1"
+    return wf
+
+
+def test_load_ssh_config_merges_new_and_legacy(tmp_path, monkeypatch):
+    wf = _workflow(tmp_path, monkeypatch, {
+        "ssh_hosts": {"m1": "legacy-host"},
+        "runner_settings": {"m1": {"ssh_user": "new-user", "cores": 16}},
+    })
+    cfg = wf._load_ssh_config()
+    assert cfg["host"] == "legacy-host"   # legacy fallback
+    assert cfg["user"] == "new-user"      # new map
+    assert cfg["cores"] == 16
+
+
+def test_wrapper_uses_cores_and_paths(tmp_path, monkeypatch):
+    wf = _workflow(tmp_path, monkeypatch, {
+        "runner_settings": {"m1": {
+            "ssh_host": "h", "ssh_user": "u", "cores": 8,
+            "snakemake_path": "/opt/bin/snakemake",
+            "conda_path": "/opt/conda/bin/conda",
+            "remote_workdir": "/remote",
+        }},
+    })
+    wf.ssh_config = wf._load_ssh_config()
+    wf.remote_exec_path = "/remote/wf-uuid"
+    wf.logger = lambda msg: None
+
+    written = {}
+
+    class FakeSsh:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def put_text(self, text, path): written[path] = text
+        def exec(self, cmd): return "", "", 0
+
+    with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
+        wf._start_remote_snakemake()
+
+    wrapper = written["/remote/wf-uuid/yuki_run.sh"]
+    assert "/opt/bin/snakemake --use-conda --cores 8" in wrapper
+    assert "/opt/conda/bin" in wrapper  # PATH injection for conda

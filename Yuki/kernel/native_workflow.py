@@ -11,6 +11,7 @@ import shutil
 import json
 from CelebiChrono.utils import metadata
 from Yuki.utils.env_interpreter import EnvInterpreter
+from Yuki.kernel import runner_config
 from .vworkflow import VWorkflow
 from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
 from . import file_types
@@ -25,15 +26,12 @@ class NativeWorkflow(VWorkflow):
     def __init__(self, project_uuid, jobs, uuid=None):
         """Initialize local workflow."""
         super().__init__(project_uuid, jobs, uuid)
-        # Create a local execution directory
-        self.local_exec_path = os.path.join(
-                os.path.join(
-                    os.environ["HOME"],
-                    ".Yuki",
-                    "LocalWorkflows",
-                    self.uuid,
-                    )
-                )
+        # Create a local execution directory, honoring a per-runner workdir
+        settings = runner_config.get_runner_settings(
+            runner_config.open_config(), self.machine_id or "")
+        base_dir = settings.get("workdir") or os.path.join(
+            os.environ["HOME"], ".Yuki", "LocalWorkflows")
+        self.local_exec_path = os.path.join(base_dir, self.uuid)
         os.makedirs(self.local_exec_path, exist_ok=True)
 
     def _execute_backend(self):

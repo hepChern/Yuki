@@ -4,6 +4,8 @@ Runner management routes.
 import os
 from flask import Blueprint, request, jsonify
 from CelebiChrono.utils import csys
+from ...kernel import runner_config
+from .. import runner_probe
 from ..config import config
 from ..utils import ping
 
@@ -59,7 +61,12 @@ def runnersurl():
     runners_list = config_file.read_variable("runners", [])
     runners_id = config_file.read_variable("runners_id", {})
     runners_url = config_file.read_variable("urls", {})
-    return " ".join([runners_url[runners_id[runner]] for runner in runners_list])
+    urls = []
+    for runner in runners_list:
+        url = runners_url.get(runners_id.get(runner, ""), "")
+        if url:
+            urls.append(url)
+    return " ".join(urls)
 
 
 @bp.route("/runner-connection/<runner>", methods=['GET'])
@@ -94,37 +101,62 @@ def runnerconnection(runner):
 @bp.route("/register-runner", methods=['POST'])
 def registerrunner():
     """Register a new runner."""
-    if request.method == 'POST':
-        print(request.form)
-        runner = request.form["runner"]
-        runner_url = request.form["url"]
-        runner_token = request.form["token"]
-        backend_type = request.form.get("backend_type", "native")
-        runner_id = csys.generate_uuid()
+    for field in ("runner", "url", "token"):
+        if field not in request.form:
+            return f"missing required field: {field}", 400
+    runner = request.form["runner"]
+    backend_type = request.form.get("backend_type", "native")
 
-        config_file = config.get_config_file()
-        runners_list = config_file.read_variable("runners", [])
-        runners_id = config_file.read_variable("runners_id", {})
-        runners_url = config_file.read_variable("urls", {})
-        tokens = config_file.read_variable("tokens", {})
-        backend_types = config_file.read_variable("backend_types", {})
+    config_file = config.get_config_file()
+    runners_list = config_file.read_variable("runners", [])
+    if runner in runners_list:
+        return f"runner '{runner}' already exists", 409
 
-        runners_list.append(runner)
-        runners_id[runner] = runner_id
-        runners_url[runner_id] = runner_url
-        tokens[runner_id] = runner_token
-        backend_types[runner_id] = backend_type
+    runner_id = csys.generate_uuid()
+    runners_id = config_file.read_variable("runners_id", {})
+    runners_url = config_file.read_variable("urls", {})
+    tokens = config_file.read_variable("tokens", {})
+    backend_types = config_file.read_variable("backend_types", {})
 
-        config_file.write_variable("runners", runners_list)
-        config_file.write_variable("runners_id", runners_id)
-        config_file.write_variable("urls", runners_url)
-        config_file.write_variable("tokens", tokens)
-        config_file.write_variable("backend_types", backend_types)
+    runners_list.append(runner)
+    runners_id[runner] = runner_id
+    runners_url[runner_id] = request.form["url"]
+    tokens[runner_id] = request.form["token"]
+    backend_types[runner_id] = backend_type
 
-        if backend_type == "ssh":
-            _write_ssh_config(config_file, runner_id, request.form)
+    config_file.write_variable("runners", runners_list)
+    config_file.write_variable("runners_id", runners_id)
+    config_file.write_variable("urls", runners_url)
+    config_file.write_variable("tokens", tokens)
+    config_file.write_variable("backend_types", backend_types)
 
+    if backend_type == "ssh":
+        _write_ssh_config(config_file, runner_id, request.form)
+
+    settings = _collect_settings(request.form)
+    if settings:
+        runner_config.merge_runner_settings(config_file, runner_id, settings)
     return "successful"
+
+
+_SETTING_FIELDS = ("workdir", "conda_path", "snakemake_path",
+                   "ssh_host", "ssh_user", "ssh_key_path", "remote_workdir")
+_SETTING_INT_FIELDS = ("cores", "mem_mb", "ssh_port")
+
+
+def _collect_settings(data):
+    """Collect runner_settings fields from form data or a JSON dict."""
+    settings = {}
+    for field in _SETTING_FIELDS:
+        if data.get(field):
+            settings[field] = data.get(field)
+    for field in _SETTING_INT_FIELDS:
+        if data.get(field) is not None:
+            try:
+                settings[field] = int(data.get(field))
+            except (ValueError, TypeError):
+                pass
+    return settings
 
 
 def _write_ssh_config(config_file, runner_id, data):
@@ -177,7 +209,6 @@ def removerunner(runner):
         return "runner not found"
 
     runner_id = runners_id[runner]
-    backend_type = backend_types.get(runner_id, "reana")
     print("runner_id", runner_id)
     runners_list.remove(runner)
     del runners_id[runner]
@@ -200,8 +231,12 @@ def removerunner(runner):
     config_file.write_variable("tokens", tokens)
     config_file.write_variable("backend_types", backend_types)
 
-    if backend_type == "ssh":
-        _remove_ssh_config(config_file, runner_id)
+    _remove_ssh_config(config_file, runner_id)
+    for key in ("runner_settings", "runner_health"):
+        data = config_file.read_variable(key, {})
+        if runner_id in data:
+            del data[runner_id]
+            config_file.write_variable(key, data)
 
     return "successful"
 
@@ -254,6 +289,10 @@ def update_runner(runner):
     if "cvmfs" in data:
         cvmfs_repos[runner_id] = data["cvmfs"]
 
+    settings = _collect_settings(data)
+    if settings:
+        runner_config.merge_runner_settings(config_file, runner_id, settings)
+
     new_backend_type = backend_types.get(runner_id, "reana")
 
     config_file.write_variable("urls", urls)
@@ -303,6 +342,10 @@ def runners_config():
             "eos_mount_point": eos_mount_points.get(runner_id, ""),
             "cvmfs": cvmfs_repos.get(runner_id, []),
         }
+        runner_cfg["settings"] = runner_config.get_runner_settings(
+            config_file, runner_id)
+        runner_cfg["health"] = runner_config.get_runner_health(
+            config_file, runner_id)
         if backend_type == "ssh":
             runner_cfg.update({
                 "ssh_host": ssh_hosts.get(runner_id, ""),
@@ -319,5 +362,48 @@ def runners_config():
 def machine_id(machine):
     """Get machine ID for a specific machine."""
     config_file = config.get_config_file()
-    runner_id = config_file.read_variable("runners_id", {})
-    return runner_id[machine]
+    runner_ids = config_file.read_variable("runners_id", {})
+    if machine not in runner_ids:
+        return "machine not found", 404
+    return runner_ids[machine]
+
+
+@bp.route("/test-runner/<runner>", methods=['GET'])
+def test_runner(runner):
+    """Probe a runner's capabilities and persist the result."""
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"Runner '{runner}' not found"}), 404
+    runner_id = runners_id[runner]
+    backend_types = config_file.read_variable("backend_types", {})
+    backend_type = backend_types.get(runner_id, "reana")
+    settings = runner_config.get_runner_settings(config_file, runner_id)
+
+    if backend_type == "ssh":
+        checks = runner_probe.probe_ssh(
+            runner_config.get_ssh_settings(config_file, runner_id))
+    elif backend_type == "reana":
+        urls = config_file.read_variable("urls", {})
+        tokens = config_file.read_variable("tokens", {})
+        checks = runner_probe.probe_reana(
+            urls.get(runner_id, ""), tokens.get(runner_id, ""), ping)
+    elif backend_type == "native":
+        checks = runner_probe.probe_native(settings)
+    else:  # dry / unknown backends: connectivity-only, always ok
+        checks = {"connectivity": {"ok": True}}
+
+    health = runner_probe.summarize(checks)
+    runner_config.set_runner_health(config_file, runner_id, health)
+    return jsonify(health)
+
+
+@bp.route("/runner-health/<runner>", methods=['GET'])
+def runner_health(runner):
+    """Return the persisted health of a runner (never re-probes)."""
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"Runner '{runner}' not found"}), 404
+    return jsonify(runner_config.get_runner_health(config_file,
+                                                   runners_id[runner]))

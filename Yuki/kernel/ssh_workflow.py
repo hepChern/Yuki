@@ -11,6 +11,7 @@ import stat
 from logging import getLogger
 
 from CelebiChrono.utils import metadata
+from Yuki.kernel import runner_config
 from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
 from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
@@ -185,23 +186,12 @@ class SshWorkflow(VWorkflow):
         ).replace(os.sep, "/")
 
     def _load_ssh_config(self):
-        """Read SSH connection settings from ~/.Yuki/config.json."""
-        config_path = os.path.join(
-            os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki")),
-            "config.json"
-        )
-        config_file = metadata.ConfigFile(config_path)
+        """Read SSH connection settings (new map preferred, legacy fallback)."""
         runner_id = self.machine_id or ""
         if not runner_id:
             return {}
-        return {
-            "host": config_file.read_variable("ssh_hosts", {}).get(runner_id, ""),
-            "user": config_file.read_variable("ssh_users", {}).get(runner_id, ""),
-            "key_path": config_file.read_variable("ssh_key_paths", {}).get(runner_id, ""),
-            "port": config_file.read_variable("ssh_ports", {}).get(runner_id, DEFAULT_SSH_PORT),
-            "remote_workdir": config_file.read_variable(
-                "remote_workdirs", {}).get(runner_id, "/tmp/yuki-workflows"),
-        }
+        return runner_config.get_ssh_settings(
+            runner_config.open_config(), runner_id)
 
     def _ssh(self):
         """Return a connected _SshConnection context manager."""
@@ -347,10 +337,17 @@ class SshWorkflow(VWorkflow):
 
     def _start_remote_snakemake(self):
         """Upload a wrapper script and start Snakemake remotely in the background."""
-        wrapper = '''#!/bin/bash
+        snakemake_bin = self.ssh_config.get("snakemake_path") or "snakemake"
+        cores = self.ssh_config.get("cores", "all")
+        conda_path = self.ssh_config.get("conda_path") or ""
+        path_export = ""
+        if conda_path:
+            conda_dir = conda_path.rsplit("/", 1)[0]
+            path_export = f'export PATH="{conda_dir}:$PATH"\n'
+        wrapper = f'''#!/bin/bash
 set -e
-cd "$(dirname "$0")"
-nohup snakemake --use-conda --cores all --snakefile Snakefile > snakemake.log 2>&1 &
+{path_export}cd "$(dirname "$0")"
+nohup {snakemake_bin} --use-conda --cores {cores} --snakefile Snakefile > snakemake.log 2>&1 &
 echo $! > yuki.pid
 wait $!
 echo $? > yuki.exit

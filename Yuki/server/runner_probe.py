@@ -1,0 +1,129 @@
+"""Capability probing for runners (snakemake / conda / workdir)."""
+import datetime
+import os
+import shutil
+import subprocess
+
+PROBE_TIMEOUT = 10
+
+
+def _ok(**extra):
+    return {"ok": True, **extra}
+
+
+def _err(error):
+    return {"ok": False, "error": str(error)}
+
+
+def _probe_tool(path_setting, binary):
+    """Probe one executable: configured path, else PATH lookup."""
+    path = path_setting or shutil.which(binary)
+    if not path:
+        return _err(f"{binary} not found in PATH")
+    try:
+        result = subprocess.run([path, "--version"], capture_output=True,
+                                text=True, timeout=PROBE_TIMEOUT, check=False)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        return _err(f"{binary} at {path} failed: {exc}")
+    if result.returncode != 0:
+        return _err(f"{binary} --version exited {result.returncode}: "
+                    f"{result.stderr.strip()}")
+    return _ok(version=result.stdout.strip(), path=path)
+
+
+def _default_workdir():
+    yuki_dir = os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
+    return os.path.join(yuki_dir, "LocalWorkflows")
+
+
+def probe_native(settings):
+    """Probe snakemake/conda/workdir on the Yuki host."""
+    checks = {
+        "snakemake": _probe_tool(settings.get("snakemake_path", ""), "snakemake"),
+        "conda": _probe_tool(settings.get("conda_path", ""), "conda"),
+    }
+    workdir = settings.get("workdir") or _default_workdir()
+    try:
+        os.makedirs(workdir, exist_ok=True)
+        checks["workdir_writable"] = (
+            _ok(path=workdir) if os.access(workdir, os.W_OK)
+            else _err(f"{workdir} is not writable"))
+    except OSError as exc:
+        checks["workdir_writable"] = _err(str(exc))
+    return checks
+
+
+def probe_ssh(ssh_settings):  # pylint: disable=too-many-locals
+    """Probe connectivity plus snakemake/conda/workdir on the remote host."""
+    try:
+        import paramiko
+    except ImportError:
+        return {"connectivity": _err("paramiko is not installed")}
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        key_path = ssh_settings.get("key_path") or None
+        if key_path:
+            key_path = os.path.expanduser(key_path)
+            if not os.path.exists(key_path):
+                key_path = None
+        client.connect(hostname=ssh_settings.get("host", ""),
+                       port=ssh_settings.get("port", 22),
+                       username=ssh_settings.get("user", ""),
+                       key_filename=key_path,
+                       timeout=PROBE_TIMEOUT, banner_timeout=PROBE_TIMEOUT)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        return {"connectivity": _err(exc)}
+    finally:
+        if client.get_transport() is None:
+            client.close()
+
+    checks = {"connectivity": _ok()}
+
+    def remote(cmd):
+        _, stdout, stderr = client.exec_command(cmd, timeout=PROBE_TIMEOUT)
+        return stdout.read().decode().strip(), stderr.read().decode().strip()
+
+    check_names = ("snakemake", "conda", "workdir_writable")
+    current = check_names[0]
+    try:
+        for name, setting, binary in (
+                ("snakemake", "snakemake_path", "snakemake"),
+                ("conda", "conda_path", "conda")):
+            current = name
+            tool = ssh_settings.get(setting) or binary
+            out, err = remote(f"{tool} --version")
+            checks[name] = _err(err or f"{binary} not usable") if err else _ok(version=out)
+        current = "workdir_writable"
+        workdir = ssh_settings.get("remote_workdir", "/tmp/yuki-workflows")
+        _, err = remote(f"mkdir -p {workdir} && test -w {workdir}")
+        checks["workdir_writable"] = _err(err) if err else _ok(path=workdir)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # A mid-probe transport failure must fail the record, not drop keys.
+        checks[current] = _err(f"probe aborted: {exc}")
+        for name in check_names:
+            checks.setdefault(name, _err(f"probe aborted: {exc}"))
+    finally:
+        client.close()
+    return checks
+
+
+def probe_reana(url, token, ping_func):
+    """Probe a REANA runner via the existing ping helper."""
+    try:
+        result = ping_func(url, token)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        return {"connectivity": _err(exc)}
+    if isinstance(result, dict) and result.get("status") not in (None, "Connected"):
+        return {"connectivity": _err(result.get("message", "ping failed"))}
+    return {"connectivity": _ok()}
+
+
+def summarize(checks):
+    """Build the persisted health record from check results."""
+    return {
+        "status": "failed" if any(not c.get("ok") for c in checks.values()) else "ok",
+        "checked_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "checks": checks,
+    }
