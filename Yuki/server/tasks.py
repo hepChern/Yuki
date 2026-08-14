@@ -30,54 +30,67 @@ celeryapp = create_celery_app()
 @celeryapp.task
 def task_exec_impression(project_uuid, impressions, machine_uuid):
     """Execute impressions as a background task."""
-    jobs = []
-    for impression_uuid in impressions.split(" "):
-        job_path = os.path.join(os.environ["HOME"], ".Yuki/Storage", project_uuid, impression_uuid)
-        job = VJob(job_path, machine_uuid)
-        jobs.append(job)
-    print("jobs", jobs)
     config = metadata.ConfigFile(os.path.join(os.environ["HOME"], ".Yuki/config.json"))
     backend_types = config.read_variable("backend_types", {})
     backend_type = backend_types.get(machine_uuid, "reana")
+    jobs = [
+        VJob(os.path.join(os.environ["HOME"], ".Yuki/Storage", project_uuid, imp),
+             machine_uuid)
+        for imp in impressions.split(" ")
+    ]
+    print("jobs", jobs)
     workflow = VWorkflow.create(project_uuid, jobs, None, mode=backend_type)
     print("workflow", workflow)
 
-    # Validate runner binding for remote-hosted data impressions.
-    runners_id = config.read_variable("runners_id", {})
+    marks = _validate_remote_data_binding(workflow, project_uuid, machine_uuid)
+    if marks:
+        from ..kernel.status_constants import DISSONANCE
+        workflow.set_workflow_status("failed")
+        for job, message in marks:
+            job.set_status(DISSONANCE, message)
+        return
 
-    def _remote_host(impression):
-        marker = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
-                              project_uuid, impression, "remote.json")
-        if not os.path.exists(marker):
-            return None
-        return metadata.ConfigFile(marker).read_variable("host_runner_id", "")
+    workflow.run()
+
+
+def _validate_remote_data_binding(workflow, project_uuid, machine_uuid):
+    """Validate the runner binding of remote-hosted data impressions.
+
+    Builds the workflow's real job set via construct_workflow_jobs (the same
+    walk run() performs) and checks each input job's remote.json marker.
+
+    Returns a list of (job, message) pairs for the workflow's own execution
+    jobs to mark dissonant when an input impression is hosted on a different
+    runner, or an empty list when the bindings are fine.
+    """
+    workflow.construct_workflow_jobs(workflow.start_job or [])
+    runners_id = metadata.ConfigFile(
+        os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+    ).read_variable("runners_id", {})
+    runner_names = {v: k for k, v in runners_id.items()}
 
     violations = []
     for job in workflow.jobs:
         if not job.is_input:
             continue
         impression = job.path.split("/")[-1] if job.path else ""
-        host = _remote_host(impression) if impression else None
+        marker = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
+                              project_uuid, impression, "remote.json")
+        if not os.path.exists(marker):
+            continue
+        host = metadata.ConfigFile(marker).read_variable("host_runner_id", "")
         if host and host != machine_uuid:
             violations.append((impression, host))
 
-    if violations:
-        from ..kernel.status_constants import DISSONANCE
-        impression, host = violations[0]
-        host_name = {v: k for k, v in runners_id.items()}.get(host, host)
-        message = (f"Data impression {impression} is hosted on runner "
-                   f"{host_name}. Submit this workflow to {host_name}, "
-                   "or move the data via collect (coming later).")
-        workflow.set_workflow_status("failed")
-        for job in workflow.jobs:
-            if not job.is_input:
-                continue
-            if job.job_type() == "algorithm":
-                continue
-            job.set_status(DISSONANCE, message)
-        return
-
-    workflow.run()
+    if not violations:
+        return []
+    impression, host = violations[0]
+    host_name = runner_names.get(host, host)
+    message = (f"Data impression {impression} is hosted on runner "
+               f"{host_name}. Submit this workflow to {host_name}, "
+               "or move the data via collect (coming later).")
+    return [(job, message) for job in workflow.jobs
+            if not job.is_input and job.job_type() != "algorithm"]
 
 
 @celeryapp.task
