@@ -142,3 +142,20 @@ def test_register_remote_data_job_without_project_context(monkeypatch, tmp_path)
     assert result["uuid"] == md5
     assert (tmp_path / "Storage" / "proj" / result["impression_uuid"] /
             "remote.json").exists()
+
+
+def test_register_remote_data_job_too_old_celebichrono(monkeypatch, tmp_path):
+    """A Celebichrono without generate_imp_uuid must produce an actionable error."""
+    from CelebiChrono.kernel import vimpression
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    data = _fixture_data(tmp_path)
+    md5 = dir_md5(str(data))
+    fake = FakeSsh(md5)
+    with mock.patch("Yuki.kernel.ssh_workflow._SshConnection",
+                    return_value=fake):
+        monkeypatch.delattr(vimpression.VImpression, "generate_imp_uuid")
+        with pytest.raises(RuntimeError) as exc:
+            remote_data_ops.register_remote_data_job(
+                "r1", str(data), "proj", "d", lambda s: None)
+    assert "too old" in str(exc.value)
+    assert "CELEBI_DIR" in str(exc.value)

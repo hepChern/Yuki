@@ -206,6 +206,12 @@ def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,
     from CelebiChrono.kernel.vimpression import VImpression
     from Yuki.cli.yuki_create_data import create_canonical_rawdata_task
 
+    if not hasattr(VImpression, "generate_imp_uuid"):
+        raise RuntimeError(
+            "installed CelebiChrono is too old (missing "
+            "VImpression.generate_imp_uuid); upgrade celebichrono or mount "
+            "a local checkout via CELEBI_DIR")
+
     update({"status": "hashing", "result": None, "error": None})
     with _ssh_connection(runner_id) as ssh:
         out, err, code = ssh.exec(remote_md5_command(remote_path), timeout=3600)
