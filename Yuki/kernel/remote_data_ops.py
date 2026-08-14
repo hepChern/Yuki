@@ -217,7 +217,10 @@ def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,
 
         with tempfile.TemporaryDirectory(prefix="yuki_register_") as tmp:
             create_canonical_rawdata_task(tmp, descriptor, data_md5)
-            impression_uuid = VImpression().generate_imp_uuid(
+            # Skip VImpression.__init__: it requires a Celebi project
+            # context (csys.project_path()), which the celery worker does
+            # not have. generate_imp_uuid uses no instance state.
+            impression_uuid = VImpression.__new__(VImpression).generate_imp_uuid(
                 project_uuid, tmp, [])
 
         settings = _ssh_settings(runner_id)

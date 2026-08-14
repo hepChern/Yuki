@@ -118,3 +118,27 @@ def test_task_register_remote_data_writes_done_state(monkeypatch, tmp_path):
     assert state["status"] == "done"
     assert state["result"]["uuid"] == md5
     assert state["error"] is None
+
+
+def test_register_remote_data_job_without_project_context(monkeypatch, tmp_path):
+    """The job must work when no Celebi project context exists (celery worker).
+
+    VImpression.__init__ on older CelebiChrono releases does
+    csys.project_path() + "/.chern/..." and crashes with TypeError when
+    project_path() is None. The job must not depend on project context.
+    """
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    data = _fixture_data(tmp_path)
+    md5 = dir_md5(str(data))
+    fake = FakeSsh(md5)
+    # Simulate running outside any Celebi project (docker celery worker).
+    monkeypatch.setattr("CelebiChrono.utils.csys.project_path",
+                        lambda: None)
+    updates = []
+    with mock.patch("Yuki.kernel.remote_data_ops._SshConnection",
+                    return_value=fake):
+        result = remote_data_ops.register_remote_data_job(
+            "r1", str(data), "proj", "mydata", updates.append)
+    assert result["uuid"] == md5
+    assert (tmp_path / "Storage" / "proj" / result["impression_uuid"] /
+            "remote.json").exists()
