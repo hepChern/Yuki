@@ -154,7 +154,8 @@ def test_stage_remote_hosted_input_copies_locally(tmp_path, monkeypatch):
         def __enter__(self): return self
         def __exit__(self, *a): return False
         def mkdir_p(self, path): commands.append(("mkdir", path))
-        def put(self, local_path, remote_path): pass
+        def put(self, local_path, remote_path):
+            commands.append(("put", f"{local_path} -> {remote_path}"))
         def exec(self, command, timeout=None):
             commands.append(("exec", command))
             return "", "", 0
@@ -167,6 +168,10 @@ def test_stage_remote_hosted_input_copies_locally(tmp_path, monkeypatch):
     assert copy_cmd, f"expected a remote cp, got: {execs}"
     assert "/remote/impressions/proj-123/imp-abc/." in copy_cmd[0]
     assert "impabc1234/stageout" in copy_cmd[0]
+    puts = [c for kind, c in commands if kind == "put"]
+    data_puts = [c for c in puts if "impabc1234/stageout" in c]
+    assert not data_puts, \
+        f"expected no SFTP put of remote-hosted data, got: {data_puts}"
 
 
 def test_stage_remote_hosted_input_wrong_runner_raises(tmp_path, monkeypatch):

@@ -53,6 +53,16 @@ def test_read_job_state_corrupt(tmp_path):
     assert remote_data_ops.read_job_state(str(tmp_path), "j1") is None
 
 
+def test_read_job_state_valid_non_dict_json_returns_none(tmp_path):
+    """Valid JSON that is not an object must not crash callers on .get."""
+    jobs_dir = tmp_path / "register-jobs"
+    os.makedirs(str(jobs_dir))
+    for payload in ("[]", '"just a string"', "42"):
+        with open(str(jobs_dir / "j1.json"), "w", encoding="utf-8") as f:
+            f.write(payload)
+        assert remote_data_ops.read_job_state(str(tmp_path), "j1") is None
+
+
 def test_find_existing_registration(tmp_path):
     yuki_dir = tmp_path
     imp_dir = yuki_dir / "Storage" / "proj" / "imp-123"

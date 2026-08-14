@@ -83,9 +83,12 @@ def read_job_state(yuki_dir, job_id):
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except ValueError:
         return None
+    if not isinstance(data, dict):
+        return None
+    return data
 
 
 def _impression_md5(imp_dir):

@@ -1,6 +1,5 @@
 """Tests for remote data operation helpers."""
 import os
-import shutil
 import subprocess
 from unittest import mock
 
