@@ -65,7 +65,7 @@ class ContainerJob(VJob):
                 return self._image
         return None
 
-    def step(self, request_machine_id):
+    def step(self, request_machine_id, backend_type="reana"):
         """
         Generate a step configuration for REANA workflow execution.
 
@@ -95,13 +95,7 @@ class ContainerJob(VJob):
             commands.append("apd-login")
             commands.append(f"python3 ../imp{short}/generate_lhcb_ap_datalist.py")
 
-        if (not self.is_input) and self.use_eos():
-            # print("Using EOS for stageout")
-            config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
-            eos_mount_points = metadata.ConfigFile(config_path).read_variable("eos_mount_point", {})
-            eos_path = eos_mount_points.get(request_machine_id, "/eos/user/unknown")
-            commands.append(f"mkdir -p {eos_path}/{self.project_uuid}/{self.impression()}/")
-            commands.append(f"cp -r stageout/* {eos_path}/{self.project_uuid}/{self.impression()}/")
+        commands.extend(self._cache_commands(request_machine_id, backend_type))
         commands.append("cd ..")
         commands.append(f"touch {self.short_uuid()}.done")
 
@@ -203,7 +197,7 @@ class ContainerJob(VJob):
         """
         return "docker.io/reanahub/reana-env-root6:6.18.04"
 
-    def snakemake_rule(self, request_machine_id):
+    def snakemake_rule(self, request_machine_id, backend_type="reana"):
         """
         Generate a Snakemake rule configuration for workflow execution.
 
@@ -226,13 +220,7 @@ class ContainerJob(VJob):
             commands.append("apd-login")
             commands.append(f"python3 ../imp{short}/generate_lhcb_ap_datalist.py")
 
-        if (not self.is_input) and self.use_eos():
-            print("Using EOS for stageout")
-            config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
-            eos_mount_points = metadata.ConfigFile(config_path).read_variable("eos_mount_point", {})
-            eos_path = eos_mount_points.get(request_machine_id, "/eos/user/unknown")
-            commands.append(f"mkdir -p {eos_path}/{self.project_uuid}/{self.impression()}/")
-            commands.append(f"cp -r stageout/* {eos_path}/{self.project_uuid}/{self.impression()}/")
+        commands.extend(self._cache_commands(request_machine_id, backend_type))
         commands.append("cd ..")
         commands.append(f"touch {self.short_uuid()}.done")
 
@@ -413,27 +401,49 @@ class ContainerJob(VJob):
 
         return inputs
 
-    def setup_commands(self):
-        """Generate commands to set up container environment from EOS storage.
+    def _cache_source(self, backend_type):
+        """The runner-side cache location for this job, or None.
 
-        Returns:
-            list: Commands to create directories and copy data from EOS
+        reana -> the EOS mount; ssh -> the runner's managed impressions
+        dir; native/dry -> None (no runner-side cache).
         """
-        config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
-        eos_mount_points = metadata.ConfigFile(config_path).read_variable("eos_mount_point", {})
-        eos_path = eos_mount_points.get(self.machine_id, "/eos/user/unknown")
-        commands = []
-        commands.append(f"mkdir -p imp{self.short_uuid()}/stageout")
-        commands.append(f"cp -r {eos_path}/{self.project_uuid}/{self.impression()}/* "
-                         f"imp{self.short_uuid()}/stageout/")
+        if backend_type == "ssh":
+            from Yuki.kernel import runner_config
+            settings = runner_config.get_ssh_settings(
+                runner_config.open_config(), self.machine_id)
+            base = settings.get("remote_workdir", "/tmp/yuki-workflows")
+            return f"{base}/impressions/{self.project_uuid}/{self.impression()}/"
+        if backend_type == "reana":
+            config_path = os.path.join(os.environ["HOME"], ".Yuki", "config.json")
+            eos_mount_points = metadata.ConfigFile(config_path).read_variable("eos_mount_point", {})
+            return (eos_mount_points.get(self.machine_id, "/eos/user/unknown")
+                    + f"/{self.project_uuid}/{self.impression()}/")
+        return None
+
+    def _cache_commands(self, request_machine_id, backend_type):
+        """Cache stageout outputs on the runner (EOS for reana, the
+        runner's impressions dir for ssh). Empty for native/dry."""
+        if self.is_input or not self.cache_on_runner():
+            return []
+        cache_path = self._cache_source(backend_type)
+        if not cache_path:
+            return []
+        return [f"mkdir -p {cache_path}",
+                f"cp -r stageout/* {cache_path}"]
+
+    def setup_commands(self, backend_type="reana"):
+        """Generate commands to set up the container environment from the
+        runner-side cache (EOS on reana, the impressions dir on ssh)."""
+        cache_path = self._cache_source(backend_type)
+        commands = [f"mkdir -p imp{self.short_uuid()}/stageout"]
+        if cache_path:
+            commands.append(f"cp -r {cache_path}* "
+                            f"imp{self.short_uuid()}/stageout/")
         return commands
 
-    def finalize_commands(self):
-        """Generate commands to clean up container environment.
-
-        Returns:
-            list: Commands to remove temporary directories
-        """
+    def finalize_commands(self, backend_type="reana"):
+        """Generate commands to clean up the container environment."""
+        del backend_type  # finalize is backend-independent
         commands = []
         commands.append(f"rm -rf imp{self.short_uuid()}/stageout")
         return commands

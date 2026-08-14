@@ -1,0 +1,92 @@
+"""Tests for backend-aware cache_on_runner command generation."""
+import json
+import os
+from unittest import mock
+
+from CelebiChrono.utils.metadata import ConfigFile
+from Yuki.kernel.container_job import ContainerJob
+from Yuki.kernel import runner_config
+
+
+def _job(machine_id="m1", is_input=False, cache=True):
+    job = object.__new__(ContainerJob)
+    job.machine_id = machine_id
+    job.is_input = is_input
+    job.path = "/store/proj/imp123456"
+    job.project_uuid = "proj"
+    job.cache_on_runner = mock.MagicMock(return_value=cache)
+    job.short_uuid = mock.MagicMock(return_value="abc1234")
+    job.impression = mock.MagicMock(return_value="imp123456")
+    return job
+
+
+def _ssh_settings(tmp_path, remote_workdir="/remote/work"):
+    yuki_dir = tmp_path
+    with open(yuki_dir / "config.json", "w", encoding="utf-8") as f:
+        json.dump({"runner_settings": {
+            "m1": {"ssh_host": "h", "ssh_user": "u",
+                   "remote_workdir": remote_workdir}}}, f)
+    return yuki_dir
+
+
+def test_cache_commands_reana_uses_eos(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    os.makedirs(tmp_path / ".Yuki", exist_ok=True)
+    cfg = ConfigFile(str(tmp_path / ".Yuki" / "config.json"))
+    cfg.write_variable("eos_mount_point", {"m1": "/eos/home/user"})
+    job = _job()
+    with mock.patch.dict(os.environ, {"HOME": str(tmp_path)}):
+        commands = job._cache_commands("m1", "reana")
+    assert commands == [
+        "mkdir -p /eos/home/user/proj/imp123456/",
+        "cp -r stageout/* /eos/home/user/proj/imp123456/",
+    ]
+
+
+def test_cache_commands_ssh_uses_impressions_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    _ssh_settings(tmp_path)
+    job = _job()
+    commands = job._cache_commands("m1", "ssh")
+    assert commands == [
+        "mkdir -p /remote/work/impressions/proj/imp123456/",
+        "cp -r stageout/* /remote/work/impressions/proj/imp123456/",
+    ]
+
+
+def test_cache_commands_native_noop(monkeypatch, tmp_path):
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    job = _job()
+    assert job._cache_commands("m1", "native") == []
+    assert job._cache_commands("m1", "dry") == []
+
+
+def test_cache_commands_disabled_noop(monkeypatch, tmp_path):
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    _ssh_settings(tmp_path)
+    job = _job(cache=False)
+    assert job._cache_commands("m1", "ssh") == []
+
+
+def test_cache_commands_input_job_noop(monkeypatch, tmp_path):
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    _ssh_settings(tmp_path)
+    job = _job(is_input=True)
+    assert job._cache_commands("m1", "ssh") == []
+
+
+def test_setup_commands_ssh_fetches_from_impressions(monkeypatch, tmp_path):
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    _ssh_settings(tmp_path)
+    job = _job()
+    commands = job.setup_commands("ssh")
+    assert commands == [
+        "mkdir -p impabc1234/stageout",
+        "cp -r /remote/work/impressions/proj/imp123456/* impabc1234/stageout/",
+    ]
+
+
+def test_setup_commands_native_no_cache_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    job = _job()
+    assert job.setup_commands("native") == ["mkdir -p impabc1234/stageout"]

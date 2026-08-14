@@ -28,7 +28,7 @@ def execute():
         print(request)
         machine = request.form["machine"]
         project_uuid = request.form['project_uuid']
-        use_eos_dict = request.form["use_eos"]
+        use_eos_dict = request.form["cache_on_runner"]
         use_eos_dict = json.loads(use_eos_dict)
         contents = request.files["impressions"].read().decode()
         start_jobs = []
@@ -51,7 +51,7 @@ def execute():
                 # Redefine, only aim for write use_eos variable
                 start_job = VJob(job_path, machine)
                 use_eos = use_eos_dict.get(impression, False)
-                start_job.set_use_eos(use_eos)
+                start_job.set_cache_on_runner(use_eos)
                 start_jobs.append(job)
             elif job.job_type() == "algorithm":
                 job.set_status(TUNING, "Algorithm job ready for configuration")

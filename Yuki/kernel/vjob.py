@@ -24,7 +24,7 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
 
     def __init__(self, path, machine_id):
         """Initialize the project with the only **information** of an object instance."""
-        self._use_eos = None
+        self._cache_on_runner = None
         self._use_kerberos = None
         self._environment = None
         self._workflow = None
@@ -148,16 +148,17 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         else:
             return translate_to_musical(status)
 
-    def set_use_eos(self, use: bool):
-        """Set whether the job should use EOS storage."""
-        self.run_config_file.write_variable("use_eos", use)
+    def set_cache_on_runner(self, use: bool):
+        """Set whether the job's outputs should be cached on the runner."""
+        self.run_config_file.write_variable("cache_on_runner", use)
 
-    def use_eos(self):
-        """Check if the job is set to use EOS storage."""
-        if self._use_eos is not None:
-            return self._use_eos
-        self._use_eos = self.run_config_file.read_variable("use_eos", False)
-        return self._use_eos
+    def cache_on_runner(self):
+        """Check if the job is set to cache outputs on the runner."""
+        if self._cache_on_runner is not None:
+            return self._cache_on_runner
+        self._cache_on_runner = self.run_config_file.read_variable(
+            "cache_on_runner", False)
+        return self._cache_on_runner
 
     def use_kerberos(self):
         """Check if the job is set to use Kerberos authentication.

@@ -124,6 +124,10 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
 
         return workflow
 
+    def backend_type(self):
+        """The workflow's backend type (persisted at creation)."""
+        return self.config_file.read_variable("backend_type", "reana")
+
     def get_name(self):
         """Get a human-readable name for the workflow."""
         return f"w-{self.project_uuid[:8]}-{self.uuid[:8]}"
@@ -348,21 +352,22 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         snake_file.addline('"finalize.done",', 2)
         self.dependencies["all"].append("finalize")
 
+        backend_type = self.backend_type()
         setup_commands = []
         for job in self.jobs:
             if job.object_type() == "task" and job.is_input:
-                if not job.use_eos() or job.machine_id != self.machine_id:
+                if not job.cache_on_runner() or job.machine_id != self.machine_id:
                     continue
                 container = ContainerJob(job.path, job.machine_id)
-                setup_commands.extend(container.setup_commands())
+                setup_commands.extend(container.setup_commands(backend_type))
 
         finalize_commands = []
         for job in self.jobs:
             if job.object_type() == "task" and job.is_input:
-                if not job.use_eos() or job.machine_id != self.machine_id:
+                if not job.cache_on_runner() or job.machine_id != self.machine_id:
                     continue
                 container = ContainerJob(job.path, job.machine_id)
-                finalize_commands.extend(container.finalize_commands())
+                finalize_commands.extend(container.finalize_commands(backend_type))
 
         snake_file.addline("\n", 0)
         snake_file.addline("rule setup:", 0)
@@ -419,8 +424,8 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             elif job.object_type() == "task":
                 container = ContainerJob(job.path, job.machine_id)
                 container.is_input = job.is_input
-                snakemake_rule = container.snakemake_rule(self.machine_id)
-                step = container.step(self.machine_id)
+                snakemake_rule = container.snakemake_rule(self.machine_id, backend_type)
+                step = container.step(self.machine_id, backend_type)
             else:
                 # Unknown job type, skip or handle
                 self.logger(f"Unknown job type {job.object_type()} for job {job}, skipping")
