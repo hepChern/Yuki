@@ -605,9 +605,21 @@ def engine_log(project_uuid, impression_name):
             workflow = VWorkflow.create(project_uuid, [], workflow_id)
             workflow.get_workflow_logs()
         except Exception:  # pylint: disable=broad-exception-caught
-            pass  # fall through to the 404 below
+            pass  # fall through to the yuki-log fallback below
 
     if not os.path.exists(log_path):
+        # Even without fetch, serve the Yuki-side workflow log (written
+        # while the workflow ran); only the remote engine log needs fetch.
+        workflow_log_path = os.path.join(
+            os.path.dirname(log_path), "workflow.log")
+        if os.path.exists(workflow_log_path):
+            with open(workflow_log_path, "r", encoding="utf-8") as fh:
+                content = fh.read()
+            return jsonify({"logs": {
+                "backend": "yuki",
+                "workflow_uuid": workflow_id,
+                "workflow_log": content,
+            }})
         return jsonify({"error": "Engine log not found"}), 404
 
     return send_from_directory(

@@ -38,6 +38,23 @@ def test_engine_log_fetch_generates_on_demand(monkeypatch):
     workflow.get_workflow_logs.assert_called_once()
 
 
+def test_engine_log_without_fetch_serves_yuki_log(monkeypatch):
+    tmp = tempfile.mkdtemp()
+    monkeypatch.setenv("HOME", tmp)
+    workflow_dir = os.path.join(tmp, ".Yuki", "Workflows", "proj", "wf-1")
+    os.makedirs(workflow_dir)
+    with open(os.path.join(workflow_dir, "workflow.log"), "w",
+              encoding="utf-8") as f:
+        f.write("[t0] Constructing the workflow")
+    with mock.patch.object(status_routes, "VWorkflow") as vwf:
+        r = _app().test_client().get("/engine-log/proj/wf-1")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["logs"]["workflow_log"] == "[t0] Constructing the workflow"
+    assert body["logs"]["workflow_uuid"] == "wf-1"
+    vwf.create.assert_not_called()
+
+
 def test_engine_log_without_fetch_still_404(monkeypatch):
     tmp = tempfile.mkdtemp()
     monkeypatch.setenv("HOME", tmp)
