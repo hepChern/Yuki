@@ -597,6 +597,16 @@ def engine_log(project_uuid, impression_name):
             except (AttributeError, OSError):
                 pass  # Fall through to check if log_path exists
 
+    # On demand: generate the log file by asking the workflow backend to
+    # fetch its engine logs (ssh pulls snakemake.log from the runner, etc).
+    if not os.path.exists(log_path) and request.args.get("fetch") == "true" \
+            and workflow_id:
+        try:
+            workflow = VWorkflow.create(project_uuid, [], workflow_id)
+            workflow.get_workflow_logs()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass  # fall through to the 404 below
+
     if not os.path.exists(log_path):
         return jsonify({"error": "Engine log not found"}), 404
 
