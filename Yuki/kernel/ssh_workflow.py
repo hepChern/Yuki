@@ -340,16 +340,18 @@ class SshWorkflow(VWorkflow):
                             "remote_path", "")
                         dst_path = (f"{self.remote_exec_path}/"
                                     f"imp{job.short_uuid()}/stageout")
-                        with self._ssh() as ssh:
-                            ssh.mkdir_p(dst_path)
-                            out, err, code = ssh.exec(
-                                f"cp -a --reflink=auto "
-                                f"{shlex.quote(managed_path)}/. "
-                                f"{shlex.quote(dst_path)}/",
-                                timeout=3600)
-                            if code != 0:
-                                raise RuntimeError(
-                                    f"Remote data staging failed: {err or out}")
+                        # Use the OUTER connection: a nested `with` here
+                        # would shadow the loop's `ssh` with a connection
+                        # that closes on exit, breaking every later put.
+                        ssh.mkdir_p(dst_path)
+                        out, err, code = ssh.exec(
+                            f"cp -a --reflink=auto "
+                            f"{shlex.quote(managed_path)}/. "
+                            f"{shlex.quote(dst_path)}/",
+                            timeout=3600)
+                        if code != 0:
+                            raise RuntimeError(
+                                f"Remote data staging failed: {err or out}")
                         continue
 
                 if job.is_input:

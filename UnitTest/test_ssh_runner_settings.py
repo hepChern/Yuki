@@ -368,3 +368,86 @@ def test_input_cache_miss_writes_through(tmp_path, monkeypatch):
     write_through = [c for c in execs
                      if "mkdir -p /remote/work/impressions/proj-123/imp-abc" in c]
     assert write_through, execs
+
+
+def test_remote_hosted_staging_does_not_shadow_outer_connection(tmp_path, monkeypatch):
+    """The snakefile put after the job loop must use the OPEN outer connection.
+
+    Regression: the remote.json branch used to open a nested `with
+    self._ssh() as ssh:` which shadowed the outer connection; after the
+    inner connection closed, the trailing snakefile put crashed with
+    AttributeError: 'NoneType' object has no attribute 'stat'.
+    """
+    yuki_dir = tmp_path / ".Yuki"
+    marker_dir = yuki_dir / "Storage" / "proj-123" / "imp-abc"
+    marker_dir.mkdir(parents=True)
+    with open(marker_dir / "remote.json", "w", encoding="utf-8") as f:
+        json.dump({"host_runner_id": "m1", "source_path": "/src",
+                   "remote_path": "/remote/impressions/proj-123/imp-abc"}, f)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    wf = _workflow(tmp_path, monkeypatch, {
+        "runner_settings": {"m1": {"ssh_host": "h", "ssh_user": "u"}},
+    })
+    wf.ssh_config = wf._load_ssh_config()
+    wf.remote_exec_path = "/remote/workflows/proj-123/wf-456"
+    wf.project_uuid = "proj-123"
+    wf.machine_id = "m1"
+    wf.snakefile_path = "/local/Snakefile"
+    wf.logger = lambda msg: None
+
+    data_job = mock.MagicMock()
+    data_job.files.return_value = []
+    data_job.environment.return_value = "analysis"
+    data_job.is_input = True
+    data_job.machine_id = "m1"
+    data_job.short_uuid.return_value = "abc1234"
+    data_job.path = str(marker_dir.parent / "imp-abc")
+
+    analysis_job = mock.MagicMock()
+    analysis_job.files.return_value = []
+    analysis_job.environment.return_value = "analysis"
+    analysis_job.is_input = False
+    analysis_job.machine_id = "m1"
+    analysis_job.short_uuid.return_value = "def5678"
+    analysis_job.path = str(marker_dir.parent / "imp-def")
+
+    wf.jobs = [data_job, analysis_job]
+
+    instances = []
+
+    class FakeSsh:
+        def __init__(self):
+            self.closed = False
+            instances.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            self.closed = True
+            return False
+
+        def mkdir_p(self, path):
+            assert not self.closed, "mkdir_p on a closed connection"
+
+        def exec(self, command, timeout=None):
+            assert not self.closed, "exec on a closed connection"
+            if command.startswith("test -d"):
+                return "", "", 1
+            return "", "", 0
+
+        def put(self, src, dst):
+            assert not self.closed, "put on a closed connection"
+            self._last_put = (src, dst)
+
+        def put_text(self, text, path):
+            assert not self.closed, "put_text on a closed connection"
+
+    with mock.patch.object(SshWorkflow, "_ssh", side_effect=FakeSsh):
+        wf._upload_files_remote()
+
+    # exactly one connection was opened for the whole staging
+    assert len(instances) == 1, f"expected 1 connection, got {len(instances)}"
+    assert instances[0]._last_put == (
+        "/local/Snakefile", "/remote/workflows/proj-123/wf-456/Snakefile")
