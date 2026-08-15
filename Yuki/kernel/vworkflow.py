@@ -358,19 +358,30 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         backend_type = self.backend_type()
         setup_commands = []
         for job in self.jobs:
-            if job.object_type() == "task" and job.is_input:
-                if not job.cache_on_runner() or job.machine_id != self.machine_id:
-                    continue
+            if job.object_type() != "task" or not job.is_input:
+                continue
+            if backend_type == "ssh":
+                # ssh inputs are always cached on the runner (auto-cache);
+                # the setup rule copies them from the impressions cache.
+                container = ContainerJob(job.path, job.machine_id)
+                setup_commands.extend(
+                    container.setup_commands("ssh", self.machine_id))
+            elif job.cache_on_runner() and job.machine_id == self.machine_id:
                 container = ContainerJob(job.path, job.machine_id)
                 setup_commands.extend(container.setup_commands(backend_type))
 
         finalize_commands = []
         for job in self.jobs:
-            if job.object_type() == "task" and job.is_input:
-                if not job.cache_on_runner() or job.machine_id != self.machine_id:
-                    continue
+            if job.object_type() != "task" or not job.is_input:
+                continue
+            if backend_type == "ssh":
                 container = ContainerJob(job.path, job.machine_id)
-                finalize_commands.extend(container.finalize_commands(backend_type))
+                finalize_commands.extend(
+                    container.finalize_commands("ssh"))
+            elif job.cache_on_runner() and job.machine_id == self.machine_id:
+                container = ContainerJob(job.path, job.machine_id)
+                finalize_commands.extend(
+                    container.finalize_commands(backend_type))
 
         snake_file.addline("\n", 0)
         snake_file.addline("rule setup:", 0)

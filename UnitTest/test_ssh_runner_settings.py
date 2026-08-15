@@ -200,9 +200,9 @@ def test_stage_remote_hosted_input_copies_locally(tmp_path, monkeypatch):
 
     execs = [c for kind, c in commands if kind == "exec"]
     copy_cmd = [c for c in execs if "cp -a --reflink=auto" in c]
-    assert copy_cmd, f"expected a remote cp, got: {execs}"
-    assert "/remote/impressions/proj-123/imp-abc/." in copy_cmd[0]
-    assert "impabc1234/stageout" in copy_cmd[0]
+    assert not copy_cmd, (
+        f"registered data is already in the cache; the setup rule copies "
+        f"it, staging must not: {execs}")
     puts = [c for kind, c in commands if kind == "put"]
     data_puts = [c for c in puts if "impabc1234/stageout" in c]
     assert not data_puts, \
@@ -310,11 +310,10 @@ def test_input_cache_hit_skips_sftp(tmp_path, monkeypatch):
         wf._upload_files_remote()
 
     execs = [c for kind, c in commands if kind == "exec"]
-    cp_cmd = [c for c in execs if "cp -a --reflink=auto" in c][0]
-    assert "/remote/work/impressions/proj-123/imp-abc/." in cp_cmd
-    assert "impabc1234/stageout" in cp_cmd
+    cp_cmd = [c for c in execs if "cp -a --reflink=auto" in c]
+    assert not cp_cmd, f"the setup rule copies on cache hit: {execs}"
     # no SFTP put of data files (only the Snakefile put is allowed)
-    data_puts = [p for p in puts if "stageout" in p[1]]
+    data_puts = [p for p in puts if "impressions" in p[1] or "stageout" in p[1]]
     assert data_puts == []
 
 
@@ -364,10 +363,13 @@ def test_input_cache_miss_writes_through(tmp_path, monkeypatch):
 
     execs = [c for kind, c in commands if kind == "exec"]
     puts = [c for kind, c in commands if kind == "put"]
-    assert any("data.txt" in p for p in puts), puts
-    write_through = [c for c in execs
-                     if "mkdir -p /remote/work/impressions/proj-123/imp-abc" in c]
-    assert write_through, execs
+    data_puts = [p for p in puts if "data.txt" in p]
+    assert data_puts, puts
+    assert data_puts[0].endswith(
+        "stageout/data.txt->"
+        "/remote/work/impressions/proj-123/imp-abc/data.txt"), data_puts[0]
+    copy_cmd = [c for c in execs if "cp -a --reflink=auto" in c]
+    assert not copy_cmd, f"staging must not copy into imp dirs: {execs}"
 
 
 def test_remote_hosted_staging_does_not_shadow_outer_connection(tmp_path, monkeypatch):

@@ -217,17 +217,6 @@ class SshWorkflow(VWorkflow):
             f"test -n \"$(ls -A {shlex.quote(cache_dir)})\"")
         return code == 0
 
-    def _write_through_cache(self, ssh, cache_dir, stageout_dir):
-        """Copy staged files into the runner-side rawdata cache."""
-        out, err, code = ssh.exec(
-            f"mkdir -p {shlex.quote(cache_dir)} && "
-            f"cp -a --reflink=auto {shlex.quote(stageout_dir)}/. "
-            f"{shlex.quote(cache_dir)}/",
-            timeout=3600)
-        if code != 0:
-            self.logger(f"[SSH] Write-through cache failed for "
-                        f"{cache_dir}: {err or out}")
-
     def _execute_backend(self):
         """Execute workflow using a remote SSH backend."""
         try:
@@ -336,40 +325,20 @@ class SshWorkflow(VWorkflow):
                                 f"Data impression {impression} is hosted on "
                                 f"another runner ({host_runner}); cannot stage "
                                 "remotely")
-                        managed_path = marker_cfg.read_variable(
-                            "remote_path", "")
-                        dst_path = (f"{self.remote_exec_path}/"
-                                    f"imp{job.short_uuid()}/stageout")
-                        # Use the OUTER connection: a nested `with` here
-                        # would shadow the loop's `ssh` with a connection
-                        # that closes on exit, breaking every later put.
-                        ssh.mkdir_p(dst_path)
-                        out, err, code = ssh.exec(
-                            f"cp -a --reflink=auto "
-                            f"{shlex.quote(managed_path)}/. "
-                            f"{shlex.quote(dst_path)}/",
-                            timeout=3600)
-                        if code != 0:
-                            raise RuntimeError(
-                                f"Remote data staging failed: {err or out}")
+                        # The data already sits in this runner's managed
+                        # impressions cache; the Snakefile setup rule copies
+                        # it into imp<short>/stageout as the first step.
+                        self.logger(f"[SSH] Cache hit: {impression} is "
+                                    "registered on this runner")
                         continue
 
                 if job.is_input:
                     cache_dir = self._rawdata_cache_dir(impression)
                     if self._cache_hit(ssh, cache_dir):
-                        dst_path = (f"{self.remote_exec_path}/"
-                                    f"imp{job.short_uuid()}/stageout")
-                        ssh.mkdir_p(dst_path)
-                        out, err, code = ssh.exec(
-                            f"cp -a --reflink=auto "
-                            f"{shlex.quote(cache_dir)}/. "
-                            f"{shlex.quote(dst_path)}/",
-                            timeout=3600)
-                        if code != 0:
-                            raise RuntimeError(
-                                f"Rawdata cache staging failed: {err or out}")
-                        self.logger(f"[SSH] Cache hit: staged {impression} "
-                                    "from runner impressions")
+                        # The setup rule copies from the cache; nothing to
+                        # upload here.
+                        self.logger(f"[SSH] Cache hit: {impression} is in "
+                                    "the runner impressions cache")
                         continue
 
                 if job.environment() == "rawdata":
@@ -378,20 +347,14 @@ class SshWorkflow(VWorkflow):
                         filelist = list(walk_files(rawdata_path))
                         total_raw = len(filelist)
                         for f_idx, (rel_path, src_path) in enumerate(filelist):
-                            dst_path = (
-                                f"{self.remote_exec_path}/"
-                                f"imp{job.short_uuid()}/stageout/{rel_path}"
-                            )
+                            # Upload into the runner cache; the Snakefile
+                            # setup rule copies it into imp<short>/stageout.
+                            dst_path = f"{cache_dir}/{rel_path}"
                             ssh.put(src_path, dst_path)
                             self.logger(
-                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded rawdata "
+                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Cached rawdata "
                                 f"{f_idx+1}/{total_raw}: {rel_path}"
                             )
-                        if total_raw:
-                            self._write_through_cache(
-                                ssh, cache_dir,
-                                f"{self.remote_exec_path}/"
-                                f"imp{job.short_uuid()}/stageout")
 
                 elif job.is_input:
                     src_stageout = os.path.join(
@@ -407,20 +370,14 @@ class SshWorkflow(VWorkflow):
                         filelist = list(walk_files(src_stageout))
                         total_input = len(filelist)
                         for f_idx, (rel_path, src_path) in enumerate(filelist):
-                            dst_path = (
-                                f"{self.remote_exec_path}/"
-                                f"imp{job.short_uuid()}/stageout/{rel_path}"
-                            )
+                            # Upload into the runner cache; the Snakefile
+                            # setup rule copies it into imp<short>/stageout.
+                            dst_path = f"{cache_dir}/{rel_path}"
                             ssh.put(src_path, dst_path)
                             self.logger(
-                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Uploaded input "
+                                f"[SSH] [Job {j_idx+1}/{total_jobs}] Cached input "
                                 f"{f_idx+1}/{total_input}: {rel_path}"
                             )
-                        if total_input:
-                            self._write_through_cache(
-                                ssh, cache_dir,
-                                f"{self.remote_exec_path}/"
-                                f"imp{job.short_uuid()}/stageout")
 
             ssh.put(self.snakefile_path, f"{self.remote_exec_path}/Snakefile")
             self.logger("[SSH] Uploaded: Snakefile")

@@ -377,7 +377,9 @@ class TestSshWorkflow(unittest.TestCase):
 
         self.workflow._upload_files_remote()
 
-        expected = f"{self.workflow.remote_exec_path}/impaaaaaaa/stageout/data.root"
+        cache_dir = (f"/tmp/yuki-workflows/impressions/"
+                     f"{self.project_uuid}/{"a" * 32}")
+        expected = f"{cache_dir}/data.root"
         self.assertIn(expected, self.mock_sftp.files)
         self.assertEqual(self.mock_sftp.files[expected], b"input-bytes")
 
@@ -409,7 +411,9 @@ class TestSshWorkflow(unittest.TestCase):
         self._prepare_snakefile()
         self.workflow._upload_files_remote()
 
-        expected = f"{self.workflow.remote_exec_path}/impaaaaaaa/stageout/data/data.root"
+        cache_dir = (f"/tmp/yuki-workflows/impressions/"
+                     f"{self.project_uuid}/{"a" * 32}")
+        expected = f"{cache_dir}/data/data.root"
         self.assertIn(expected, self.mock_sftp.files)
         self.assertEqual(self.mock_sftp.files[expected], b"input-bytes")
 

@@ -399,7 +399,7 @@ class ContainerJob(VJob):
 
         return inputs
 
-    def _cache_source(self, backend_type):
+    def _cache_source(self, backend_type, workflow_machine_id=None):
         """The runner-side cache location for this job, or None.
 
         reana -> the EOS mount; ssh -> the runner's managed impressions
@@ -407,8 +407,11 @@ class ContainerJob(VJob):
         """
         if backend_type == "ssh":
             from Yuki.kernel import runner_config
+            # The cache lives on the runner the WORKFLOW runs on, not on
+            # the runner that produced the input.
+            machine_id = workflow_machine_id or self.machine_id
             settings = runner_config.get_ssh_settings(
-                runner_config.open_config(), self.machine_id)
+                runner_config.open_config(), machine_id)
             base = settings.get("remote_workdir", "/tmp/yuki-workflows")
             return f"{base}/impressions/{self.project_uuid}/{self.impression()}/"
         if backend_type == "reana":
@@ -429,10 +432,10 @@ class ContainerJob(VJob):
         return [f"mkdir -p {cache_path}",
                 f"cp -r stageout/* {cache_path}"]
 
-    def setup_commands(self, backend_type="reana"):
+    def setup_commands(self, backend_type="reana", workflow_machine_id=None):
         """Generate commands to set up the container environment from the
         runner-side cache (EOS on reana, the impressions dir on ssh)."""
-        cache_path = self._cache_source(backend_type)
+        cache_path = self._cache_source(backend_type, workflow_machine_id)
         commands = [f"mkdir -p imp{self.short_uuid()}/stageout"]
         if cache_path:
             commands.append(f"cp -r {cache_path}* "
