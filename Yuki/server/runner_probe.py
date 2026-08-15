@@ -6,6 +6,7 @@ import subprocess
 
 PROBE_TIMEOUT = 10
 ENV_LIST_TIMEOUT = 30
+EXEC_TIMEOUT = 30
 
 
 def _ok(**extra):
@@ -19,14 +20,14 @@ def _err(error):
     return {"ok": False, "error": text}
 
 
-def _probe_tool(path_setting, binary):
+def _probe_tool(path_setting, binary, timeout=EXEC_TIMEOUT):
     """Probe one executable: configured path, else PATH lookup."""
     path = path_setting or shutil.which(binary)
     if not path:
         return _err(f"{binary} not found in PATH")
     try:
         result = subprocess.run([path, "--version"], capture_output=True,
-                                text=True, timeout=PROBE_TIMEOUT, check=False)
+                                text=True, timeout=timeout, check=False)
     except Exception as exc:  # pylint: disable=broad-exception-caught
         return _err(f"{binary} at {path} failed: {exc}")
     if result.returncode != 0:
@@ -40,11 +41,13 @@ def _default_workdir():
     return os.path.join(yuki_dir, "LocalWorkflows")
 
 
-def probe_native(settings):
+def probe_native(settings, timeout=EXEC_TIMEOUT):
     """Probe snakemake/conda/workdir on the Yuki host."""
     checks = {
-        "snakemake": _probe_tool(settings.get("snakemake_path", ""), "snakemake"),
-        "conda": _probe_tool(settings.get("conda_path", ""), "conda"),
+        "snakemake": _probe_tool(settings.get("snakemake_path", ""),
+                                  "snakemake", timeout),
+        "conda": _probe_tool(settings.get("conda_path", ""),
+                             "conda", timeout),
     }
     workdir = settings.get("workdir") or _default_workdir()
     try:
@@ -57,7 +60,7 @@ def probe_native(settings):
     return checks
 
 
-def probe_ssh(ssh_settings):  # pylint: disable=too-many-locals
+def probe_ssh(ssh_settings, timeout=PROBE_TIMEOUT):  # pylint: disable=too-many-locals
     """Probe connectivity plus snakemake/conda/workdir on the remote host."""
     try:
         import paramiko
@@ -86,7 +89,7 @@ def probe_ssh(ssh_settings):  # pylint: disable=too-many-locals
     checks = {"connectivity": _ok()}
 
     def remote(cmd):
-        _, stdout, stderr = client.exec_command(cmd, timeout=PROBE_TIMEOUT)
+        _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
         return stdout.read().decode().strip(), stderr.read().decode().strip()
 
     check_names = ("snakemake", "conda", "workdir_writable")

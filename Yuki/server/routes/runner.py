@@ -409,16 +409,18 @@ def test_runner(runner):
     backend_type = backend_types.get(runner_id, "reana")
     settings = runner_config.get_runner_settings(config_file, runner_id)
 
+    timeout = request.args.get("timeout", type=int) or runner_probe.PROBE_TIMEOUT
     if backend_type == "ssh":
         checks = runner_probe.probe_ssh(
-            runner_config.get_ssh_settings(config_file, runner_id))
+            runner_config.get_ssh_settings(config_file, runner_id),
+            timeout=timeout)
     elif backend_type == "reana":
         urls = config_file.read_variable("urls", {})
         tokens = config_file.read_variable("tokens", {})
         checks = runner_probe.probe_reana(
             urls.get(runner_id, ""), tokens.get(runner_id, ""), ping)
     elif backend_type == "native":
-        checks = runner_probe.probe_native(settings)
+        checks = runner_probe.probe_native(settings, timeout=timeout)
     else:  # dry / unknown backends: connectivity-only, always ok
         checks = {"connectivity": {"ok": True}}
 
