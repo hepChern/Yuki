@@ -1,0 +1,39 @@
+## v1.0.0b3
++ Selective collect and file visibility.
+  - Add a file-type classifier (`file_types`) with selection specs (plots/data/all).
+  - Add `light collect`, `collect_files`, and `file_status` on `ImpressionStorage`; new `/collect-files` and `/file-status` routes.
+  - REANA `list_runner_files` and `download_selected` (filtered, idempotent) with bounded retries for transient TLS failures; runner file listings are cached so status skips repeat REANA calls.
+  - Selective, logs-inclusive REANA booking via `upload_mode`; book-reana uploads the runner file manifest.
+  - Collect reports are structured with skip/failure reasons; stageout/log handling preserves subdirectory structure.
++ Add the SSH runner backend to Yuki.
+  - Remote workflows execute via SSH/SFTP with status/display pipeline support.
++ Docker consolidation.
+  - Multi-stage `docker/Dockerfile` (base -> dev -> prod) with a non-root `yuki` runtime.
+  - Unified `docker/scripts/build.sh` (dev/prod, version and nightly tagging, tar export).
+  - Portable dev compose with an optional `CELEBI_DIR` mount and host `~/.Yuki` storage sharing; rootless-aware `yuki docker run`.
+  - README and CLAUDE.md refreshed for the new Docker workflow.
++ Runner management.
+  - Per-runner settings (`runner_settings`: workdir, cores, mem_mb, conda/snakemake paths, ssh fields) stored in `~/.Yuki/config.json` with legacy ssh-map fallback; per-runner health (`runner_health`).
+  - `POST /register-runner` validates required fields and rejects duplicates; accepts the new settings fields; stores uploaded ssh keys under `$YUKIDIR/keys/` (mode 600).
+  - `PATCH /update-runner` merges partial ssh updates (no longer wipes sibling fields).
+  - `GET /runners-config` includes `settings` and `health` per runner; `/remove-runner` cleans settings/health and stale ssh entries unconditionally.
+  - `GET /machine-id/<name>` returns 404 for unknown names; `/runners-url` tolerates missing entries.
+  - Add `GET /test-runner/<runner>` (synchronous capability probe: connectivity, snakemake, conda, workdir — locally for native, over SSH for ssh, ping for reana) and `GET /runner-health/<runner>` (persisted result). Mid-probe SSH failures are recorded as failed, never as a false green.
+  - Add `GET /runner-envs/<runner>`: lists conda environments on ssh/native runners.
++ Remote data registration (`register-data`).
+  - `POST /register-remote-data` starts a background job (returns a job id; `GET /register-remote-data/<job_id>` polls state). The Celery job hashes on the runner (remote MD5 matching `csys.dir_md5` semantics), fast-copies into `[remote-workdir]/impressions/<project>/<impression>/` (reflink → hardlink → rsync → copy), and synthesizes the impression (`contents/`, `config.json`, `status.json`, `remote.json`) replicating `yuki-create-data`.
+  - Impression status lifecycle: `running` while the copy is in flight, `archived` when it settles, `failed` on copy errors; failed registrations do not count as existing, so they can be re-registered.
+  - Idempotent for the same `(runner, path)`, including in-flight jobs.
+  - `GET /verify-data/<project>/<impression>`: recomputes the MD5 (on the host runner for remote data, locally from `rawdata/` otherwise) and compares it with the registered UUID; SSH failures retry once and return a proper error instead of a 500.
+  - `file_status` lists remote-hosted data from the host runner's managed dir (cached to `<host_runner_id>/<kind>.filelist.json`).
+  - Submit validation: workflows referencing remote-hosted data on a different runner are marked failed with a clear message.
++ SSH workflow.
+  - Remote layout is now `[remote-workdir]/workflows/<project_uuid>/<workflow_id>/` with a reserved `impressions/` area.
+  - Remote-hosted inputs are staged by a remote `cp` (never through the Yuki network); raw-data inputs are cached automatically on the runner (hit-skip + upload-into-cache on miss).
+  - Inputs are copied into `imp<short>/stageout` by the Snakefile `setup` rule (like the REANA/EOS setup), with the runner cache as the source; the pre-execution phase only fills the cache.
+  - Fixed a connection-shadowing bug where a nested SSH session closed the outer connection and broke every later upload.
++ `cache_on_runner` replaces `use_eos` end-to-end (job run config, `/execute` form field, Snakefile step commands): REANA copies stageout to EOS, ssh copies stageout to the runner's managed impressions area, native/dry do nothing. Input setup/finalize is backend-aware.
++ `GET /engine-log/...` supports `?fetch=true` to generate engine logs on demand, and serves the Yuki `workflow.log` directly when the generated log is missing.
++ Fix `vjob.py` bugs: undefined `PENDING`/`SUCCESS` status constants and a `stap_status` typo in the legacy-status branch.
++ Fix all pylint issues (10.00/10 with the project lint command).
++ Bump version to 1.0.0b3.
