@@ -105,16 +105,56 @@ def task_update_workflow_status(project_uuid, workflow_id):
 @celeryapp.task
 def task_register_remote_data(job_id, runner_id, remote_path, project_uuid,
                               descriptor):
-    """Register remote data on an ssh runner: hash, copy, register."""
+    """Register remote data on an ssh runner: hash, then dispatch the copy."""
     yuki_dir = remote_data_ops._yuki_dir()  # pylint: disable=protected-access
 
     def update(state):
-        remote_data_ops.write_job_state(yuki_dir, job_id, state)
+        current = remote_data_ops.read_job_state(yuki_dir, job_id) or {}
+        current.update(state)
+        remote_data_ops.write_job_state(yuki_dir, job_id, current)
 
     try:
-        result = remote_data_ops.register_remote_data_job(
-            runner_id, remote_path, project_uuid, descriptor, update)
+        remote_data_ops.register_remote_data_job(
+            job_id, runner_id, remote_path, project_uuid, descriptor, update)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        update({"status": "failed", "result": None,
+                "error": str(e) or type(e).__name__})
+        return
+    state = remote_data_ops.read_job_state(yuki_dir, job_id) or {}
+    if state.get("status") != "copying":
+        # Unchanged data: the job reused the archived registration and
+        # recorded done itself; there is nothing to copy.
+        return
+    impression_uuid = (state.get("result") or {}).get("impression_uuid", "")
+    try:
+        task_copy_remote_data.apply_async(
+            args=[job_id, impression_uuid, project_uuid, runner_id,
+                  remote_path])
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # Nobody will clean the progress file if the copy is never
+        # dispatched; remove it so a later re-run starts fresh.
+        update({"status": "failed", "result": None,
+                "error": str(e) or type(e).__name__})
+        remote_data_ops.remove_remote_progress_file(runner_id, job_id)
+
+
+@celeryapp.task
+def task_copy_remote_data(job_id, impression_uuid, project_uuid, runner_id,
+                          remote_path):
+    """Copy registered data into the runner's managed area (background)."""
+    yuki_dir = remote_data_ops._yuki_dir()  # pylint: disable=protected-access
+
+    def update(state):
+        current = remote_data_ops.read_job_state(yuki_dir, job_id) or {}
+        current.update(state)
+        remote_data_ops.write_job_state(yuki_dir, job_id, current)
+
+    try:
+        result = remote_data_ops.copy_remote_data_job(
+            job_id, impression_uuid, project_uuid, runner_id, remote_path)
         update({"status": "done", "result": result, "error": None})
     except Exception as e:  # pylint: disable=broad-exception-caught
         update({"status": "failed", "result": None,
                 "error": str(e) or type(e).__name__})
+    finally:
+        remote_data_ops.remove_remote_progress_file(runner_id, job_id)

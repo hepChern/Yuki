@@ -98,8 +98,8 @@ class ImpressionStorage:
         served from there afterwards — sparing a slow, sometimes flaky REANA
         list_files on every status. See _runner_files for the policy.
 
-        Remote-hosted data (registered via register-data) is listed from the
-        host runner's managed impressions dir; see _remote_hosted_files.
+        Remote-hosted data (registered via register-ssh-data) is listed from
+        the host runner's managed impressions dir; see _remote_hosted_files.
         """
         result = self._remote_hosted_files(kind)
         for name, job, workflow in self._get_runner_contexts():
@@ -136,7 +136,7 @@ class ImpressionStorage:
         return result
 
     def _remote_hosted_files(self, kind):  # pylint: disable=too-many-locals,too-many-branches
-        """List files of a remote-hosted data impression (register-data).
+        """List files of a remote-hosted data impression (register-ssh-data).
 
         Files live in the host runner's managed impressions dir. The listing
         is cached to <host_runner_id>/<kind>.filelist.json (same convention as

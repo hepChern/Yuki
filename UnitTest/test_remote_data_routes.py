@@ -101,6 +101,28 @@ def test_find_existing_registration(tmp_path):
         str(yuki_dir), "r1", "/other") is None
 
 
+def test_find_existing_registration_skips_running(tmp_path):
+    """A mid-copy (running) impression is not offered as existing.
+
+    The route falls through to the in-flight job lookup instead, so a
+    re-run during a background copy returns the live job id.
+    """
+    yuki_dir = tmp_path
+    imp_dir = yuki_dir / "Storage" / "proj" / "imp-run"
+    os.makedirs(imp_dir / "contents")
+    with open(imp_dir / "contents" / "celebi.yaml", "w", encoding="utf-8") as f:
+        f.write("environment: rawdata\nuuid: abcdef\ndescriptor: d\n")
+    marker = ConfigFile(str(imp_dir / "remote.json"))
+    marker.write_variable("host_runner_id", "r1")
+    marker.write_variable("source_path", "/src/data")
+    marker.write_variable("remote_path", "/remote/imp")
+    status = ConfigFile(str(imp_dir / "status.json"))
+    status.write_variable("status", "running")
+
+    assert remote_data_ops.find_existing_registration(
+        str(yuki_dir), "r1", "/src/data") is None
+
+
 def test_find_inflight_job(tmp_path):
     """An in-flight job for the same runner and path is found."""
     remote_data_ops.write_job_state(
@@ -149,8 +171,12 @@ def test_register_remote_data_non_ssh_runner(monkeypatch, tmp_path):
     assert "ssh" in r.get_json()["error"]
 
 
-def test_register_remote_data_idempotent(monkeypatch, tmp_path):
-    """Re-registering existing data is idempotent and skips enqueue."""
+def test_register_remote_data_existing_still_creates_job(monkeypatch, tmp_path):
+    """Even with an archived registration, a new hash job is started.
+
+    The reuse decision happens after the fresh md5 is computed, in the
+    hash job — the route always re-hashes.
+    """
     config_obj = _temp_config(monkeypatch, tmp_path)
     _register_runner(config_obj)
     imp_dir = tmp_path / "Storage" / "proj" / "imp-123"
@@ -161,14 +187,16 @@ def test_register_remote_data_idempotent(monkeypatch, tmp_path):
     marker.write_variable("host_runner_id", "r-uuid")
     marker.write_variable("source_path", "/src/data")
     marker.write_variable("remote_path", "/remote/imp")
+    status = ConfigFile(str(imp_dir / "status.json"))
+    status.write_variable("status", "archived")
     with mock.patch.object(remote_data_routes, "task_register_remote_data") as task:
         r = _app(remote_data_routes.bp).test_client().post(
             "/register-remote-data",
             json={"runner": "cluster", "remote_path": "/src/data",
                   "project_uuid": "proj"})
-    task.apply_async.assert_not_called()
-    assert r.get_json()["result"]["uuid"] == "abcdef"
-    assert r.get_json()["result"]["descriptor"] == "d"
+    assert r.status_code == 200
+    assert r.get_json()["job_id"]
+    task.apply_async.assert_called_once()
 
 
 def test_register_remote_data_missing_field(monkeypatch, tmp_path):
@@ -244,6 +272,89 @@ def test_register_remote_data_status(monkeypatch, tmp_path):
     r2 = _app(remote_data_routes.bp).test_client().get(
         "/register-remote-data/ghost")
     assert r2.status_code == 404
+
+
+def test_register_remote_data_status_merges_progress(monkeypatch, tmp_path):
+    """A running job's status response includes remote byte progress."""
+    _temp_config(monkeypatch, tmp_path)
+    remote_data_ops.write_job_state(
+        str(tmp_path), "job-9",
+        {"status": "copying", "result": None, "error": None,
+         "runner_id": "r1", "remote_path": "/p"})
+    progress = {"stage": "copying", "bytes_done": 10, "bytes_total": 14}
+
+    with mock.patch.object(remote_data_ops, "read_remote_progress",
+                           return_value=progress):
+        r = _app(remote_data_routes.bp).test_client().get(
+            "/register-remote-data/job-9")
+    body = r.get_json()
+    assert body["status"] == "copying"
+    assert body["progress"] == progress
+    # The merged response must not be persisted into the job state file.
+    stored = remote_data_ops.read_job_state(str(tmp_path), "job-9")
+    assert "progress" not in stored
+
+
+def test_register_remote_data_status_progress_none_on_failure(monkeypatch, tmp_path):
+    """A failed progress read yields progress: null, not a 500."""
+    _temp_config(monkeypatch, tmp_path)
+    remote_data_ops.write_job_state(
+        str(tmp_path), "job-9",
+        {"status": "hashing", "result": None, "error": None,
+         "runner_id": "r1", "remote_path": "/p"})
+    with mock.patch.object(remote_data_ops, "read_remote_progress",
+                           return_value=None):
+        r = _app(remote_data_routes.bp).test_client().get(
+            "/register-remote-data/job-9")
+    assert r.status_code == 200
+    assert r.get_json()["progress"] is None
+
+
+def test_register_remote_data_status_terminal_has_no_progress(monkeypatch, tmp_path):
+    """Terminal states carry no progress key and skip the ssh read."""
+    _temp_config(monkeypatch, tmp_path)
+    remote_data_ops.write_job_state(
+        str(tmp_path), "job-9",
+        {"status": "done", "result": {"uuid": "x"}, "error": None,
+         "runner_id": "r1", "remote_path": "/p"})
+    with mock.patch.object(remote_data_ops, "read_remote_progress") as read:
+        r = _app(remote_data_routes.bp).test_client().get(
+            "/register-remote-data/job-9")
+    read.assert_not_called()
+    assert "progress" not in r.get_json()
+
+
+def test_register_remote_data_impression_status(monkeypatch, tmp_path):
+    """A job is findable by its impression uuid, with merged progress."""
+    _temp_config(monkeypatch, tmp_path)
+    remote_data_ops.write_job_state(
+        str(tmp_path), "job-9",
+        {"status": "copying", "error": None,
+         "runner_id": "r1", "remote_path": "/p",
+         "result": {"uuid": "md5x", "impression_uuid": "imp-1",
+                    "descriptor": "d"}})
+    progress = {"stage": "copying", "bytes_done": 10, "bytes_total": 14}
+    with mock.patch.object(remote_data_ops, "read_remote_progress",
+                           return_value=progress):
+        r = _app(remote_data_routes.bp).test_client().get(
+            "/register-remote-data/impression/imp-1")
+    body = r.get_json()
+    assert body["status"] == "copying"
+    assert body["result"]["impression_uuid"] == "imp-1"
+    assert body["progress"] == progress
+
+
+def test_register_remote_data_impression_status_unknown_404(monkeypatch, tmp_path):
+    """An impression with no job record gives 404."""
+    _temp_config(monkeypatch, tmp_path)
+    remote_data_ops.write_job_state(
+        str(tmp_path), "job-9",
+        {"status": "done", "result": {"uuid": "x", "impression_uuid": "imp-1",
+                                      "descriptor": "d"}, "error": None,
+         "runner_id": "r1", "remote_path": "/p"})
+    r = _app(remote_data_routes.bp).test_client().get(
+        "/register-remote-data/impression/ghost")
+    assert r.status_code == 404
 
 
 def _impression_fixture(tmp_path, project="proj", imp="imp-1", md5="abc123",

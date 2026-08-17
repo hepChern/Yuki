@@ -31,17 +31,16 @@ def register_remote_data():  # pylint: disable=too-many-return-statements
     runner_id = runners_id[runner]
     backend_types = config_file.read_variable("backend_types", {})
     if backend_types.get(runner_id, "reana") != "ssh":
-        return jsonify({"error": "register-data requires an ssh runner; "
+        return jsonify({"error": "register-ssh-data requires an ssh runner; "
                                  "native data should use upload-data"}), 400
 
     descriptor = data.get("descriptor") or os.path.basename(
         os.path.normpath(remote_path))
 
     yuki_dir = remote_data_ops._yuki_dir()  # pylint: disable=protected-access
-    existing = remote_data_ops.find_existing_registration(
-        yuki_dir, runner_id, remote_path)
-    if existing:
-        return jsonify(existing)
+    # No fast path for existing registrations: the data may have changed,
+    # so every run re-hashes. The hash job reuses an archived record
+    # when the fresh md5 matches (see register_remote_data_job).
     inflight = remote_data_ops.find_inflight_job(yuki_dir, runner_id, remote_path)
     if inflight:
         return jsonify({"job_id": inflight})
@@ -71,6 +70,25 @@ def register_remote_data_status(job_id):
         remote_data_ops._yuki_dir(), job_id)  # pylint: disable=protected-access
     if state is None:
         return jsonify({"error": "job not found"}), 404
+    if state.get("status") in ("hashing", "copying"):
+        state = dict(state)
+        state["progress"] = remote_data_ops.read_remote_progress(
+            state.get("runner_id", ""), job_id)
+    return jsonify(state)
+
+
+@bp.route("/register-remote-data/impression/<impression_uuid>", methods=['GET'])
+def register_remote_data_impression_status(impression_uuid):
+    """Poll a registration job's state by impression uuid."""
+    yuki_dir = remote_data_ops._yuki_dir()  # pylint: disable=protected-access
+    found = remote_data_ops.find_job_by_impression(yuki_dir, impression_uuid)
+    if found is None:
+        return jsonify({"error": "no registration job for impression"}), 404
+    job_id, state = found
+    if state.get("status") in ("hashing", "copying"):
+        state = dict(state)
+        state["progress"] = remote_data_ops.read_remote_progress(
+            state.get("runner_id", ""), job_id)
     return jsonify(state)
 
 

@@ -1,4 +1,4 @@
-"""Remote-side data operations for register-data.
+"""Remote-side data operations for register-ssh-data.
 
 Helpers that build shell commands executed ON an ssh runner, plus the
 local Yuki-side storage paths for registration job state.
@@ -12,7 +12,7 @@ import tempfile
 from CelebiChrono.utils.metadata import ConfigFile
 
 REMOTE_MD5_SCRIPT = r'''
-import hashlib, os, sys
+import hashlib, json, os, sys
 
 def md5sum(path):
     h = hashlib.md5()
@@ -21,18 +21,38 @@ def md5sum(path):
             h.update(chunk)
     return h.hexdigest()
 
-def dir_md5(root):
-    total = hashlib.md5()
+def list_files(root):
+    result = []
     for cur, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        files = [f for f in files if not f.startswith(".")]
-        dirs.sort()
-        files.sort()
-        for name in files:
-            total.update(md5sum(os.path.join(cur, name)).encode("utf-8"))
-    return total.hexdigest()
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        result.extend(
+            os.path.join(cur, name)
+            for name in sorted(f for f in files if not f.startswith(".")))
+    return result
 
-print(dir_md5(sys.argv[1]))
+def dir_md5(root, progress_path=None):
+    files = list_files(root)
+    total = sum(os.path.getsize(path) for path in files)
+    if progress_path:
+        os.makedirs(os.path.dirname(progress_path), exist_ok=True)
+        with open(progress_path, "w", encoding="utf-8") as f:
+            json.dump({"stage": "hashing", "bytes_done": 0,
+                       "bytes_total": total}, f)
+    hasher = hashlib.md5()
+    done = 0
+    for path in files:
+        hasher.update(md5sum(path).encode("utf-8"))
+        done += os.path.getsize(path)
+        if progress_path:
+            with open(progress_path, "w", encoding="utf-8") as f:
+                json.dump({"stage": "hashing", "bytes_done": done,
+                           "bytes_total": total}, f)
+    return hasher.hexdigest()
+
+if len(sys.argv) >= 3:
+    print(dir_md5(sys.argv[1], sys.argv[2]))
+else:
+    print(dir_md5(sys.argv[1]))
 '''
 
 
@@ -41,23 +61,57 @@ def _yuki_dir():
     return os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
 
 
-def remote_md5_command(remote_path):
-    """SSH command computing the dir md5 on the remote host."""
-    return f"python3 -c {shlex.quote(REMOTE_MD5_SCRIPT)} {shlex.quote(remote_path)}"
+def remote_md5_command(remote_path, progress_path=None):
+    """SSH command computing the dir md5 on the remote host.
+
+    With progress_path, the script also writes cumulative byte progress
+    there ({"stage": "hashing", "bytes_done": n, "bytes_total": t}).
+    """
+    args = [REMOTE_MD5_SCRIPT, remote_path]
+    if progress_path:
+        args.append(progress_path)
+    return "python3 -c " + " ".join(shlex.quote(a) for a in args)
 
 
-def build_remote_fast_copy_command(src, dst):
+def build_remote_fast_copy_command(src, dst, progress_path=None):
     """Copy src into dst on the remote host, fastest mechanism first.
 
     Mirrors yuki_create_data.fast_copy_tree: reflink -> hardlink ->
     rsync -> plain copy.
+
+    With progress_path, the copy runs backgrounded under a watcher that
+    writes dst's byte count into the progress file every 3s (stage
+    "copying", bytes_total read from the file left by the md5 stage).
+    The chain's exit code is preserved and the progress file removed.
     """
-    return (
-        f"mkdir -p {shlex.quote(dst)} && "
+    chain = (
         f"(cp -a --reflink=auto {shlex.quote(src)}/. {shlex.quote(dst)}/ || "
         f"cp -al {shlex.quote(src)}/. {shlex.quote(dst)}/ || "
         f"rsync -a {shlex.quote(src)}/ {shlex.quote(dst)}/ || "
         f"cp -r {shlex.quote(src)}/. {shlex.quote(dst)}/)"
+    )
+    if not progress_path:
+        return f"mkdir -p {shlex.quote(dst)} && {chain}"
+    progress_reader = (
+        "python3 -c 'import json,sys;"
+        "print(json.load(open(sys.argv[1]))[\"bytes_total\"])'"
+    )
+    return (
+        f"mkdir -p {shlex.quote(dst)} && "
+        f"{chain} & "
+        f"_pid=$!; "
+        f"_total=$({progress_reader} {shlex.quote(progress_path)}); "
+        f"while kill -0 $_pid 2>/dev/null; do "
+        f"_done=$(du -sb {shlex.quote(dst)} 2>/dev/null | cut -f1); "
+        f"_done=${{_done:-0}}; "
+        f'printf \'{{"stage": "copying", "bytes_done": %s, "bytes_total": %s}}\' '
+        f'"$_done" "$_total" > {shlex.quote(progress_path)}; '
+        f"sleep 3; "
+        f"done; "
+        f"wait $_pid; "
+        f"_code=$?; "
+        f"rm -f {shlex.quote(progress_path)}; "
+        f"exit $_code"
     )
 
 
@@ -114,12 +168,13 @@ def find_existing_registration(yuki_dir, runner_id, remote_path):
             if marker.read_variable("host_runner_id", "") == runner_id and \
                     marker.read_variable("source_path", "") == remote_path:
                 imp_dir = os.path.join(proj_dir, imp)
-                # A failed registration must not count as existing; it can
-                # be re-registered (synthesis overwrites the record).
+                # Failed registrations can be re-registered (synthesis
+                # overwrites the record); running ones have their copy in
+                # flight, so re-registration re-routes through the live job.
                 status = ConfigFile(
                     os.path.join(imp_dir, "status.json")
                 ).read_variable("status", "")
-                if status == "failed":
+                if status in ("failed", "running"):
                     continue
                 from CelebiChrono.utils import metadata
                 yaml_file = metadata.YamlFile(
@@ -147,6 +202,25 @@ def find_inflight_job(yuki_dir, runner_id, remote_path):
                 state.get("remote_path") == remote_path and \
                 state.get("status") not in ("done", "failed"):
             return name[:-5]
+    return None
+
+
+def find_job_by_impression(yuki_dir, impression_uuid):
+    """Return (job_id, state) for the job whose result references the
+    impression, or None."""
+    jobs_dir = _jobs_dir(yuki_dir)
+    if not os.path.isdir(jobs_dir):
+        return None
+    for name in sorted(os.listdir(jobs_dir), reverse=True):
+        if not name.endswith(".json"):
+            continue
+        job_id = name[:-5]
+        state = read_job_state(yuki_dir, job_id)
+        if state is None:
+            continue
+        result = state.get("result") or {}
+        if result.get("impression_uuid") == impression_uuid:
+            return job_id, state
     return None
 
 
@@ -186,6 +260,41 @@ def _runner_name(runner_id):
         if rid == runner_id:
             return name
     return runner_id
+
+
+def progress_file_path(runner_id, job_id):
+    """Progress file path on the runner for a registration job."""
+    settings = _ssh_settings(runner_id)
+    remote_workdir = settings.get("remote_workdir", "/tmp/yuki-workflows")
+    return f"{remote_workdir}/register-progress/{job_id}.json"
+
+
+def read_remote_progress(runner_id, job_id):
+    """Read the runner-side progress file, or None on any failure."""
+    try:
+        with _ssh_connection(runner_id) as ssh:
+            out, _err, code = ssh.exec(
+                f"cat {shlex.quote(progress_file_path(runner_id, job_id))}",
+                timeout=15)
+        if code != 0:
+            return None
+        data = json.loads(out)
+        if not isinstance(data, dict):
+            return None
+        return data
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
+
+
+def remove_remote_progress_file(runner_id, job_id):
+    """Best-effort removal of a job's progress file on the runner."""
+    try:
+        with _ssh_connection(runner_id) as ssh:
+            ssh.exec(
+                f"rm -f {shlex.quote(progress_file_path(runner_id, job_id))}",
+                timeout=15)
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
 
 
 def verify_registered_data(project_uuid, impression_uuid):  # pylint: disable=too-many-locals
@@ -291,9 +400,12 @@ def set_impression_status(project_uuid, impression_uuid, status):
     status_file.write_variable("status", status)
 
 
-def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,  # pylint: disable=too-many-locals
-                             update):
-    """Run the registration pipeline: hash -> copy -> register.
+def register_remote_data_job(job_id, runner_id, remote_path, project_uuid,  # pylint: disable=too-many-locals,too-many-arguments,too-many-positional-arguments
+                             descriptor, update):
+    """Hash phase of a registration: hash -> synthesize -> dispatch copy.
+
+    Ends with the job state "copying" and the registration result; the
+    copy runs in task_copy_remote_data.
 
     ``update(state: dict)`` is called with each progress state.
     """
@@ -306,14 +418,25 @@ def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,  
             "VImpression.generate_imp_uuid); upgrade celebichrono or mount "
             "a local checkout via CELEBI_DIR")
 
+    progress_path = progress_file_path(runner_id, job_id)
     update({"status": "hashing", "result": None, "error": None})
     with _ssh_connection(runner_id) as ssh:
-        out, err, code = ssh.exec(remote_md5_command(remote_path), timeout=3600)
+        out, err, code = ssh.exec(remote_md5_command(remote_path, progress_path),
+                                  timeout=3600)
         if code != 0:
             raise RuntimeError(f"remote md5 failed: {err or out}")
         data_md5 = out.strip()
         if not data_md5:
             raise RuntimeError("remote md5 returned empty result")
+
+        existing = find_existing_registration(_yuki_dir(), runner_id,
+                                              remote_path)
+        if existing and existing["result"]["uuid"] == data_md5:
+            # Unchanged data: reuse the archived registration (the managed
+            # copy is still valid). No synthesis, no copy dispatch.
+            result = existing["result"]
+            update({"status": "done", "result": result, "error": None})
+            return result
 
         with tempfile.TemporaryDirectory(prefix="yuki_register_") as tmp:
             create_canonical_rawdata_task(tmp, descriptor, data_md5)
@@ -333,14 +456,38 @@ def register_remote_data_job(runner_id, remote_path, project_uuid, descriptor,  
                               descriptor, runner_id, remote_path, managed_dir,
                               status="running")
 
-        update({"status": "copying", "result": None, "error": None})
-        out, err, code = ssh.exec(
-            build_remote_fast_copy_command(remote_path, managed_dir),
-            timeout=10800)
-        if code != 0:
-            set_impression_status(project_uuid, impression_uuid, "failed")
-            raise RuntimeError(f"remote copy failed: {err or out}")
+        result = {"uuid": data_md5, "impression_uuid": impression_uuid,
+                  "descriptor": descriptor}
+        update({"status": "copying", "result": result, "error": None})
 
-        set_impression_status(project_uuid, impression_uuid, "archived")
-        return {"uuid": data_md5, "impression_uuid": impression_uuid,
-                "descriptor": descriptor}
+    return result
+
+
+def copy_remote_data_job(job_id, impression_uuid, project_uuid, runner_id,
+                         remote_path):
+    """Copy phase of a registration: copy data into the managed dir.
+
+    Ends with the impression archived (the caller records job "done");
+    on failure the impression is marked failed and the error raised.
+    """
+    settings = _ssh_settings(runner_id)
+    managed_dir = (f"{settings.get('remote_workdir', '/tmp/yuki-workflows')}"
+                   f"/impressions/{project_uuid}/{impression_uuid}")
+    progress_path = progress_file_path(runner_id, job_id)
+    with _ssh_connection(runner_id) as ssh:
+        out, err, code = ssh.exec(
+            build_remote_fast_copy_command(remote_path, managed_dir,
+                                           progress_path),
+            timeout=10800)
+    if code != 0:
+        set_impression_status(project_uuid, impression_uuid, "failed")
+        raise RuntimeError(f"remote copy failed: {err or out}")
+    set_impression_status(project_uuid, impression_uuid, "archived")
+    imp_dir = os.path.join(_yuki_dir(), "Storage", project_uuid,
+                           impression_uuid)
+    from CelebiChrono.utils import metadata
+    yaml_file = metadata.YamlFile(
+        os.path.join(imp_dir, "contents", "celebi.yaml"))
+    return {"uuid": _impression_md5(imp_dir),
+            "impression_uuid": impression_uuid,
+            "descriptor": yaml_file.read_variable("descriptor", "")}
