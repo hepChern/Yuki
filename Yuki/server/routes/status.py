@@ -196,19 +196,20 @@ def impression(project_uuid, impression_name):
     """Get impression path."""
     return config.get_job_path(project_uuid, impression_name)
 
-def process_directory(job_path, runner_id, base_dir, file_infos_dict, max_preview_chars):
-    """Lists files in a directory and adds their metadata/preview content to file_infos_dict."""
-    full_path = os.path.join(job_path, runner_id, base_dir)
+def _walk_files(full_path, base_dir):
+    """Relative paths of every file under full_path, sorted for display.
 
-    if not os.path.exists(full_path):
-        return
-
-    files = os.listdir(full_path)
+    Subdirectories are walked so nested files (e.g. plots/*.png) render
+    as entries themselves rather than as a bare directory name.
+    """
+    files = []
+    for root, _dirs, names in os.walk(full_path):
+        for name in names:
+            files.append(os.path.relpath(os.path.join(root, name),
+                                         full_path))
 
     # Define directory-specific sort priority
     # outputs: chern.stdout first (0), logs: standard sort (1)
-
-    # Sort files according to the original logic
     files.sort(
         key=lambda x: (
             (0 if x == "chern.stdout" and base_dir == 'stageout' else 1),
@@ -216,6 +217,19 @@ def process_directory(job_path, runner_id, base_dir, file_infos_dict, max_previe
             x.lower()
         )
     )
+    return files
+
+
+def process_directory(job_path, runner_id, base_dir, file_infos_dict, max_preview_chars):
+    """Lists files in a directory tree and adds their metadata/preview
+    content to file_infos_dict, keyed by the path relative to base_dir.
+    """
+    full_path = os.path.join(job_path, runner_id, base_dir)
+
+    if not os.path.exists(full_path):
+        return
+
+    files = _walk_files(full_path, base_dir)
 
     for filename in files:
         # Prevent 'logs' from overwriting files already found in 'outputs'
