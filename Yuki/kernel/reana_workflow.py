@@ -65,8 +65,8 @@ class ReanaWorkflow(VWorkflow):
         try:
             self.logger("Upload file")
             self.upload_file()
-        except:
-            self.logger("Failed to upload the files")
+        except Exception as e:
+            self.logger(f"Failed to upload the files: {type(e).__name__}: {e}")
             self.set_workflow_status("failed")
             for job in self.jobs:
                 if job.is_input:
@@ -237,7 +237,7 @@ class ReanaWorkflow(VWorkflow):
                             self.get_access_token(self.machine_id)
                         )
             elif job.is_input:
-                if job.use_eos() and job.machine_id == self.machine_id:
+                if job.cache_on_runner() and job.machine_id == self.machine_id:
                     continue
                 impression = job.path.split("/")[-1]
                 path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
