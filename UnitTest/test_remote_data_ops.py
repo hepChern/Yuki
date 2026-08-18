@@ -109,13 +109,16 @@ def test_remote_md5_progress_writes_zero_entry_for_empty_tree(tmp_path):
 
 
 def test_fast_copy_command_chain():
-    """The fast-copy command falls back through reflink/hardlink/rsync/cp."""
+    """The fast-copy command falls back through reflink/hardlink/rsync/cp
+    and makes the copied data read-only."""
     cmd = build_remote_fast_copy_command("/src dir", "/dst dir")
     assert "mkdir -p '/dst dir'" in cmd
     assert "cp -a --reflink=auto '/src dir'/." in cmd
     assert "cp -al '/src dir'/." in cmd
     assert "rsync -a '/src dir'/" in cmd
     assert "cp -r '/src dir'/." in cmd
+    assert ("find '/dst dir' -mindepth 1 -maxdepth 1 "
+            "-exec chmod -R a-w -- {} +") in cmd
 
 
 def test_fast_copy_command_with_progress_watches_dst_bytes():
@@ -126,6 +129,8 @@ def test_fast_copy_command_with_progress_watches_dst_bytes():
     # The fallback chain is preserved, now backgrounded.
     assert "cp -a --reflink=auto '/src dir'/." in cmd
     assert "rsync -a '/src dir'/" in cmd
+    # The read-only step runs with the copy, before the watcher finishes.
+    assert "chmod -R a-w -- {} +" in cmd
     # Watcher polls dst bytes into the progress file as stage copying.
     assert "du -sb '/dst dir'" in cmd
     assert '"stage": "copying"' in cmd
@@ -161,6 +166,27 @@ def test_fast_copy_command_progress_runs_end_to_end(tmp_path):
     assert result.returncode == 0, result.stderr
     assert (dst / "a.txt").read_text(encoding="utf-8") == "alpha" * 1000
     assert (dst / "sub" / "b.txt").read_text(encoding="utf-8") == "beta" * 2000
+    assert not progress.exists()
+    if os.geteuid() != 0:  # root bypasses write permissions
+        assert not os.access(dst / "a.txt", os.W_OK)
+        assert not os.access(dst / "sub" / "b.txt", os.W_OK)
+
+
+def test_fast_copy_command_empty_src_succeeds(tmp_path):
+    """An empty source dir still completes (the ro step tolerates it)."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    progress = tmp_path / "prog.json"
+    progress.write_text(json.dumps(
+        {"stage": "hashing", "bytes_done": 0, "bytes_total": 0}),
+        encoding="utf-8")
+
+    cmd = build_remote_fast_copy_command(str(src), str(dst), str(progress))
+    result = subprocess.run(["bash", "-c", cmd], capture_output=True,
+                            text=True, timeout=60, check=False)
+    assert result.returncode == 0, result.stderr
+    assert dst.is_dir()
     assert not progress.exists()
 
 

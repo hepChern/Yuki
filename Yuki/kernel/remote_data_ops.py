@@ -77,7 +77,8 @@ def build_remote_fast_copy_command(src, dst, progress_path=None):
     """Copy src into dst on the remote host, fastest mechanism first.
 
     Mirrors yuki_create_data.fast_copy_tree: reflink -> hardlink ->
-    rsync -> plain copy.
+    rsync -> plain copy. The copied data is then made read-only
+    (write-once cache); find handles empty dirs where a glob would fail.
 
     With progress_path, the copy runs backgrounded under a watcher that
     writes dst's byte count into the progress file every 3s (stage
@@ -90,15 +91,17 @@ def build_remote_fast_copy_command(src, dst, progress_path=None):
         f"rsync -a {shlex.quote(src)}/ {shlex.quote(dst)}/ || "
         f"cp -r {shlex.quote(src)}/. {shlex.quote(dst)}/)"
     )
+    chmod_ro = (f"find {shlex.quote(dst)} -mindepth 1 -maxdepth 1 "
+                f"-exec chmod -R a-w -- {{}} +")
     if not progress_path:
-        return f"mkdir -p {shlex.quote(dst)} && {chain}"
+        return f"mkdir -p {shlex.quote(dst)} && {chain} && {chmod_ro}"
     progress_reader = (
         "python3 -c 'import json,sys;"
         "print(json.load(open(sys.argv[1]))[\"bytes_total\"])'"
     )
     return (
         f"mkdir -p {shlex.quote(dst)} && "
-        f"{chain} & "
+        f"{chain} && {chmod_ro} & "
         f"_pid=$!; "
         f"_total=$({progress_reader} {shlex.quote(progress_path)}); "
         f"while kill -0 $_pid 2>/dev/null; do "
