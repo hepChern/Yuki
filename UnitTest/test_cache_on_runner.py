@@ -47,7 +47,8 @@ def test_cache_commands_reana_uses_eos(monkeypatch, tmp_path):
 
 
 def test_cache_commands_ssh_uses_impressions_dir(monkeypatch, tmp_path):
-    """SSH cache commands copy stageout into the remote impressions dir."""
+    """SSH cache commands copy stageout into the remote impressions dir
+    and make the cached data read-only."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     _ssh_settings(tmp_path)
     job = _job()
@@ -55,6 +56,7 @@ def test_cache_commands_ssh_uses_impressions_dir(monkeypatch, tmp_path):
     assert commands == [
         "mkdir -p /remote/work/impressions/proj/imp123456/",
         "cp -r stageout/* /remote/work/impressions/proj/imp123456/",
+        "chmod -R a-w /remote/work/impressions/proj/imp123456/*",
     ]
 
 
@@ -83,14 +85,15 @@ def test_cache_commands_input_job_noop(monkeypatch, tmp_path):
 
 
 def test_setup_commands_ssh_fetches_from_impressions(monkeypatch, tmp_path):
-    """SSH setup commands pull cached data from the remote impressions dir."""
+    """SSH setup commands link cached data from the remote impressions dir
+    into stageout instead of copying."""
     monkeypatch.setenv("YUKIDIR", str(tmp_path))
     _ssh_settings(tmp_path)
     job = _job()
     commands = job.setup_commands("ssh")
     assert commands == [
         "mkdir -p impabc1234/stageout",
-        "cp -r /remote/work/impressions/proj/imp123456/* impabc1234/stageout/",
+        "ln -s /remote/work/impressions/proj/imp123456/* impabc1234/stageout/",
     ]
 
 

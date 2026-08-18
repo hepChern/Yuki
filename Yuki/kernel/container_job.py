@@ -429,8 +429,13 @@ class ContainerJob(VJob):
         cache_path = self._cache_source(backend_type)
         if not cache_path:
             return []
-        return [f"mkdir -p {cache_path}",
-                f"cp -r stageout/* {cache_path}"]
+        commands = [f"mkdir -p {cache_path}",
+                    f"cp -r stageout/* {cache_path}"]
+        if backend_type == "ssh":
+            # Cached data is read-only once written, so workflows linking
+            # it via the setup rule cannot modify the shared cache.
+            commands.append(f"chmod -R a-w {cache_path}*")
+        return commands
 
     def setup_commands(self, backend_type="reana", workflow_machine_id=None):
         """Generate commands to set up the container environment from the
@@ -438,8 +443,15 @@ class ContainerJob(VJob):
         cache_path = self._cache_source(backend_type, workflow_machine_id)
         commands = [f"mkdir -p imp{self.short_uuid()}/stageout"]
         if cache_path:
-            commands.append(f"cp -r {cache_path}* "
-                            f"imp{self.short_uuid()}/stageout/")
+            if backend_type == "ssh":
+                # The cache lives on the same runner as the workflow, so
+                # link each entry into stageout instead of copying. The
+                # cached data was made read-only when written.
+                commands.append(f"ln -s {cache_path}* "
+                                f"imp{self.short_uuid()}/stageout/")
+            else:
+                commands.append(f"cp -r {cache_path}* "
+                                f"imp{self.short_uuid()}/stageout/")
         return commands
 
     def finalize_commands(self, backend_type="reana"):

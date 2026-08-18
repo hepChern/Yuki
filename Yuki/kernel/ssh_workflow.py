@@ -217,6 +217,14 @@ class SshWorkflow(VWorkflow):
             f"test -n \"$(ls -A {shlex.quote(cache_dir)})\"")
         return code == 0
 
+    def _chmod_cache_ro(self, ssh, cache_dir):
+        """Make runner-side cached data read-only after write-through."""
+        out, err, code = ssh.exec(
+            f"chmod -R a-w {shlex.quote(cache_dir)}/*", timeout=3600)
+        if code != 0:
+            self.logger(f"[SSH] chmod cache read-only failed for "
+                        f"{cache_dir}: {err or out}")
+
     def _execute_backend(self):
         """Execute workflow using a remote SSH backend."""
         try:
@@ -348,13 +356,15 @@ class SshWorkflow(VWorkflow):
                         total_raw = len(filelist)
                         for f_idx, (rel_path, src_path) in enumerate(filelist):
                             # Upload into the runner cache; the Snakefile
-                            # setup rule copies it into imp<short>/stageout.
+                            # setup rule links it into imp<short>/stageout.
                             dst_path = f"{cache_dir}/{rel_path}"
                             ssh.put(src_path, dst_path)
                             self.logger(
                                 f"[SSH] [Job {j_idx+1}/{total_jobs}] Cached rawdata "
                                 f"{f_idx+1}/{total_raw}: {rel_path}"
                             )
+                        if total_raw:
+                            self._chmod_cache_ro(ssh, cache_dir)
 
                 elif job.is_input:
                     src_stageout = os.path.join(
@@ -371,13 +381,15 @@ class SshWorkflow(VWorkflow):
                         total_input = len(filelist)
                         for f_idx, (rel_path, src_path) in enumerate(filelist):
                             # Upload into the runner cache; the Snakefile
-                            # setup rule copies it into imp<short>/stageout.
+                            # setup rule links it into imp<short>/stageout.
                             dst_path = f"{cache_dir}/{rel_path}"
                             ssh.put(src_path, dst_path)
                             self.logger(
                                 f"[SSH] [Job {j_idx+1}/{total_jobs}] Cached input "
                                 f"{f_idx+1}/{total_input}: {rel_path}"
                             )
+                        if total_input:
+                            self._chmod_cache_ro(ssh, cache_dir)
 
             ssh.put(self.snakefile_path, f"{self.remote_exec_path}/Snakefile")
             self.logger("[SSH] Uploaded: Snakefile")
