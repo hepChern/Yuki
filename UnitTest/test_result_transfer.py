@@ -143,3 +143,43 @@ def test_copy_remote_to_local(tmp_path):
         progress={"bytes_done": 0}, report=report)
     ssh.get.assert_called_once_with("/remote/a.txt", mock.ANY)
     assert report["transferred"] == ["a.txt"]
+
+
+def test_run_transfer_yuki_to_yuki_rejected(tmp_path, monkeypatch):
+    yuki_dir = tmp_path / "yuki"
+    yuki_dir.mkdir()
+    monkeypatch.setenv("YUKIDIR", str(yuki_dir))
+    with pytest.raises(ValueError, match="source and destination cannot both be yuki"):
+        result_transfer.run_transfer(
+            "job1", "proj", "imp", "yuki", "yuki",
+            pattern=None, force=False, yuki_dir=str(yuki_dir))
+
+
+def test_run_transfer_with_mocked_remote(tmp_path, monkeypatch):
+    yuki_dir = tmp_path / "yuki"
+    yuki_dir.mkdir()
+    storage = yuki_dir / "Storage" / "proj" / "imp" / "stageout"
+    storage.mkdir(parents=True)
+    (storage / "a.txt").write_text("hello")
+    config_path = yuki_dir / "config.json"
+    config_path.write_text(json.dumps({
+        "runners_id": {"pkufarm": "runner-uuid"},
+        "runners": ["pkufarm"],
+        "runner_settings": {
+            "runner-uuid": {"ssh_host": "host", "ssh_user": "user",
+                            "remote_workdir": "/remote/work"}
+        }
+    }))
+    monkeypatch.setenv("YUKIDIR", str(yuki_dir))
+
+    with mock.patch("Yuki.kernel.result_transfer._ssh_connection") as ssh_conn:
+        ssh = mock.MagicMock()
+        ssh.exists.return_value = False
+        ssh.walk_files.return_value = []
+        ssh_conn.return_value.__enter__ = mock.Mock(return_value=ssh)
+        ssh_conn.return_value.__exit__ = mock.Mock(return_value=False)
+        report = result_transfer.run_transfer(
+            "job1", "proj", "imp", "yuki", "runner:pkufarm",
+            pattern=None, force=False, yuki_dir=str(yuki_dir))
+        assert report["transferred"] == ["a.txt"]
+        ssh.put.assert_called_once()

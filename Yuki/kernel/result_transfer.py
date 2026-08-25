@@ -165,25 +165,88 @@ def _copy_remote_to_remote(src_root: str, dst_root: str,
                            src_ssh: _SshConnection, dst_ssh: _SshConnection,
                            force: bool, progress: dict, report: dict) -> None:
     """Stream files from src runner to dst runner through Yuki host."""
+    import tempfile
     files = _list_remote_files(src_ssh, src_root)
     for entry in files:
         rel = entry["name"]
         src_file = entry["remote_path"]
         dst_file = f"{dst_root}/{rel}"
+        progress["current_file"] = rel
         if dst_ssh.exists(dst_file) and not force:
             report["skipped"].append(rel)
             continue
+        tmp_path = None
         try:
-            for chunk in src_ssh.stream(src_file):
-                # We'll implement chunked streaming in the next refinement.
-                # For now, use a temporary buffer approach.
-                import tempfile
-                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp_path = tmp.name
+                for chunk in src_ssh.stream(src_file):
                     tmp.write(chunk)
-                    tmp_path = tmp.name
             dst_ssh.put(tmp_path, dst_file)
-            os.unlink(tmp_path)
             progress["bytes_done"] += entry["size"]
             report["transferred"].append(rel)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             report["failed"].append({"file": rel, "reason": str(exc)})
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+
+def run_transfer(job_id: str, project_uuid: str, impression: str,
+                 source: str, destination: str,
+                 pattern: Optional[str] = None, force: bool = False,
+                 yuki_dir: str = None) -> dict:
+    """Run a transfer job and return the final report."""
+    yuki_dir = yuki_dir or _resolve_yuki_dir()
+    src_path, src_runner = _resolve_path(source, project_uuid, impression, yuki_dir)
+    dst_path, dst_runner = _resolve_path(destination, project_uuid, impression, yuki_dir)
+
+    if source == "yuki" and destination == "yuki":
+        raise ValueError("source and destination cannot both be yuki")
+
+    progress_dir = _make_progress_dir(yuki_dir)
+    progress_path = os.path.join(progress_dir, f"{job_id}.json")
+
+    progress = {"bytes_done": 0, "bytes_total": 0, "current_file": ""}
+
+    def write_status(status, extra=None):
+        state = {
+            "status": status,
+            "bytes_done": progress["bytes_done"],
+            "bytes_total": progress["bytes_total"],
+            "current_file": progress.get("current_file", ""),
+        }
+        if extra:
+            state.update(extra)
+        with open(progress_path, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+
+    # Discover files on both sides to compute total
+    if source == "yuki":
+        src_files = _list_local_files(src_path, pattern)
+    else:
+        with _ssh_connection(src_runner) as ssh:
+            src_files = _list_remote_files(ssh, src_path, pattern)
+
+    progress["bytes_total"] = sum(f["size"] for f in src_files)
+    write_status("running")
+
+    report = {"transferred": [], "skipped": [], "failed": []}
+
+    try:
+        if source == "yuki" and destination.startswith("runner:"):
+            with _ssh_connection(dst_runner) as ssh:
+                _copy_local_to_remote(src_path, dst_path, ssh, force, progress, report)
+        elif source.startswith("runner:") and destination == "yuki":
+            with _ssh_connection(src_runner) as ssh:
+                _copy_remote_to_local(src_path, dst_path, ssh, force, progress, report)
+        elif source.startswith("runner:") and destination.startswith("runner:"):
+            with _ssh_connection(src_runner) as src_ssh, \
+                 _ssh_connection(dst_runner) as dst_ssh:
+                _copy_remote_to_remote(src_path, dst_path, src_ssh, dst_ssh,
+                                       force, progress, report)
+        write_status("done", {"report": report})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        write_status("failed", {"error": str(exc), "report": report})
+        raise
+
+    return report
