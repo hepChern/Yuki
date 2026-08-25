@@ -1,7 +1,11 @@
 """Result transfer logic for celebi-cli transfer."""
 import fnmatch
+import json
 import os
 from typing import List, Optional, Tuple
+
+from Yuki.kernel import runner_config
+from Yuki.kernel.ssh_workflow import _SshConnection
 
 
 def _resolve_yuki_dir():
@@ -41,3 +45,56 @@ def _make_progress_dir(yuki_dir: str) -> str:
     path = os.path.join(yuki_dir, "transfer-progress")
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def _resolve_path(location: str, project_uuid: str, impression: str,
+                  yuki_dir: str = None) -> Tuple[str, Optional[str]]:
+    """Return (path, runner_id) for a location.
+
+    For yuki: ~/.Yuki/Storage/<project>/<impression>/stageout
+    For runner: <remote_workdir>/impressions/<project>/<impression>
+    """
+    kind, runner_name = _parse_location(location)
+    if kind == "yuki":
+        yuki_dir = yuki_dir or _resolve_yuki_dir()
+        return os.path.join(yuki_dir, "Storage", project_uuid,
+                            impression, "stageout"), None
+
+    # runner
+    yuki_dir = yuki_dir or _resolve_yuki_dir()
+    config_file = runner_config.open_config()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner_name not in runners_id:
+        raise ValueError(f"runner '{runner_name}' not found")
+    runner_id = runners_id[runner_name]
+    settings = runner_config.get_ssh_settings(config_file, runner_id)
+    remote_workdir = settings.get("remote_workdir", "/tmp/yuki-workflows")
+    remote_path = os.path.join(
+        remote_workdir, "impressions", project_uuid, impression
+    ).replace(os.sep, "/")
+    return remote_path, runner_id
+
+
+def _ssh_connection(runner_id: str) -> _SshConnection:
+    """Build an SSH connection for runner_id from config."""
+    config_file = runner_config.open_config()
+    settings = runner_config.get_ssh_settings(config_file, runner_id)
+    return _SshConnection(
+        host=settings.get("host", ""),
+        user=settings.get("user", ""),
+        key_path=settings.get("key_path"),
+        port=settings.get("port", 22),
+    )
+
+
+def _list_remote_files(ssh: _SshConnection, remote_root: str,
+                       pattern: Optional[str] = None) -> List[dict]:
+    """List files on the remote host under remote_root."""
+    result = []
+    if not ssh.exists(remote_root):
+        return result
+    for rel, full_path, size in ssh.walk_files(remote_root):
+        if pattern and not fnmatch.fnmatch(rel, pattern):
+            continue
+        result.append({"name": rel, "size": size, "remote_path": full_path})
+    return result

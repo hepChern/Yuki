@@ -1,4 +1,5 @@
 """Tests for Yuki.kernel.result_transfer."""
+import json
 import os
 from unittest import mock
 
@@ -42,3 +43,43 @@ def test_list_local_files(tmp_path):
 def test_list_local_files_missing_dir():
     files = result_transfer._list_local_files("/nonexistent/path")
     assert files == []
+
+
+def test_resolve_path_yuki(tmp_path, monkeypatch):
+    yuki_dir = tmp_path / "yuki"
+    yuki_dir.mkdir()
+    monkeypatch.setenv("YUKIDIR", str(yuki_dir))
+    project_uuid = "proj-uuid"
+    impression = "imp-uuid"
+    path, runner_id = result_transfer._resolve_path("yuki", project_uuid, impression)
+    assert path == str(yuki_dir / "Storage" / project_uuid / impression / "stageout")
+    assert runner_id is None
+
+
+def test_resolve_path_runner(tmp_path, monkeypatch):
+    yuki_dir = tmp_path / "yuki"
+    yuki_dir.mkdir()
+    config_path = yuki_dir / "config.json"
+    config_path.write_text(json.dumps({
+        "runners_id": {"pkufarm": "runner-uuid"},
+        "runners": ["pkufarm"],
+        "runner_settings": {
+            "runner-uuid": {"ssh_host": "host", "ssh_user": "user",
+                            "remote_workdir": "/remote/work"}
+        }
+    }))
+    monkeypatch.setenv("YUKIDIR", str(yuki_dir))
+    path, runner_id = result_transfer._resolve_path(
+        "runner:pkufarm", "proj-uuid", "imp-uuid")
+    assert path == "/remote/work/impressions/proj-uuid/imp-uuid"
+    assert runner_id == "runner-uuid"
+
+
+def test_list_remote_files_uses_ssh_walk():
+    ssh = mock.MagicMock()
+    ssh.walk_files.return_value = [
+        ("a.txt", "/remote/a.txt", 10),
+        ("sub/b.txt", "/remote/sub/b.txt", 20),
+    ]
+    files = result_transfer._list_remote_files(ssh, "/remote/root", "*.txt")
+    assert sorted(f["name"] for f in files) == ["a.txt", "sub/b.txt"]
