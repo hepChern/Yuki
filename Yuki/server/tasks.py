@@ -4,7 +4,7 @@ Celery tasks for Yuki server.
 import os
 from celery import Celery
 from CelebiChrono.utils import metadata
-from ..kernel import remote_data_ops
+from ..kernel import remote_data_ops, result_transfer
 from ..kernel.vjob import VJob
 from ..kernel.vworkflow import VWorkflow
 
@@ -158,3 +158,13 @@ def task_copy_remote_data(job_id, impression_uuid, project_uuid, runner_id,
                 "error": str(e) or type(e).__name__})
     finally:
         remote_data_ops.remove_remote_progress_file(runner_id, job_id)
+
+
+@celeryapp.task
+def task_transfer_results(job_id, project_uuid, impression,
+                          source, destination, pattern, force):
+    """Transfer impression results between yuki and runner cache."""
+    return result_transfer.run_transfer(
+        job_id, project_uuid, impression,
+        source, destination,
+        pattern=pattern, force=force)
