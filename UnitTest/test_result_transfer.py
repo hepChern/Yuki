@@ -83,3 +83,63 @@ def test_list_remote_files_uses_ssh_walk():
     ]
     files = result_transfer._list_remote_files(ssh, "/remote/root", "*.txt")
     assert sorted(f["name"] for f in files) == ["a.txt", "sub/b.txt"]
+
+
+def test_copy_local_to_local(tmp_path):
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    (src / "a.txt").write_text("hello")
+    (src / "sub").mkdir()
+    (src / "sub" / "b.txt").write_text("world")
+    progress = {"bytes_done": 0}
+    report = {"transferred": [], "skipped": [], "failed": []}
+    result_transfer._copy_local_to_local(
+        str(src), str(dst), force=False,
+        progress=progress, report=report)
+    assert sorted(report["transferred"]) == ["a.txt", "sub/b.txt"]
+    assert (dst / "a.txt").read_text() == "hello"
+    assert (dst / "sub" / "b.txt").read_text() == "world"
+    assert progress["bytes_done"] == 10
+
+
+def test_copy_local_to_local_skips_existing(tmp_path):
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    (src / "a.txt").write_text("hello")
+    (dst / "a.txt").write_text("existing")
+    report = {"transferred": [], "skipped": [], "failed": []}
+    result_transfer._copy_local_to_local(
+        str(src), str(dst), force=False,
+        progress={"bytes_done": 0}, report=report)
+    assert report["skipped"] == ["a.txt"]
+    assert (dst / "a.txt").read_text() == "existing"
+
+
+def test_copy_local_to_remote(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.txt").write_text("hello")
+    ssh = mock.MagicMock()
+    ssh.exists.return_value = False
+    report = {"transferred": [], "skipped": [], "failed": []}
+    result_transfer._copy_local_to_remote(
+        str(src), "/remote/dst", ssh, force=False,
+        progress={"bytes_done": 0}, report=report)
+    ssh.put.assert_called_once()
+    assert report["transferred"] == ["a.txt"]
+
+
+def test_copy_remote_to_local(tmp_path):
+    dst = tmp_path / "dst"
+    ssh = mock.MagicMock()
+    ssh.exists.return_value = True
+    ssh.walk_files.return_value = [("a.txt", "/remote/a.txt", 5)]
+    report = {"transferred": [], "skipped": [], "failed": []}
+    result_transfer._copy_remote_to_local(
+        "/remote/src", str(dst), ssh, force=False,
+        progress={"bytes_done": 0}, report=report)
+    ssh.get.assert_called_once_with("/remote/a.txt", mock.ANY)
+    assert report["transferred"] == ["a.txt"]
