@@ -2,14 +2,18 @@
 Bulk impression stageout export/import routes.
 """
 import io
+import json
 import os
 import re
 import tarfile
 from logging import getLogger
 
+from CelebiChrono.utils import csys
 from flask import Blueprint, request, send_file, jsonify
 
+from ...kernel import result_transfer
 from ..config import config
+from ..tasks import task_transfer_results
 
 bp = Blueprint('transfer', __name__)
 logger = getLogger("YukiLogger")
@@ -95,3 +99,62 @@ def import_impressions():
             imported.add(impression)
 
     return jsonify({"imported": sorted(imported), "count": len(imported)})
+
+
+@bp.route("/transfer", methods=['POST'])
+def start_transfer():
+    """Start a result transfer job."""
+    data = request.get_json(silent=True) or request.form
+    project_uuid = data.get("project_uuid", "")
+    impression = data.get("impression", "")
+    source = data.get("source", "")
+    destination = data.get("destination", "")
+    pattern = data.get("pattern") or None
+    force = bool(data.get("force", False))
+
+    if not (project_uuid and impression and source and destination):
+        return jsonify({"error": "missing required field"}), 400
+
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    backend_types = config_file.read_variable("backend_types", {})
+
+    for loc in (source, destination):
+        if loc.startswith("runner:"):
+            name = loc[len("runner:"):]
+            if name not in runners_id:
+                return jsonify({"error": f"runner '{name}' not found"}), 404
+            runner_id = runners_id[name]
+            if backend_types.get(runner_id, "reana") != "ssh":
+                return jsonify({
+                    "error": f"runner '{name}' is not an ssh runner"
+                }), 400
+
+    job_id = csys.generate_uuid()
+    yuki_dir = result_transfer._resolve_yuki_dir()  # pylint: disable=protected-access
+    progress_dir = os.path.join(yuki_dir, "transfer-progress")
+    os.makedirs(progress_dir, exist_ok=True)
+    progress_path = os.path.join(progress_dir, f"{job_id}.json")
+    with open(progress_path, "w", encoding="utf-8") as f:
+        json.dump({"status": "pending", "bytes_done": 0,
+                   "bytes_total": 0, "current_file": ""}, f)
+
+    task_transfer_results.apply_async(
+        args=[job_id, project_uuid, impression,
+              source, destination, pattern, force])
+    return jsonify({"job_id": job_id})
+
+
+@bp.route("/transfer/<job_id>", methods=['GET'])
+def transfer_status(job_id):
+    """Poll a transfer job's state."""
+    yuki_dir = result_transfer._resolve_yuki_dir()  # pylint: disable=protected-access
+    progress_path = os.path.join(yuki_dir, "transfer-progress", f"{job_id}.json")
+    if not os.path.exists(progress_path):
+        return jsonify({"error": "job not found"}), 404
+    try:
+        with open(progress_path, encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        return jsonify({"error": "corrupt job state"}), 500
+    return jsonify(state)
