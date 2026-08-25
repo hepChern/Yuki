@@ -100,6 +100,16 @@ class _SshConnection:
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         self._sftp.get(remote_path, local_path)
 
+    def stream(self, remote_path, chunk_size=65536):
+        """Yield chunks of a remote file."""
+        with self._sftp.file(remote_path, "rb") as remote_file:
+            remote_file.prefetch()
+            while True:
+                chunk = remote_file.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
     def listdir(self, remote_path):
         """List entries in a remote directory.
 
