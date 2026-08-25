@@ -13,6 +13,18 @@ def _resolve_yuki_dir():
     return os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki"))
 
 
+def _sanitize_rel_path(rel: str) -> str:
+    """Validate a relative path and reject traversal/absolute paths."""
+    if not rel:
+        raise ValueError("empty relative path")
+    if os.path.isabs(rel) or rel.startswith("/"):
+        raise ValueError(f"absolute path not allowed: {rel}")
+    parts = rel.replace(os.sep, "/").split("/")
+    if ".." in parts:
+        raise ValueError(f"path traversal not allowed: {rel}")
+    return rel
+
+
 def _parse_location(location: str) -> Tuple[str, Optional[str]]:
     """Parse 'yuki' or 'runner:<runner-id>' into (kind, runner_id)."""
     if location == "yuki":
@@ -34,6 +46,7 @@ def _list_local_files(root: str, pattern: Optional[str] = None) -> List[dict]:
         for fname in filenames:
             full = os.path.join(dirpath, fname)
             rel = os.path.relpath(full, root)
+            rel = _sanitize_rel_path(rel)
             if pattern and not fnmatch.fnmatch(rel, pattern):
                 continue
             result.append({"name": rel, "size": os.path.getsize(full)})
@@ -94,18 +107,21 @@ def _list_remote_files(ssh: _SshConnection, remote_root: str,
     if not ssh.exists(remote_root):
         return result
     for rel, full_path, size in ssh.walk_files(remote_root):
+        rel = _sanitize_rel_path(rel)
         if pattern and not fnmatch.fnmatch(rel, pattern):
             continue
         result.append({"name": rel, "size": size, "remote_path": full_path})
     return result
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def _copy_local_to_local(src_root: str, dst_root: str, force: bool,
                          progress: dict, report: dict) -> None:
     """Copy files from src_root to dst_root."""
     files = _list_local_files(src_root)
     for entry in files:
         rel = entry["name"]
+        progress["current_file"] = rel
         src_file = os.path.join(src_root, rel)
         dst_file = os.path.join(dst_root, rel)
         os.makedirs(os.path.dirname(dst_file), exist_ok=True)
@@ -114,20 +130,25 @@ def _copy_local_to_local(src_root: str, dst_root: str, force: bool,
             continue
         try:
             with open(src_file, "rb") as sf, open(dst_file, "wb") as df:
-                data = sf.read()
-                df.write(data)
+                while True:
+                    chunk = sf.read(65536)
+                    if not chunk:
+                        break
+                    df.write(chunk)
             progress["bytes_done"] += entry["size"]
             report["transferred"].append(rel)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             report["failed"].append({"file": rel, "reason": str(exc)})
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def _copy_local_to_remote(src_root: str, dst_root: str, ssh: _SshConnection,
                           force: bool, progress: dict, report: dict) -> None:
     """Upload files from src_root to dst_root on the remote host."""
     files = _list_local_files(src_root)
     for entry in files:
         rel = entry["name"]
+        progress["current_file"] = rel
         src_file = os.path.join(src_root, rel)
         dst_file = f"{dst_root}/{rel}"
         if ssh.exists(dst_file) and not force:
@@ -141,12 +162,14 @@ def _copy_local_to_remote(src_root: str, dst_root: str, ssh: _SshConnection,
             report["failed"].append({"file": rel, "reason": str(exc)})
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def _copy_remote_to_local(src_root: str, dst_root: str, ssh: _SshConnection,
                           force: bool, progress: dict, report: dict) -> None:
     """Download files from src_root on the remote host to dst_root."""
     files = _list_remote_files(ssh, src_root)
     for entry in files:
         rel = entry["name"]
+        progress["current_file"] = rel
         src_file = entry["remote_path"]
         dst_file = os.path.join(dst_root, rel)
         os.makedirs(os.path.dirname(dst_file), exist_ok=True)
@@ -161,6 +184,7 @@ def _copy_remote_to_local(src_root: str, dst_root: str, ssh: _SshConnection,
             report["failed"].append({"file": rel, "reason": str(exc)})
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
 def _copy_remote_to_remote(src_root: str, dst_root: str,
                            src_ssh: _SshConnection, dst_ssh: _SshConnection,
                            force: bool, progress: dict, report: dict) -> None:
@@ -191,6 +215,17 @@ def _copy_remote_to_remote(src_root: str, dst_root: str,
                 os.unlink(tmp_path)
 
 
+def _report_counts(report: dict) -> dict:
+    """Return top-level count keys plus the full report."""
+    return {
+        "transferred": len(report["transferred"]),
+        "skipped": len(report["skipped"]),
+        "failed": len(report["failed"]),
+        "report": report,
+    }
+
+
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
 def run_transfer(job_id: str, project_uuid: str, impression: str,
                  source: str, destination: str,
                  pattern: Optional[str] = None, force: bool = False,
@@ -220,33 +255,32 @@ def run_transfer(job_id: str, project_uuid: str, impression: str,
         with open(progress_path, "w", encoding="utf-8") as f:
             json.dump(state, f)
 
-    # Discover files on both sides to compute total
-    if source == "yuki":
-        src_files = _list_local_files(src_path, pattern)
-    else:
-        with _ssh_connection(src_runner) as ssh:
-            src_files = _list_remote_files(ssh, src_path, pattern)
-
-    progress["bytes_total"] = sum(f["size"] for f in src_files)
-    write_status("running")
-
     report = {"transferred": [], "skipped": [], "failed": []}
 
     try:
         if source == "yuki" and destination.startswith("runner:"):
-            with _ssh_connection(dst_runner) as ssh:
-                _copy_local_to_remote(src_path, dst_path, ssh, force, progress, report)
+            with _ssh_connection(dst_runner) as dst_ssh:
+                src_files = _list_local_files(src_path, pattern)
+                progress["bytes_total"] = sum(f["size"] for f in src_files)
+                write_status("running")
+                _copy_local_to_remote(src_path, dst_path, dst_ssh, force, progress, report)
         elif source.startswith("runner:") and destination == "yuki":
-            with _ssh_connection(src_runner) as ssh:
-                _copy_remote_to_local(src_path, dst_path, ssh, force, progress, report)
+            with _ssh_connection(src_runner) as src_ssh:
+                src_files = _list_remote_files(src_ssh, src_path, pattern)
+                progress["bytes_total"] = sum(f["size"] for f in src_files)
+                write_status("running")
+                _copy_remote_to_local(src_path, dst_path, src_ssh, force, progress, report)
         elif source.startswith("runner:") and destination.startswith("runner:"):
             with _ssh_connection(src_runner) as src_ssh, \
                  _ssh_connection(dst_runner) as dst_ssh:
+                src_files = _list_remote_files(src_ssh, src_path, pattern)
+                progress["bytes_total"] = sum(f["size"] for f in src_files)
+                write_status("running")
                 _copy_remote_to_remote(src_path, dst_path, src_ssh, dst_ssh,
                                        force, progress, report)
-        write_status("done", {"report": report})
+        write_status("done", _report_counts(report))
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        write_status("failed", {"error": str(exc), "report": report})
+        write_status("failed", {**_report_counts(report), "error": str(exc)})
         raise
 
     return report

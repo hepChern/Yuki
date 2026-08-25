@@ -1,4 +1,5 @@
 """Tests for Yuki.kernel.result_transfer."""
+# pylint: disable=missing-function-docstring
 import json
 import os
 from unittest import mock
@@ -37,12 +38,21 @@ def test_list_local_files(tmp_path):
     (tmp_path / "sub" / "b.txt").write_text("world")
     files = result_transfer._list_local_files(str(tmp_path))
     assert sorted(f["name"] for f in files) == ["a.txt", "sub/b.txt"]
-    assert files[0]["size"] == 5
+    size_map = {f["name"]: f["size"] for f in files}
+    assert size_map["a.txt"] == 5
 
 
 def test_list_local_files_missing_dir():
     files = result_transfer._list_local_files("/nonexistent/path")
-    assert files == []
+    assert not files
+
+
+def test_list_local_files_rejects_traversal(tmp_path, monkeypatch):
+    def bad_walk(_root):
+        yield str(tmp_path), [], ["../etc/passwd"]
+    monkeypatch.setattr(result_transfer.os, "walk", bad_walk)
+    with pytest.raises(ValueError, match="path traversal not allowed"):
+        result_transfer._list_local_files(str(tmp_path))
 
 
 def test_resolve_path_yuki(tmp_path, monkeypatch):
@@ -83,6 +93,16 @@ def test_list_remote_files_uses_ssh_walk():
     ]
     files = result_transfer._list_remote_files(ssh, "/remote/root", "*.txt")
     assert sorted(f["name"] for f in files) == ["a.txt", "sub/b.txt"]
+
+
+def test_list_remote_files_rejects_traversal():
+    ssh = mock.MagicMock()
+    ssh.exists.return_value = True
+    ssh.walk_files.return_value = [
+        ("../etc/passwd", "/remote/../etc/passwd", 10),
+    ]
+    with pytest.raises(ValueError, match="path traversal not allowed"):
+        result_transfer._list_remote_files(ssh, "/remote/root")
 
 
 def test_copy_local_to_local(tmp_path):
@@ -183,3 +203,12 @@ def test_run_transfer_with_mocked_remote(tmp_path, monkeypatch):
             pattern=None, force=False, yuki_dir=str(yuki_dir))
         assert report["transferred"] == ["a.txt"]
         ssh.put.assert_called_once()
+
+        progress_path = yuki_dir / "transfer-progress" / "job1.json"
+        progress = json.loads(progress_path.read_text())
+        assert progress["status"] == "done"
+        assert progress["transferred"] == 1
+        assert progress["skipped"] == 0
+        assert progress["failed"] == 0
+        assert progress["bytes_total"] == 5
+        assert progress["report"]["transferred"] == ["a.txt"]
