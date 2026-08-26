@@ -64,6 +64,54 @@ def test_start_transfer_non_ssh_runner():
     assert "not an ssh runner" in r.get_json()["error"]
 
 
+def test_start_transfer_reana_to_ssh_allowed():
+    """A reana source is allowed when the destination is an ssh runner."""
+    client = _app().test_client()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch.object(transfer_routes, "task_transfer_results") as task:
+            with mock.patch("Yuki.server.routes.transfer.config",
+                            _mock_config(
+                                runners_id={"reanafarm": "reana-uuid",
+                                            "pkufarm": "ssh-uuid"},
+                                backend_types={"reana-uuid": "reana",
+                                               "ssh-uuid": "ssh"},
+                            )):
+                with mock.patch.object(
+                    transfer_routes.result_transfer,
+                    "_resolve_yuki_dir",
+                    return_value=tmpdir,
+                ):
+                    r = client.post("/transfer", json={
+                        "project_uuid": "proj",
+                        "impression": "imp",
+                        "source": "runner:reanafarm",
+                        "destination": "runner:pkufarm",
+                    })
+    assert r.status_code == 200
+    assert "job_id" in r.get_json()
+    task.apply_async.assert_called_once()
+
+
+def test_start_transfer_reana_to_reana_rejected():
+    """A reana source to a non-ssh destination stays rejected."""
+    client = _app().test_client()
+    with mock.patch("Yuki.server.routes.transfer.config",
+                    _mock_config(
+                        runners_id={"reanafarm": "reana-uuid",
+                                    "otherreana": "reana-uuid-2"},
+                        backend_types={"reana-uuid": "reana",
+                                       "reana-uuid-2": "reana"},
+                    )):
+        r = client.post("/transfer", json={
+            "project_uuid": "proj",
+            "impression": "imp",
+            "source": "runner:reanafarm",
+            "destination": "runner:otherreana",
+        })
+    assert r.status_code == 400
+    assert "not an ssh runner" in r.get_json()["error"]
+
+
 def test_start_transfer_starts_job():
     client = _app().test_client()
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -1,4 +1,14 @@
 ## v1.0.0b3
++ Add impression result transfer (`POST /transfer`, `GET /transfer/<job_id>`).
+  - Move stageout results between Yuki storage and SSH runner managed caches, and from REANA runners to SSH runners (the destination pulls the REANA workspace with its own reana-cli; nothing crosses the Yuki host).
+  - Yuki-side stageout is read as the union of the per-machine `stageout/` directories; runner downloads land under the source runner's machine directory.
+  - Location validation (runner existence, backend types), per-file skip/failure accounting, and progress state files for client polling.
++ Add a per-impression data distribution registry (`distribution.json`).
+  - Records at impression granularity where the data lives and how each copy got there: `produced_on`, a `yuki` entry (`collected`/`transferred`), and per-runner `workflow` (only in workflow storage) vs `cache` (managed impressions cache; `transferred`/`registered`) states.
+  - Written by transfers; refreshed by `ImpressionStorage.update_distribution`; legacy flat entries are migrated on load.
++ Live log following support.
+  - `VJob.log` reads byte-offset slices; the error-log route accepts an `offset` query parameter.
+  - `collect_logs` refreshes existing local copies so followers see growing remote logs.
 + Selective collect and file visibility.
   - Add a file-type classifier (`file_types`) with selection specs (plots/data/all).
   - Add `light collect`, `collect_files`, and `file_status` on `ImpressionStorage`; new `/collect-files` and `/file-status` routes.

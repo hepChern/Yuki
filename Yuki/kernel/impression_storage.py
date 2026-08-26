@@ -3,13 +3,14 @@
 This module provides the ImpressionStorage class for managing workflow operations
 and status tracking for individual impressions across different execution runners.
 """
+import datetime
 import os
 import json
 from CelebiChrono.utils.metadata import ConfigFile
 from . import file_types
 from .vjob import VJob
 from .vworkflow import VWorkflow
-from .status_constants import CODA, FAILED, DISSONANCE
+from .status_constants import CODA, FAILED, DISSONANCE, IN_MOVEMENT
 
 class ImpressionStorage:
     """Storage manager for impression workflow operations and status tracking."""
@@ -286,3 +287,124 @@ class ImpressionStorage:
         for name, _, workflow in self._get_runner_contexts():
             return f"{name} {workflow.uuid}"
         return "UNDEFINED"
+
+    def update_distribution(self, overrides=None):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        """Refresh and persist the impression's distribution.json registry.
+
+        The registry records, at impression granularity, where the data
+        lives and how each copy got there:
+        - produced_on: the runner that ran the producing workflow
+        - 'yuki': origin 'collected' (union of local stageout dirs)
+        - 'runner:<name>': a block with per-state entries:
+          - 'workflow': data that only exists in the workflow's storage
+            (origin 'produced'), recomputed on every refresh
+          - 'cache': data in the runner's managed impressions cache
+            (origin 'transferred' or 'registered')
+        Transferred entries are written by the transfer task; they are
+        preserved here and block recomputation of that state.
+        overrides: {location: state_entry}; for 'yuki' it replaces the
+        yuki entry, for a runner it replaces the 'cache' state (used by
+        the transfer task to record the destination).
+        """
+        dist_path = os.path.join(self.job_path, "distribution.json")
+        existing = {}
+        if os.path.isfile(dist_path):
+            try:
+                with open(dist_path, encoding="utf-8") as fh:
+                    existing = json.load(fh)
+            except (OSError, ValueError):
+                existing = {}
+
+        # Keep only the states that must survive a refresh: transferred
+        # yuki entries and transferred runner cache entries. Legacy flat
+        # runner entries are migrated into state blocks.
+        locations = {}
+        for loc, value in existing.get("locations", {}).items():
+            if "origin" in value:  # yuki entry or legacy flat runner entry
+                if loc == "yuki":
+                    if value.get("origin") == "transferred":
+                        locations[loc] = value
+                else:
+                    state = "workflow" if value.get("origin") == "produced" \
+                        else "cache"
+                    locations[loc] = {state: value}
+            elif loc != "yuki":
+                cache = value.get("cache")
+                if cache and cache.get("origin") == "transferred":
+                    locations[loc] = {"cache": cache}
+        produced_on = existing.get("produced_on")
+
+        def make_entry(origin, files):
+            return {
+                "origin": origin,
+                "files": len(files),
+                "bytes": sum(f.get("size", 0) for f in files),
+                "updated": datetime.datetime.now(
+                    datetime.timezone.utc).isoformat(),
+            }
+
+        for name, job, workflow in self._get_runner_contexts():
+            if produced_on is None and job.workflow_id():
+                produced_on = name
+            machine_id = self.runners_id.get(name)
+            machine_dir = os.path.join(self.job_path, machine_id)
+            files = self._runner_files(job, workflow, "stageout", machine_dir)
+            if files:
+                locations.setdefault(f"runner:{name}", {})["workflow"] = \
+                    make_entry("produced", files)
+
+        # yuki: union of local stageout dirs across machines
+        if "yuki" not in locations:
+            yuki_files = []
+            if os.path.isdir(self.job_path):
+                for machine in sorted(os.listdir(self.job_path)):
+                    root = os.path.join(self.job_path, machine, "stageout")
+                    if not os.path.isdir(root):
+                        continue
+                    for dirpath, _dirs, filenames in os.walk(root):
+                        for fname in filenames:
+                            full = os.path.join(dirpath, fname)
+                            yuki_files.append({
+                                "name": os.path.relpath(full, root),
+                                "size": os.path.getsize(full),
+                            })
+            if yuki_files:
+                locations["yuki"] = make_entry("collected", yuki_files)
+
+        # registered (remote-hosted data via register-ssh-data)
+        marker = os.path.join(self.job_path, "remote.json")
+        if os.path.exists(marker):
+            marker_file = ConfigFile(marker)
+            host_runner = marker_file.read_variable("host_runner_id", "")
+            host_name = next(
+                (n for n, mid in self.runners_id.items() if mid == host_runner),
+                None)
+            registered = [row for row in self._remote_hosted_files("stageout")
+                          if row.get("in_runner")]
+            key = f"runner:{host_name}" if host_name else None
+            if registered and key:
+                block = locations.setdefault(key, {})
+                if "cache" not in block:
+                    block["cache"] = make_entry("registered", registered)
+
+        if overrides:
+            for loc, value in overrides.items():
+                if loc == "yuki":
+                    locations[loc] = value
+                else:
+                    locations.setdefault(loc, {})["cache"] = value
+
+        dist = {"produced_on": produced_on, "locations": locations}
+        new_content = json.dumps(dist, indent=2)
+        try:
+            with open(dist_path, encoding="utf-8") as fh:
+                if fh.read() == new_content:
+                    return dist
+        except OSError:
+            pass
+        os.makedirs(self.job_path, exist_ok=True)
+        tmp_path = dist_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            fh.write(new_content)
+        os.replace(tmp_path, dist_path)
+        return dist

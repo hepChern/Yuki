@@ -37,10 +37,18 @@ The command uses the current Celebi project / impression context (identical to
 Only **stageout files** (job results). The transfer operates on the impression's
 managed cache / stageout directory:
 
-- Yuki side: `~/.Yuki/Storage/<project_uuid>/<impression>/stageout/`
+- Yuki side: `~/.Yuki/Storage/<project_uuid>/<impression>/<machine_id>/stageout/`
+  — one stageout dir per runner machine (see `impression_storage.py`); the
+  transfer reads the union across machine dirs, and writes downloads under the
+  source runner's machine dir.
 - Runner side: `<remote_workdir>/impressions/<project_uuid>/<impression>/`
 
 If the source/destination directory does not exist, it is created.
+
+> **Amendment (2026-08-26):** the original spec assumed a flat
+> `<impression>/stageout/` on the Yuki side; the real storage layout nests
+> stageout under per-machine directories. `result_transfer._list_yuki_stageout`
+> implements the union listing.
 
 ## Architecture
 

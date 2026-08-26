@@ -102,7 +102,7 @@ def import_impressions():
 
 
 @bp.route("/transfer", methods=['POST'])
-def start_transfer():
+def start_transfer():  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches
     """Start a result transfer job."""
     data = request.get_json(silent=True) or request.form
     project_uuid = data.get("project_uuid", "")
@@ -119,8 +119,10 @@ def start_transfer():
     runners_id = config_file.read_variable("runners_id", {})
     backend_types = config_file.read_variable("backend_types", {})
 
-    for loc in (source, destination):
+    names = {}
+    for role, loc in (("source", source), ("destination", destination)):
         if loc == "yuki":
+            names[role] = None
             continue
         if loc.startswith("runner:"):
             name = loc[len("runner:"):]
@@ -128,13 +130,26 @@ def start_transfer():
                 return jsonify({"error": f"invalid location: {loc}"}), 400
             if name not in runners_id:
                 return jsonify({"error": f"runner '{name}' not found"}), 404
-            runner_id = runners_id[name]
-            if backend_types.get(runner_id, "reana") != "ssh":
-                return jsonify({
-                    "error": f"runner '{name}' is not an ssh runner"
-                }), 400
+            names[role] = name
         else:
             return jsonify({"error": f"invalid location: {loc}"}), 400
+
+    for role, name in names.items():
+        if name is None:
+            continue
+        backend = backend_types.get(runners_id[name], "reana")
+        if backend == "ssh":
+            continue
+        # Only exception: a reana source may transfer to an ssh runner,
+        # which pulls the files with its own reana-cli.
+        if (role == "source" and backend == "reana"
+                and names["destination"] is not None
+                and backend_types.get(runners_id[names["destination"]],
+                                      "reana") == "ssh"):
+            continue
+        return jsonify({
+            "error": f"runner '{name}' is not an ssh runner"
+        }), 400
 
     if source == "yuki" and destination == "yuki":
         return jsonify({
