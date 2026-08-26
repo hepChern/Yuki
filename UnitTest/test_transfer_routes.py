@@ -94,10 +94,11 @@ def test_start_transfer_starts_job():
 
 def test_transfer_status():
     client = _app().test_client()
+    job_id = "a" * 32
     with tempfile.TemporaryDirectory() as tmpdir:
         progress_dir = os.path.join(tmpdir, "transfer-progress")
         os.makedirs(progress_dir)
-        progress_path = os.path.join(progress_dir, "job-123.json")
+        progress_path = os.path.join(progress_dir, f"{job_id}.json")
         with open(progress_path, "w", encoding="utf-8") as f:
             json.dump({"status": "done", "bytes_done": 42,
                        "bytes_total": 42, "current_file": "a.txt"}, f)
@@ -106,7 +107,7 @@ def test_transfer_status():
             "_resolve_yuki_dir",
             return_value=tmpdir,
         ):
-            r = client.get("/transfer/job-123")
+            r = client.get(f"/transfer/{job_id}")
     assert r.status_code == 200
     body = r.get_json()
     assert body["status"] == "done"
@@ -121,6 +122,82 @@ def test_transfer_status_unknown_job():
             "_resolve_yuki_dir",
             return_value=tmpdir,
         ):
-            r = client.get("/transfer/no-such-job")
+            r = client.get("/transfer/" + "b" * 32)
     assert r.status_code == 404
     assert "error" in r.get_json()
+
+
+def test_transfer_status_rejects_traversal_job_id():
+    client = _app().test_client()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch.object(
+            transfer_routes.result_transfer,
+            "_resolve_yuki_dir",
+            return_value=tmpdir,
+        ):
+            # A hostile id with a leading ".." — rejected by UUID_RE before
+            # any filesystem access.
+            r = client.get("/transfer/.." + "b" * 30)
+    assert r.status_code == 404
+    assert "error" in r.get_json()
+
+
+def test_start_transfer_invalid_location():
+    client = _app().test_client()
+    with mock.patch("Yuki.server.routes.transfer.config",
+                    _mock_config()):
+        r = client.post("/transfer", json={
+            "project_uuid": "proj",
+            "impression": "imp",
+            "source": "foo",
+            "destination": "yuki",
+        })
+    assert r.status_code == 400
+    assert "invalid location" in r.get_json()["error"]
+
+
+def test_start_transfer_yuki_to_yuki():
+    client = _app().test_client()
+    with mock.patch("Yuki.server.routes.transfer.config",
+                    _mock_config()):
+        r = client.post("/transfer", json={
+            "project_uuid": "proj",
+            "impression": "imp",
+            "source": "yuki",
+            "destination": "yuki",
+        })
+    assert r.status_code == 400
+    assert "cannot both be yuki" in r.get_json()["error"]
+
+
+def test_start_transfer_dispatch_failure():
+    client = _app().test_client()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch.object(
+            transfer_routes, "task_transfer_results") as task:
+            task.apply_async.side_effect = RuntimeError("broker down")
+            with mock.patch("Yuki.server.routes.transfer.config",
+                            _mock_config(
+                                runners_id={"pkufarm": "runner-uuid"},
+                                backend_types={"runner-uuid": "ssh"},
+                            )):
+                with mock.patch.object(
+                    transfer_routes.result_transfer,
+                    "_resolve_yuki_dir",
+                    return_value=tmpdir,
+                ):
+                    r = client.post("/transfer", json={
+                        "project_uuid": "proj",
+                        "impression": "imp",
+                        "source": "runner:pkufarm",
+                        "destination": "yuki",
+                    })
+                    assert r.status_code == 500
+                    body = r.get_json()
+                    assert "error" in body
+                    job_id = body["job_id"]
+                    progress_path = os.path.join(
+                        tmpdir, "transfer-progress", f"{job_id}.json")
+                    with open(progress_path, encoding="utf-8") as f:
+                        state = json.load(f)
+                    assert state["status"] == "failed"

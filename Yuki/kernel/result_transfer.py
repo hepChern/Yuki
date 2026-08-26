@@ -232,12 +232,6 @@ def run_transfer(job_id: str, project_uuid: str, impression: str,
                  yuki_dir: str = None) -> dict:
     """Run a transfer job and return the final report."""
     yuki_dir = yuki_dir or _resolve_yuki_dir()
-    src_path, src_runner = _resolve_path(source, project_uuid, impression, yuki_dir)
-    dst_path, dst_runner = _resolve_path(destination, project_uuid, impression, yuki_dir)
-
-    if source == "yuki" and destination == "yuki":
-        raise ValueError("source and destination cannot both be yuki")
-
     progress_dir = _make_progress_dir(yuki_dir)
     progress_path = os.path.join(progress_dir, f"{job_id}.json")
 
@@ -258,6 +252,14 @@ def run_transfer(job_id: str, project_uuid: str, impression: str,
     report = {"transferred": [], "skipped": [], "failed": []}
 
     try:
+        src_path, src_runner = _resolve_path(
+            source, project_uuid, impression, yuki_dir)
+        dst_path, dst_runner = _resolve_path(
+            destination, project_uuid, impression, yuki_dir)
+
+        if source == "yuki" and destination == "yuki":
+            raise ValueError("source and destination cannot both be yuki")
+
         if source == "yuki" and destination.startswith("runner:"):
             with _ssh_connection(dst_runner) as dst_ssh:
                 src_files = _list_local_files(src_path, pattern)

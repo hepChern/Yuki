@@ -173,6 +173,24 @@ def test_run_transfer_yuki_to_yuki_rejected(tmp_path, monkeypatch):
         result_transfer.run_transfer(
             "job1", "proj", "imp", "yuki", "yuki",
             pattern=None, force=False, yuki_dir=str(yuki_dir))
+    progress_path = yuki_dir / "transfer-progress" / "job1.json"
+    progress = json.loads(progress_path.read_text())
+    assert progress["status"] == "failed"
+    assert "cannot both be yuki" in progress["error"]
+
+
+def test_run_transfer_invalid_location_writes_failed(tmp_path, monkeypatch):
+    yuki_dir = tmp_path / "yuki"
+    yuki_dir.mkdir()
+    monkeypatch.setenv("YUKIDIR", str(yuki_dir))
+    with pytest.raises(ValueError, match="invalid location"):
+        result_transfer.run_transfer(
+            "job2", "proj", "imp", "foo", "yuki",
+            pattern=None, force=False, yuki_dir=str(yuki_dir))
+    progress_path = yuki_dir / "transfer-progress" / "job2.json"
+    progress = json.loads(progress_path.read_text())
+    assert progress["status"] == "failed"
+    assert "invalid location" in progress["error"]
 
 
 def test_run_transfer_with_mocked_remote(tmp_path, monkeypatch):

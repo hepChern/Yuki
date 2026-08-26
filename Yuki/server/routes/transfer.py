@@ -120,8 +120,12 @@ def start_transfer():
     backend_types = config_file.read_variable("backend_types", {})
 
     for loc in (source, destination):
+        if loc == "yuki":
+            continue
         if loc.startswith("runner:"):
             name = loc[len("runner:"):]
+            if not name:
+                return jsonify({"error": f"invalid location: {loc}"}), 400
             if name not in runners_id:
                 return jsonify({"error": f"runner '{name}' not found"}), 404
             runner_id = runners_id[name]
@@ -129,6 +133,13 @@ def start_transfer():
                 return jsonify({
                     "error": f"runner '{name}' is not an ssh runner"
                 }), 400
+        else:
+            return jsonify({"error": f"invalid location: {loc}"}), 400
+
+    if source == "yuki" and destination == "yuki":
+        return jsonify({
+            "error": "source and destination cannot both be yuki"
+        }), 400
 
     job_id = csys.generate_uuid()
     yuki_dir = result_transfer._resolve_yuki_dir()  # pylint: disable=protected-access
@@ -139,15 +150,25 @@ def start_transfer():
         json.dump({"status": "pending", "bytes_done": 0,
                    "bytes_total": 0, "current_file": ""}, f)
 
-    task_transfer_results.apply_async(
-        args=[job_id, project_uuid, impression,
-              source, destination, pattern, force])
+    try:
+        task_transfer_results.apply_async(
+            args=[job_id, project_uuid, impression,
+                  source, destination, pattern, force])
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Record the failure so the progress file never stays pending.
+        with open(progress_path, "w", encoding="utf-8") as f:
+            json.dump({"status": "failed", "bytes_done": 0,
+                       "bytes_total": 0, "current_file": "",
+                       "error": str(exc)}, f)
+        return jsonify({"job_id": job_id, "error": str(exc)}), 500
     return jsonify({"job_id": job_id})
 
 
 @bp.route("/transfer/<job_id>", methods=['GET'])
 def transfer_status(job_id):
     """Poll a transfer job's state."""
+    if not UUID_RE.match(job_id):
+        return jsonify({"error": "job not found"}), 404
     yuki_dir = result_transfer._resolve_yuki_dir()  # pylint: disable=protected-access
     progress_path = os.path.join(yuki_dir, "transfer-progress", f"{job_id}.json")
     if not os.path.exists(progress_path):
