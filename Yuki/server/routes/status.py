@@ -563,11 +563,18 @@ def homekeep(project_uuid):
 # You can use the VJob.log(index)
 @bp.route("/error-log/<project_uuid>/<impression_name>/<index>", methods=['GET'])
 def error_log(project_uuid, impression_name, index):
-    """Get error log content for a specific impression and log index."""
+    """Get error log content for a specific impression and log index.
+
+    Query parameters:
+        offset (int): Byte offset to start reading from. Defaults to 0.
+    """
     job_path = config.get_job_path(project_uuid, impression_name)
     job = VJob(job_path, None)
-    log_content = job.log(index)
-    return log_content if log_content else "No log content found"
+    offset = request.args.get("offset", 0, type=int)
+    log_content = job.log(index, offset=offset)
+    if not log_content:
+        return "", 204
+    return log_content
 
 
 @bp.route("/engine-log/<project_uuid>/<impression_name>", methods=['GET'])

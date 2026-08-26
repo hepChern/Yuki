@@ -6,11 +6,13 @@ import uuid
 import tarfile
 from logging import getLogger
 
-from flask import Blueprint, request, send_from_directory, jsonify
+from flask import Blueprint, request, send_from_directory, jsonify, Response
 from CelebiChrono.utils import metadata
 
 from ..config import config
 from ..resumable_upload_handler import get_upload_manager
+from ...kernel.impression_storage import ImpressionStorage
+from ...kernel.vworkflow import VWorkflow
 
 bp = Blueprint('upload', __name__)
 logger = getLogger("YukiLogger")
@@ -112,6 +114,28 @@ def export(project_uuid, impression, filename):
         print("path", full_path)
         if os.path.exists(full_path):
             return _safe_send_from_directory(path, filename)
+    return "NOTFOUND"
+
+
+@bp.route("/remote-export/<project_uuid>/<impression>/<path:filename>", methods=['GET'])
+def remote_export(project_uuid, impression, filename):
+    """Stream a file directly from an SSH runner without copying it to Yuki storage."""
+    storage = ImpressionStorage(project_uuid, impression)
+    for name, job, workflow in storage._get_runner_contexts():  # pylint: disable=protected-access
+        if workflow.__class__.__name__ != "SshWorkflow":
+            continue
+        src_path = f"{workflow.remote_exec_path}/imp{impression[0:7]}/stageout/{filename}"
+        try:
+            with workflow._ssh() as ssh:  # pylint: disable=protected-access
+                if not ssh.isfile(src_path):
+                    continue
+                return Response(
+                    ssh.stream(src_path),
+                    headers={"Content-Disposition": f"inline; filename={filename}"},
+                )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.warning("remote-export failed for %s on %s: %s", filename, name, exc)
+            continue
     return "NOTFOUND"
 
 

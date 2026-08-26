@@ -216,6 +216,62 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         dst_rels = {e["dst_rel"] for e in manifest["entries"]}
         self.assertIn("impaaaaaaa/stageout/data/x.root", dst_rels)
 
+    # -- live log collection ----------------------------------------------
+
+    def test_collect_artifacts_refresh_overwrites_existing_log(self):
+        """refresh=True overwrites a local log snapshot with newer content."""
+        impression = "i" * 32
+        self.workflow.machine_id = "runner-uuid"
+        src_logs = os.path.join(
+            self.workflow.local_exec_path, f"imp{impression[:7]}", "logs")
+        os.makedirs(src_logs, exist_ok=True)
+        with open(os.path.join(src_logs, "celebi_user_step0.log"),
+                  "w", encoding="utf-8") as f:
+            f.write("grown")
+
+        dst_logs = os.path.join(
+            self.tmpdir, ".Yuki", "Storage", self.project_uuid,
+            impression, "runner-uuid", "logs")
+        os.makedirs(dst_logs, exist_ok=True)
+        local_log = os.path.join(dst_logs, "celebi_user_step0.log")
+        with open(local_log, "w", encoding="utf-8") as f:
+            f.write("stale")
+
+        report = self.workflow._collect_artifacts(
+            impression, "logs", "logs.downloaded", "log", refresh=True)
+
+        with open(local_log, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "grown")
+        self.assertIn("celebi_user_step0.log", report["collected"])
+
+    def test_collect_artifacts_without_refresh_skips_existing_log(self):
+        """Without refresh an already-downloaded log is left untouched."""
+        impression = "i" * 32
+        self.workflow.machine_id = "runner-uuid"
+        src_logs = os.path.join(
+            self.workflow.local_exec_path, f"imp{impression[:7]}", "logs")
+        os.makedirs(src_logs, exist_ok=True)
+        with open(os.path.join(src_logs, "celebi_user_step0.log"),
+                  "w", encoding="utf-8") as f:
+            f.write("grown")
+
+        dst_logs = os.path.join(
+            self.tmpdir, ".Yuki", "Storage", self.project_uuid,
+            impression, "runner-uuid", "logs")
+        os.makedirs(dst_logs, exist_ok=True)
+        local_log = os.path.join(dst_logs, "celebi_user_step0.log")
+        with open(local_log, "w", encoding="utf-8") as f:
+            f.write("stale")
+
+        report = self.workflow._collect_artifacts(
+            impression, "logs", "logs.downloaded", "log")
+
+        with open(local_log, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "stale")
+        self.assertEqual(
+            report["skipped"],
+            [{"file": "celebi_user_step0.log", "reason": "already in Yuki"}])
+
 
 if __name__ == "__main__":
     unittest.main()

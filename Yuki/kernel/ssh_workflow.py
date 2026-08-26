@@ -585,9 +585,14 @@ echo $? > yuki.exit
                 continue
             job.set_status(FAILED, "SSH workflow killed by user")
 
-    # pylint: disable=too-many-locals
-    def _collect_remote_artifacts(self, impression, artifact_dir, marker_name, label):
-        """Collect a job artifact directory from remote execution into Storage."""
+    # pylint: disable=too-many-locals,too-many-arguments,too-many-positional-arguments
+    def _collect_remote_artifacts(self, impression, artifact_dir, marker_name,
+                                  label, *, refresh=False):
+        """Collect a job artifact directory from remote execution into Storage.
+
+        With refresh=True, files that already exist locally are downloaded
+        again instead of skipped, so growing logs can be re-synced.
+        """
         src_path = f"{self.remote_exec_path}/imp{impression[0:7]}/{artifact_dir}"
         dst_path = os.path.join(
             os.environ["HOME"],
@@ -618,7 +623,7 @@ echo $? > yuki.exit
             total_files = len(filelist)
             for i, (rel_path, remote_file, _size) in enumerate(filelist):
                 local_file = os.path.join(dst_path, rel_path)
-                if os.path.exists(local_file):
+                if os.path.exists(local_file) and not refresh:
                     report["skipped"].append(
                         {"file": rel_path, "reason": "already in Yuki"})
                     continue
@@ -660,12 +665,12 @@ echo $? > yuki.exit
             )
         return {"collected": [], "skipped": [], "failed": []}
 
-    def download_logs(self, impression=None):
+    def download_logs(self, impression=None, refresh=False):
         """Download logs from remote execution."""
         if impression:
             self.logger("[SSH] Collecting logs from remote execution")
             return self._collect_remote_artifacts(
-                impression, "logs", "logs.downloaded", "log"
+                impression, "logs", "logs.downloaded", "log", refresh=refresh
             )
         return {"collected": [], "skipped": [], "failed": []}
 

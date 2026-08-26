@@ -435,7 +435,8 @@ class ReanaWorkflow(VWorkflow):
                     {"file": "<stageout>", "reason": str(e)})
         return report
 
-    def download_logs(self, impression=None):  # pylint: disable=too-many-locals
+    def download_logs(self, impression=None,  # pylint: disable=too-many-locals
+                      refresh=False):
         """Download workflow logs."""
         # self.logger("Downloading the files")
         if not REANA_AVAILABLE:
@@ -446,7 +447,7 @@ class ReanaWorkflow(VWorkflow):
             path = os.path.join(os.environ["HOME"], ".Yuki", "Storage",
                                 self.project_uuid, impression, self.machine_id)
             try:
-                if os.path.exists(os.path.join(path, "logs.downloaded")):
+                if not refresh and os.path.exists(os.path.join(path, "logs.downloaded")):
                     report["skipped"].append(
                         {"file": "<logs>", "reason": "already collected"})
                     return report

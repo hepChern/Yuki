@@ -413,13 +413,23 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
         # Update job status
         self._update_job_status(config_file, current_status, status, full_workflow_status, logger)
 
-    def log(self, index):
-        """Get log content for this job."""
+    def log(self, index, offset=0):
+        """Get log content for this job.
+
+        Args:
+            index: Step index of the log file to read.
+            offset: Number of bytes to skip from the start of the file.
+
+        Returns:
+            Log content from the given offset, or "" if the file is missing
+            or the offset is at/past the end of the file.
+        """
         log_path = os.path.join(self.path, self.machine_id, "logs", f"celebi_user_step{index}.log")
-        if os.path.exists(log_path):
-            with open(log_path, encoding='utf-8') as f:
-                return f.read()
-        return ""
+        if not os.path.exists(log_path):
+            return ""
+        with open(log_path, encoding='utf-8') as f:
+            f.seek(offset)
+            return f.read()
 
     def error(self):
         """Get error message if any."""

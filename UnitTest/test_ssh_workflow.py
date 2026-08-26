@@ -441,6 +441,61 @@ class TestSshWorkflow(unittest.TestCase):
         self.assertIn("plots/mass.png", report["collected"])
 
     @patch("paramiko.SSHClient")
+    def test_collect_remote_artifacts_refresh_overwrites_existing_log(self, mock_ssh_cls):
+        """refresh=True must overwrite a local log that has grown remotely."""
+        mock_ssh_cls.return_value = self.mock_client
+
+        impression = "i" * 32
+        short = impression[:7]
+        remote_logs = f"{self.workflow.remote_exec_path}/imp{short}/logs"
+        self.mock_sftp.dirs.add(remote_logs)
+        self.mock_sftp.files[f"{remote_logs}/celebi_user_step0.log"] = b"grown"
+
+        # Seed a stale local snapshot.
+        local_log = os.path.join(
+            self.tmpdir, ".Yuki", "Storage", self.project_uuid,
+            impression, self.workflow.machine_id, "logs", "celebi_user_step0.log")
+        os.makedirs(os.path.dirname(local_log), exist_ok=True)
+        with open(local_log, "wb") as f:
+            f.write(b"stale")
+
+        report = self.workflow._collect_remote_artifacts(
+            impression, "logs", "logs.downloaded", "log", refresh=True
+        )
+
+        with open(local_log, "rb") as f:
+            self.assertEqual(f.read(), b"grown")
+        self.assertIn("celebi_user_step0.log", report["collected"])
+
+    @patch("paramiko.SSHClient")
+    def test_collect_remote_artifacts_without_refresh_skips_existing(self, mock_ssh_cls):
+        """Without refresh an already-downloaded log is skipped."""
+        mock_ssh_cls.return_value = self.mock_client
+
+        impression = "i" * 32
+        short = impression[:7]
+        remote_logs = f"{self.workflow.remote_exec_path}/imp{short}/logs"
+        self.mock_sftp.dirs.add(remote_logs)
+        self.mock_sftp.files[f"{remote_logs}/celebi_user_step0.log"] = b"grown"
+
+        local_log = os.path.join(
+            self.tmpdir, ".Yuki", "Storage", self.project_uuid,
+            impression, self.workflow.machine_id, "logs", "celebi_user_step0.log")
+        os.makedirs(os.path.dirname(local_log), exist_ok=True)
+        with open(local_log, "wb") as f:
+            f.write(b"stale")
+
+        report = self.workflow._collect_remote_artifacts(
+            impression, "logs", "logs.downloaded", "log"
+        )
+
+        with open(local_log, "rb") as f:
+            self.assertEqual(f.read(), b"stale")
+        self.assertEqual(
+            report["skipped"],
+            [{"file": "celebi_user_step0.log", "reason": "already in Yuki"}])
+
+    @patch("paramiko.SSHClient")
     def test_list_runner_files_remote_returns_relative_paths(self, mock_ssh_cls):
         """list_runner_files must return relative paths for nested files."""
         mock_ssh_cls.return_value = self.mock_client

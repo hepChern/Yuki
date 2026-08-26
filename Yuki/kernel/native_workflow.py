@@ -386,9 +386,13 @@ class NativeWorkflow(VWorkflow):
                 continue
             job.set_status(FAILED, "Native workflow killed by user")
 
-    # pylint: disable=too-many-locals
-    def _collect_artifacts(self, impression, artifact_dir, marker_name, label):
+    # pylint: disable=too-many-locals,too-many-arguments,too-many-positional-arguments
+    def _collect_artifacts(self, impression, artifact_dir, marker_name, label,
+                           *, refresh=False):
         """Collect a job artifact directory from local execution into Storage.
+
+        With refresh=True, files that already exist locally are copied again
+        instead of skipped, so growing logs can be re-synced.
 
         Returns a report dict with collected/skipped/failed file lists.
         """
@@ -419,7 +423,7 @@ class NativeWorkflow(VWorkflow):
         total_files = len(filelist)
         for i, (rel_path, src_file) in enumerate(filelist):
             dst_file = os.path.join(dst_path, rel_path)
-            if os.path.exists(dst_file):
+            if os.path.exists(dst_file) and not refresh:
                 report["skipped"].append(
                     {"file": rel_path, "reason": "already in Yuki"})
                 continue
@@ -462,12 +466,12 @@ class NativeWorkflow(VWorkflow):
             )
         return {"collected": [], "skipped": [], "failed": []}
 
-    def download_logs(self, impression=None):
+    def download_logs(self, impression=None, refresh=False):
         """Download logs from local execution."""
         if impression:
             self.logger("[LOCAL] Collecting logs from local execution")
             return self._collect_artifacts(
-                impression, "logs", "logs.downloaded", "log"
+                impression, "logs", "logs.downloaded", "log", refresh=refresh
             )
         return {"collected": [], "skipped": [], "failed": []}
 

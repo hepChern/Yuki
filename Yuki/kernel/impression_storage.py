@@ -250,13 +250,18 @@ class ImpressionStorage:
         return report
 
     def collect_logs(self):
-        """Retrieves only logs from runners."""
+        """Retrieves only logs from runners.
+
+        Logs are refreshed (existing local copies overwritten) whenever the
+        job is executing or has reached a terminal state, so live log
+        following sees growing remote logs.
+        """
         report = {}
         for name, job, workflow in self._get_runner_contexts():
             job_status = job.status(musical=True)
-            if job_status == CODA or job_status in (FAILED, DISSONANCE):
+            if job_status in (CODA, FAILED, DISSONANCE, IN_MOVEMENT):
                 print(f"[{name}] Collecting logs...")
-                report[name] = workflow.download_logs(self.impression)
+                report[name] = workflow.download_logs(self.impression, refresh=True)
             else:
                 report[name] = {"collected": [], "skipped": [], "failed": []}
 

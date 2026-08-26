@@ -156,3 +156,20 @@ def test_download_selected_only_matching_and_skips_existing(tmp_path):
     assert "impimp7000/stageout/already.png" not in downloaded   # skipped (exists)
     assert "impimp7000/stageout/ntuple.root" not in downloaded   # not a plot
     assert not (storage / "stageout.downloaded").exists()        # no marker on partial
+
+
+def test_download_logs_refresh_bypasses_collected_marker(tmp_path):
+    """refresh=True re-downloads logs even when logs.downloaded exists."""
+    wf = _make_wf()
+    home = tmp_path
+    storage = home / ".Yuki" / "Storage" / "proj-1" / "imp7" / "runner-1"
+    storage.mkdir(parents=True)
+    (storage / "logs.downloaded").write_text("")
+    fake = [{"name": "impimp7/logs/celebi_user_step0.log", "size": 5}]
+    with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+         mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
+         mock.patch.object(reana_workflow, "client") as cli:
+        cli.list_files.return_value = fake
+        cli.download_file.return_value = (b"grown",)
+        report = wf.download_logs("imp7", refresh=True)
+    assert "celebi_user_step0.log" in report["collected"]
