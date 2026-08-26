@@ -2,6 +2,8 @@
 import os
 from unittest import mock
 
+import pytest
+
 from Yuki.kernel import reana_workflow
 
 
@@ -120,16 +122,17 @@ def test_list_runner_files_retries_transient_then_succeeds():
     assert out == [{"name": "mass.png", "size": 5}]
 
 
-def test_list_runner_files_returns_empty_when_all_retries_fail():
-    """If every attempt fails (runner unreachable), degrade to [] instead of
-    raising, so status can still render the Storage-only view."""
+def test_list_runner_files_raises_after_all_retries_fail():
+    """If every attempt fails (runner unreachable), the error propagates after
+    the bounded retries, so callers can tell failure apart from an empty
+    listing ([] means 'listed fine, no files') and report a diagnostic."""
     wf = _make_wf()
     with mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
          mock.patch.object(reana_workflow, "client") as cli, \
          mock.patch.object(reana_workflow.time, "sleep", lambda *_a: None):
         cli.list_files.side_effect = RuntimeError("[SSL: UNEXPECTED_EOF_WHILE_READING]")
-        out = wf.list_runner_files("1234567abc", "stageout")
-    assert not out
+        with pytest.raises(RuntimeError):
+            wf.list_runner_files("1234567abc", "stageout")
     assert cli.list_files.call_count == 3        # bounded retry, then give up
 
 

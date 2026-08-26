@@ -91,7 +91,7 @@ class ImpressionStorage:
                 report[name] = {"collected": [], "skipped": [], "failed": []}
         return report
 
-    def file_status(self, kind="stageout"):  # pylint: disable=too-many-locals
+    def file_status(self, kind="stageout", detailed=False):  # pylint: disable=too-many-locals
         """Merge runner listing with downloaded Storage state for <kind>.
 
         The runner listing of a finished job is immutable, so it is cached to
@@ -101,8 +101,18 @@ class ImpressionStorage:
 
         Remote-hosted data (registered via register-ssh-data) is listed from
         the host runner's managed impressions dir; see _remote_hosted_files.
+
+        With detailed=True returns {"files": [...], "notes": [...]} where each
+        note is {"runner": <name or None>, "level": info|warning|error,
+        "message": str} explaining e.g. an unreachable runner or a cached
+        listing; otherwise returns the bare files list.
         """
-        result = self._remote_hosted_files(kind)
+        result = []
+        notes = []
+        hosted, hosted_note = self._remote_hosted_files(kind)
+        result.extend(hosted)
+        if hosted_note:
+            notes.append(hosted_note)
         for name, job, workflow in self._get_runner_contexts():
             machine_id = self.runners_id.get(name)
             machine_dir = os.path.join(self.job_path, machine_id)
@@ -113,7 +123,9 @@ class ImpressionStorage:
                     for f in files:
                         downloaded.add(os.path.relpath(os.path.join(root, f), storage_dir))
 
-            runner_files = self._runner_files(job, workflow, kind, machine_dir)
+            runner_files, note = self._runner_files(job, workflow, kind, machine_dir)
+            if note:
+                notes.append({"runner": name, **note})
 
             seen = set()
             for rf in runner_files:
@@ -134,24 +146,28 @@ class ImpressionStorage:
                     "in_runner": False,
                     "in_yuki": True,
                 })
+        if detailed:
+            return {"files": result, "notes": notes}
         return result
 
     def _remote_hosted_files(self, kind):  # pylint: disable=too-many-locals,too-many-branches
-        """List files of a remote-hosted data impression (register-ssh-data).
+        """Return (rows, note) for a remote-hosted data impression
+        (register-ssh-data).
 
         Files live in the host runner's managed impressions dir. The listing
         is cached to <host_runner_id>/<kind>.filelist.json (same convention as
         _runner_files) and merged with the Storage state, so rows report
-        in_runner/in_yuki like any other impression.
+        in_runner/in_yuki like any other impression. The note is None or
+        {"level", "message"} for a cached listing or an unreachable host.
         """
         marker_path = os.path.join(self.job_path, "remote.json")
         if not os.path.exists(marker_path):
-            return []
+            return [], None
         marker = ConfigFile(marker_path)
         host_runner = marker.read_variable("host_runner_id", "")
         managed_path = marker.read_variable("remote_path", "")
         if not host_runner or not managed_path:
-            return []
+            return [], None
 
         machine_dir = os.path.join(self.job_path, host_runner)
         cache_path = os.path.join(machine_dir, kind + ".filelist.json")
@@ -166,13 +182,19 @@ class ImpressionStorage:
             except (OSError, ValueError):
                 pass
 
+        note = None
         if runner_files is None:
             from . import remote_data_ops
             try:
                 runner_files = remote_data_ops.list_managed_files(
                     host_runner, managed_path)
-            except Exception:
+            except Exception as exc:
                 runner_files = []
+                note = {
+                    "level": "error",
+                    "message": (f"remote host unreachable "
+                                f"[{type(exc).__name__}]: {exc}"),
+                }
             if runner_files:
                 try:
                     os.makedirs(machine_dir, exist_ok=True)
@@ -181,6 +203,8 @@ class ImpressionStorage:
                                    "files": runner_files}, fh)
                 except OSError:
                     pass
+        else:
+            note = {"level": "info", "message": "cached remote listing"}
 
         storage_dir = os.path.join(machine_dir, kind)
         downloaded = set()
@@ -199,35 +223,61 @@ class ImpressionStorage:
                 "in_runner": True,
                 "in_yuki": rf["name"] in downloaded,
             })
-        return result
+        return result, note
 
     def _runner_files(self, job, workflow, kind, machine_dir):
-        """Return the runner file listing for <kind>, served from a cache for a
-        finished job to avoid a REANA round-trip on every status.
+        """Return (files, note) for the runner listing of <kind>.
 
-        Cached to <machine_dir>/<kind>.filelist.json keyed by the job's workflow
-        id (a re-run invalidates it). The cache is only written once the job is
-        finished and the live listing is non-empty, so a transient runner
-        failure (empty result) is never persisted. A running job is always
-        listed live, since its file set is still changing.
+        A finished job's listing is served from <machine_dir>/<kind>.filelist.json
+        (keyed by the job's workflow id, so a re-run invalidates it) to avoid a
+        REANA round-trip on every status. The cache is only written once the job
+        is finished and the live listing is non-empty, so a transient runner
+        failure is never persisted. A running job is always listed live, since
+        its file set is still changing.
+
+        The note is None or {"level": info|warning|error, "message": str}
+        explaining the outcome: a cached listing, an empty live listing, or an
+        unreachable runner (with same-workflow cache fallback).
         """
         finished = job.status(musical=True) == CODA
         workflow_id = job.workflow_id()
         cache_path = os.path.join(machine_dir, kind + ".filelist.json")
 
-        if finished and os.path.isfile(cache_path):
+        def read_cache():
+            """Return the cached file list if it matches the current workflow."""
             try:
                 with open(cache_path, encoding="utf-8") as fh:
                     cached = json.load(fh)
                 if cached.get("workflow_id") == workflow_id:
                     return cached.get("files", [])
             except (OSError, ValueError):
-                pass   # unreadable/corrupt cache -> fall through to a live fetch
+                pass   # unreadable/corrupt/mismatched cache
+            return None
+
+        if finished and os.path.isfile(cache_path):
+            cached_files = read_cache()
+            if cached_files is not None:
+                stamp = datetime.datetime.fromtimestamp(
+                    os.path.getmtime(cache_path)).strftime("%Y-%m-%d %H:%M")
+                return cached_files, {
+                    "level": "info",
+                    "message": f"cached listing from {stamp}",
+                }
 
         try:
             runner_files = workflow.list_runner_files(self.impression, kind)
-        except Exception:
-            runner_files = []
+        except Exception as exc:  # runner unreachable
+            cached_files = read_cache() if os.path.isfile(cache_path) else None
+            if cached_files is not None:
+                return cached_files, {
+                    "level": "warning",
+                    "message": (f"runner unreachable [{type(exc).__name__}]: {exc} "
+                                f"— showing cached listing"),
+                }
+            return [], {
+                "level": "error",
+                "message": f"runner unreachable [{type(exc).__name__}]: {exc}",
+            }
 
         if finished and runner_files:
             try:
@@ -237,7 +287,10 @@ class ImpressionStorage:
             except OSError:
                 pass   # best-effort cache; status still works without it
 
-        return runner_files
+        if not runner_files:
+            return [], {"level": "info",
+                        "message": f"no {kind} files on the runner yet"}
+        return runner_files, None
 
     def collect_outputs(self):
         """Retrieves only output files from runners."""
@@ -348,7 +401,7 @@ class ImpressionStorage:
                 produced_on = name
             machine_id = self.runners_id.get(name)
             machine_dir = os.path.join(self.job_path, machine_id)
-            files = self._runner_files(job, workflow, "stageout", machine_dir)
+            files, _note = self._runner_files(job, workflow, "stageout", machine_dir)
             if files:
                 locations.setdefault(f"runner:{name}", {})["workflow"] = \
                     make_entry("produced", files)
@@ -379,8 +432,8 @@ class ImpressionStorage:
             host_name = next(
                 (n for n, mid in self.runners_id.items() if mid == host_runner),
                 None)
-            registered = [row for row in self._remote_hosted_files("stageout")
-                          if row.get("in_runner")]
+            hosted, _note = self._remote_hosted_files("stageout")
+            registered = [row for row in hosted if row.get("in_runner")]
             key = f"runner:{host_name}" if host_name else None
             if registered and key:
                 block = locations.setdefault(key, {})

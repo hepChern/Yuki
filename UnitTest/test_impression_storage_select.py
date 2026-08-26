@@ -1,5 +1,6 @@
 """Tests for impression storage selection helpers."""
 # pylint: disable=protected-access
+import json
 import os
 from unittest import mock
 
@@ -154,3 +155,92 @@ def test_file_status_cache_invalidated_on_new_workflow(tmp_path):
 
     assert "new.png" in rows and "old.png" not in rows   # cache bypassed, re-listed
     assert wf.list_runner_files.call_count == 2
+
+
+def _write_cache(machine_dir, wid, files):
+    machine_dir.mkdir(parents=True, exist_ok=True)
+    (machine_dir / "stageout.filelist.json").write_text(
+        json.dumps({"workflow_id": wid, "files": files}))
+
+
+def test_file_status_detailed_returns_files_and_notes(tmp_path):
+    """file_status(detailed=True) returns {files, notes}; default stays a list."""
+    s, _ims = _storage(tmp_path)
+    wf = mock.Mock()
+    wf.list_runner_files.return_value = []
+    s._get_runner_contexts = lambda: [("runner", mock.Mock(), wf)]
+
+    detail = s.file_status("stageout", detailed=True)
+
+    assert isinstance(detail, dict)
+    assert detail["files"] == []
+    assert any("no stageout" in n["message"] for n in detail["notes"])
+    assert s.file_status("stageout") == []               # default mode unchanged
+
+
+def test_file_status_error_note_when_runner_unreachable(tmp_path):
+    """A raising listing yields no files and an error note naming the failure."""
+    s, _ims = _storage(tmp_path)
+    wf = mock.Mock()
+    wf.list_runner_files.side_effect = ConnectionError("boom")
+    s._get_runner_contexts = lambda: [("runner", mock.Mock(), wf)]
+
+    detail = s.file_status("stageout", detailed=True)
+
+    assert detail["files"] == []
+    notes = detail["notes"]
+    assert any(n["level"] == "error" and "ConnectionError" in n["message"]
+               and n["runner"] == "runner" for n in notes)
+
+
+def test_file_status_falls_back_to_matching_cache_on_failure(tmp_path):
+    """On live failure, a running re-run of the same workflow falls back to the
+    cache its earlier finished phase wrote, with a warning note."""
+    s, _ims = _storage(tmp_path)
+    machine_dir = tmp_path / "job" / "runner-1"
+    _write_cache(machine_dir, "wf-1", [{"name": "old.png", "size": 3}])
+    job = mock.Mock()                        # running again, same workflow id
+    job.status.return_value = "orchestrating"
+    job.workflow_id.return_value = "wf-1"
+    wf = mock.Mock()
+    wf.list_runner_files.side_effect = ConnectionError("boom")
+    s._get_runner_contexts = lambda: [("runner", job, wf)]
+
+    detail = s.file_status("stageout", detailed=True)
+
+    assert {r["name"] for r in detail["files"]} == {"old.png"}
+    notes = detail["notes"]
+    assert any(n["level"] == "warning" and "cached" in n["message"] for n in notes)
+
+
+def test_file_status_ignores_mismatched_cache_on_failure(tmp_path):
+    """A cache from another workflow run is not shown when the live listing
+    fails (same-workflow-only policy)."""
+    s, _ims = _storage(tmp_path)
+    machine_dir = tmp_path / "job" / "runner-1"
+    _write_cache(machine_dir, "wf-1", [{"name": "old.png", "size": 3}])
+    wf = mock.Mock()
+    wf.list_runner_files.side_effect = ConnectionError("boom")
+    s._get_runner_contexts = lambda: [("runner", _finished_job("wf-2"), wf)]
+
+    detail = s.file_status("stageout", detailed=True)
+
+    assert detail["files"] == []
+    assert any(n["level"] == "error" and "cached" not in n["message"]
+               for n in detail["notes"])
+
+
+def test_file_status_annotates_cache_hit_for_finished_job(tmp_path):
+    """The cache-first path for a finished job carries an info note."""
+    s, _ims = _storage(tmp_path)
+    machine_dir = tmp_path / "job" / "runner-1"
+    _write_cache(machine_dir, "wf-1", [{"name": "mass.png", "size": 3}])
+    wf = mock.Mock()
+    s._get_runner_contexts = lambda: [("runner", _finished_job("wf-1"), wf)]
+
+    detail = s.file_status("stageout", detailed=True)
+
+    assert not wf.list_runner_files.called               # served from cache
+    notes = detail["notes"]
+    assert any(n["level"] == "info" and "cached" in n["message"] for n in notes)
+    assert {r["name"] for r in detail["files"]} == {"mass.png"}

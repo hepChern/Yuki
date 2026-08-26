@@ -40,7 +40,7 @@ def test_update_distribution_computes_yuki_collected(tmp_path):
     stageout.mkdir(parents=True)
     (stageout / "mass.png").write_bytes(b"img")  # 3 bytes
     storage._get_runner_contexts = lambda: []
-    storage._remote_hosted_files = lambda kind: []
+    storage._remote_hosted_files = lambda kind: ([], None)
 
     storage.update_distribution()
 
@@ -59,11 +59,10 @@ def test_update_distribution_records_workflow_state(tmp_path):
     job.workflow_id.return_value = "wf-1"
     wf = mock.Mock()
     storage._get_runner_contexts = lambda: [("cern", job, wf)]
-    storage._runner_files = lambda _j, _w, _k, _d: [
-        {"name": "a.root", "size": 10},
-        {"name": "mass.png", "size": 3},
-    ]
-    storage._remote_hosted_files = lambda kind: []
+    storage._runner_files = lambda _j, _w, _k, _d: (
+        [{"name": "a.root", "size": 10},
+         {"name": "mass.png", "size": 3}], None)
+    storage._remote_hosted_files = lambda kind: ([], None)
 
     storage.update_distribution()
 
@@ -80,9 +79,8 @@ def test_update_distribution_records_registered_cache_state(tmp_path):
     """Remote-hosted (registered) data produces a 'cache' state."""
     storage = _storage(tmp_path)
     storage._get_runner_contexts = lambda: []
-    storage._remote_hosted_files = lambda kind: [
-        {"name": "dataset.root", "size": 99, "in_runner": True},
-    ]
+    storage._remote_hosted_files = lambda kind: (
+        [{"name": "dataset.root", "size": 99, "in_runner": True}], None)
     # The host runner name is reverse-mapped from the remote marker.
     marker = tmp_path / "job" / "remote.json"
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -114,7 +112,7 @@ def test_update_distribution_preserves_transferred_cache_entries(tmp_path):
     stageout.mkdir(parents=True)
     (stageout / "mass.png").write_bytes(b"img")
     storage._get_runner_contexts = lambda: []
-    storage._remote_hosted_files = lambda kind: []
+    storage._remote_hosted_files = lambda kind: ([], None)
 
     storage.update_distribution()
 
@@ -140,10 +138,9 @@ def test_update_distribution_tracks_workflow_and_cache_states(tmp_path):
     job.workflow_id.return_value = "wf-1"
     wf = mock.Mock()
     storage._get_runner_contexts = lambda: [("cern", job, wf)]
-    storage._runner_files = lambda _j, _w, _k, _d: [
-        {"name": "a.root", "size": 10},
-    ]
-    storage._remote_hosted_files = lambda kind: []
+    storage._runner_files = lambda _j, _w, _k, _d: (
+        [{"name": "a.root", "size": 10}], None)
+    storage._remote_hosted_files = lambda kind: ([], None)
 
     storage.update_distribution()
 
@@ -166,7 +163,7 @@ def test_update_distribution_migrates_legacy_flat_entries(tmp_path):
         },
     })
     storage._get_runner_contexts = lambda: []
-    storage._remote_hosted_files = lambda kind: []
+    storage._remote_hosted_files = lambda kind: ([], None)
 
     storage.update_distribution()
 

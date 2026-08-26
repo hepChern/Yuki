@@ -43,6 +43,20 @@ def test_file_status_route_returns_json():
         assert r.get_json()[0]["name"] == "mass.png"
 
 
+def test_file_status_route_detailed_mode():
+    """detailed=1 forwards the flag and returns the {files, notes} payload."""
+    app = _app(ex_routes.bp)
+    with mock.patch.object(ex_routes, "ImpressionStorage") as storage_cls:
+        storage_cls.return_value.file_status.return_value = {
+            "files": [], "notes": []}
+        c = app.test_client()
+        r = c.get("/file-status/proj/imp/runner?kind=stageout&detailed=1")
+        assert r.status_code == 200
+        assert r.get_json() == {"files": [], "notes": []}
+        storage_cls.return_value.file_status.assert_called_once_with(
+            "stageout", detailed=True)
+
+
 def _app(bp):
     from flask import Flask
     app = Flask(__name__)

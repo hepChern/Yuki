@@ -532,7 +532,7 @@ class ReanaWorkflow(VWorkflow):
             self.logger(
                 f"Giving up listing imp{impression[0:7]}/{kind} after retries "
                 f"[{type(e).__name__}]: {e!r}")
-            return []
+            raise
         result = []
         for f in files:
             name = f["name"]

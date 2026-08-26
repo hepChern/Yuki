@@ -132,7 +132,12 @@ def outputs(project_uuid, impression, machine):
 
 @bp.route("/file-status/<project_uuid>/<impression>/<machine>", methods=['GET'])
 def file_status(project_uuid, impression, machine):  # pylint: disable=unused-argument
-    """Return merged runner + Storage file listing for an impression."""
+    """Return merged runner + Storage file listing for an impression.
+
+    With ?detailed=1 the payload is {"files": [...], "notes": [...]} where
+    notes explain e.g. an unreachable runner or a cached listing.
+    """
     kind = request.args.get("kind", "stageout")
+    detailed = request.args.get("detailed") == "1"
     storage = ImpressionStorage(project_uuid, impression)
-    return jsonify(storage.file_status(kind))
+    return jsonify(storage.file_status(kind, detailed=detailed))
