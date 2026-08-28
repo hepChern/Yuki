@@ -46,4 +46,14 @@
 + `GET /engine-log/...` supports `?fetch=true` to generate engine logs on demand, and serves the Yuki `workflow.log` directly when the generated log is missing.
 + Fix `vjob.py` bugs: undefined `PENDING`/`SUCCESS` status constants and a `stap_status` typo in the legacy-status branch.
 + Fix all pylint issues (10.00/10 with the project lint command).
++ Runner cache management.
+  - `POST /purge-runner-cache`: synchronous purge of an ssh runner's managed impressions cache, scoped by `project`/`impression`, with a `dry_run` flag. Cached data is stored read-only, so entries are chmod'd writable before deletion; the local bookkeeping is cleared to match (`remote.json`/`status.json` markers and the runner's `distribution.json` cache entry). Impressions whose registration is still running are skipped, never purged.
+  - `POST /cache-results` + `GET /cache-results/<job_id>`: background job that saves a workflow's runner-resident stageout into the runner's managed impressions cache — the manual version of the workflow's own cache rule. Fast-copies with the reflink → hardlink → rsync → copy chain, makes the copy read-only, and records a `transferred` cache entry in `distribution.json`. Impressions whose job never finished, or whose stageout is missing on the runner, are skipped with a reason instead of failing the batch.
+  - `GET /whereabouts/<project_uuid>/<impression>`: reports where an impression's data lives — the `yuki` entry, per-runner `workflow`/`cache` states (runner ids mapped to names), and the registration host — read from the persisted distribution registry (no SSH). Missing or corrupt registries degrade to a note, never a 500.
+  - `yuki purge-ssh-runner-cache <runner> [--project X] [--impression Y] [--dry-run] [-y]`: server-side CLI for cache purges with a confirmation prompt.
++ Failure propagation fixes.
+  - `VWorkflow.run` no longer stamps every execution job `failed` when the backend errors: jobs already in a terminal state keep their status, so a failed remote start leaves jobs `dissonance` and never clobbers a previously completed status (fixes spurious downstream "Blocked: upstream input ... is failed" cascades).
+  - `DISSONANCE` is now part of `is_terminal_status`.
+  - SSH workflow start failures include the tail of the runner's `snakemake.log` ("Remote Snakemake failed: ... (exit N)") instead of an empty detail.
++ Job-state files can live in per-purpose directories (cache jobs in `$YUKIDIR/cache-jobs/`), generalizing the register-jobs helpers.
 + Bump version to 1.0.0b3.
