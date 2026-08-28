@@ -453,3 +453,88 @@ def test_remote_hosted_staging_does_not_shadow_outer_connection(tmp_path, monkey
     assert len(instances) == 1, f"expected 1 connection, got {len(instances)}"
     assert instances[0]._last_put == (
         "/local/Snakefile", "/remote/workflows/proj-123/wf-456/Snakefile")
+
+
+def test_wrapper_sanitizes_environment_without_conda_path(tmp_path, monkeypatch):
+    """The wrapper resets PYTHONPATH/LD_LIBRARY_PATH and curates PATH."""
+    wf = _workflow(tmp_path, monkeypatch, {
+        "runner_settings": {"m1": {
+            "ssh_host": "h", "ssh_user": "u",
+            "snakemake_path": "/opt/bin/snakemake",
+            "remote_workdir": "/remote",
+        }},
+    })
+    wf.ssh_config = wf._load_ssh_config()
+    wf.remote_exec_path = "/remote/wf-uuid"
+    wf.logger = lambda msg: None
+
+    written = {}
+
+    class FakeSsh:
+        """Ssh shim recording wrapper files written remotely."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def put_text(self, text, path):
+            """Record the written wrapper file."""
+            written[path] = text
+
+        def exec(self, _cmd):
+            """Report a successful remote command."""
+            return "", "", 0
+
+    with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
+        wf._start_remote_snakemake()
+
+    wrapper = written["/remote/wf-uuid/yuki_run.sh"]
+    assert "unset PYTHONPATH LD_LIBRARY_PATH" in wrapper
+    assert "conda info --base" in wrapper
+    assert "$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" in wrapper
+    assert ":$PATH" not in wrapper  # no ambient PATH leakage
+
+
+def test_wrapper_conda_path_curates_path(tmp_path, monkeypatch):
+    """With conda_path configured, the curated PATH uses it and no probe."""
+    wf = _workflow(tmp_path, monkeypatch, {
+        "runner_settings": {"m1": {
+            "ssh_host": "h", "ssh_user": "u", "cores": 8,
+            "snakemake_path": "/opt/bin/snakemake",
+            "conda_path": "/opt/conda/bin/conda",
+            "remote_workdir": "/remote",
+        }},
+    })
+    wf.ssh_config = wf._load_ssh_config()
+    wf.remote_exec_path = "/remote/wf-uuid"
+    wf.logger = lambda msg: None
+
+    written = {}
+
+    class FakeSsh:
+        """Ssh shim recording wrapper files written remotely."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def put_text(self, text, path):
+            """Record the written wrapper file."""
+            written[path] = text
+
+        def exec(self, _cmd):
+            """Report a successful remote command."""
+            return "", "", 0
+
+    with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
+        wf._start_remote_snakemake()
+
+    wrapper = written["/remote/wf-uuid/yuki_run.sh"]
+    assert "/opt/conda/bin" in wrapper
+    assert "conda info --base" not in wrapper
+    assert "$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" in wrapper
+    assert ":$PATH" not in wrapper

@@ -409,3 +409,123 @@ def test_remove_runner_deletes_stored_key(monkeypatch):  # pylint: disable=unuse
     assert os.path.exists(key_file)
     c.get("/remove-runner/cluster")
     assert not os.path.exists(key_file)
+
+
+def test_runner_ssh_config_returns_settings_and_key(monkeypatch):
+    """runner-ssh-config returns ssh settings plus the stored key content."""
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "cluster.example.com", "ssh_user": "alice",
+        "ssh_port": "2222", "remote_workdir": "/data/yuki",
+        "ssh_key_data": "-----BEGIN KEY-----\nfake\n-----END KEY-----",
+    })
+
+    r = c.get("/runner-ssh-config/cluster")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["host"] == "cluster.example.com"
+    assert data["user"] == "alice"
+    assert data["port"] == 2222
+    assert data["remote_workdir"] == "/data/yuki"
+    assert data["key"].startswith("-----BEGIN KEY-----")
+
+
+def test_runner_ssh_config_unknown_runner_404(monkeypatch):
+    """runner-ssh-config 404s for an unknown runner name."""
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    r = c.get("/runner-ssh-config/nosuch")
+    assert r.status_code == 404
+    assert "nosuch" in r.get_json()["error"]
+
+
+def test_runner_ssh_config_non_ssh_runner_400(monkeypatch):
+    """runner-ssh-config 400s for a runner that is not ssh-backed."""
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "reanacluster", "url": "https://reana.example.com",
+        "token": "t", "backend_type": "reana",
+    })
+    r = c.get("/runner-ssh-config/reanacluster")
+    assert r.status_code == 400
+
+
+def test_runner_ssh_config_missing_key_file_returns_empty_key(monkeypatch):
+    """runner-ssh-config returns empty key when the key file is absent."""
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u",
+        "ssh_key_path": "/nonexistent/key",
+    })
+    r = c.get("/runner-ssh-config/cluster")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["key"] == ""
+    assert data["key_path"] == "/nonexistent/key"
+
+
+def test_runner_ssh_config_resolves_environment_via_map(monkeypatch):
+    """An environment param is resolved through the server's conda_env_map."""
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u",
+    })
+    with open(runner_routes.config.config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    cfg["conda_env_map"] = {
+        "rootproject/root:6.32.02-ubuntu22.04": "env_root_6.32.02"}
+    with open(runner_routes.config.config_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f)
+
+    r = c.get("/runner-ssh-config/cluster",
+              query_string={"environment": "rootproject/root:6.32.02-ubuntu22.04"})
+    assert r.status_code == 200
+    assert r.get_json()["conda_env"] == "env_root_6.32.02"
+
+
+def test_runner_ssh_config_mangles_unmapped_environment(monkeypatch):
+    """An unmapped docker image falls back to the mangled name."""
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u",
+    })
+    r = c.get("/runner-ssh-config/cluster",
+              query_string={"environment": "docker.io/reanahub/env-root6:6.18.04"})
+    assert r.status_code == 200
+    assert r.get_json()["conda_env"] == "reanahub_env-root6_6.18.04"
+
+
+def test_runner_ssh_config_skips_environment_for_script_tasks(monkeypatch):
+    """script/rawdata environments yield no conda_env."""
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u",
+    })
+    r = c.get("/runner-ssh-config/cluster",
+              query_string={"environment": "script"})
+    assert r.status_code == 200
+    assert "conda_env" not in r.get_json()
+
+
+def test_runner_ssh_config_without_environment_param(monkeypatch):
+    """Without the environment param, no conda_env is returned."""
+    _temp_config(monkeypatch)
+    c = _app(runner_routes.bp).test_client()
+    c.post("/register-runner", data={
+        "runner": "cluster", "url": "", "token": "", "backend_type": "ssh",
+        "ssh_host": "h", "ssh_user": "u",
+    })
+    r = c.get("/runner-ssh-config/cluster")
+    assert r.status_code == 200
+    assert "conda_env" not in r.get_json()

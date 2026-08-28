@@ -5,6 +5,8 @@ import os
 from flask import Blueprint, request, jsonify
 from CelebiChrono.utils import csys
 from ...kernel import runner_config
+from ...kernel.ssh_workflow import (
+    environment_needs_conda, resolve_conda_environment)
 from .. import runner_probe
 from ..config import config
 from ..utils import ping
@@ -385,6 +387,42 @@ def runners_config():  # pylint: disable=too-many-locals
             })
         result.append(runner_cfg)
     return jsonify(result)
+
+
+@bp.route("/runner-ssh-config/<runner>", methods=['GET'])
+def runner_ssh_config(runner):
+    """Return ssh connection settings plus the key content for a runner."""
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"runner '{runner}' not found"}), 404
+    runner_id = runners_id[runner]
+    backend_types = config_file.read_variable("backend_types", {})
+    if backend_types.get(runner_id) != "ssh":
+        return jsonify({"error": f"runner '{runner}' is not an ssh runner"}), 400
+    settings = runner_config.get_ssh_settings(config_file, runner_id)
+    key_path = settings.get("key_path", "")
+    key = ""
+    expanded = os.path.expanduser(key_path) if key_path else ""
+    if expanded and os.path.exists(expanded):
+        try:
+            with open(expanded, encoding="utf-8") as f:
+                key = f.read()
+        except OSError:
+            key = ""
+    payload = {
+        "host": settings.get("host", ""),
+        "user": settings.get("user", ""),
+        "port": settings.get("port", 22),
+        "key": key,
+        "key_path": key_path,
+        "remote_workdir": settings.get("remote_workdir", "/tmp/yuki-workflows"),
+    }
+    environment = request.args.get("environment", "")
+    if environment_needs_conda(environment):
+        payload["conda_env"] = resolve_conda_environment(
+            environment, config.config_path)
+    return jsonify(payload)
 
 
 @bp.route("/machine-id/<machine>", methods=["GET"])

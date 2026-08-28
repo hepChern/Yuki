@@ -22,6 +22,44 @@ logger = getLogger("YukiLogger")
 DEFAULT_ENVIRONMENT = "docker.io/reanahub/reana-env-root6:6.18.04"
 DEFAULT_SSH_PORT = 22
 
+# Environments that need no conda activation on ssh runners
+PURE_COPY_ENVIRONMENTS = ("rawdata", "datalist", "lhcb_ap_datalist", "script")
+
+
+def resolve_conda_environment(environment, config_path):
+    """Map an environment string to a conda environment name.
+
+    Resolution order: the server's ``conda_env_map``, then the same lookup
+    after stripping docker:// prefixes, then a name mangled from the raw
+    string (docker image names become valid-ish env names).
+    """
+    if not environment:
+        environment = DEFAULT_ENVIRONMENT
+
+    resolved = EnvInterpreter.resolve(environment, config_path)
+    if resolved is not None:
+        return resolved
+
+    stripped = environment
+    for prefix in ("docker://", "docker.io/", "docker:"):
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix):]
+            break
+
+    if stripped != environment:
+        resolved = EnvInterpreter.resolve(stripped, config_path)
+        if resolved is not None:
+            return resolved
+
+    return stripped.replace("/", "_").replace(":", "_")
+
+
+def environment_needs_conda(environment):
+    """True when the environment requires conda activation on an ssh runner."""
+    if not environment or environment == DEFAULT_ENVIRONMENT:
+        return False
+    return environment not in PURE_COPY_ENVIRONMENTS
+
 
 class _SshConnection:
     """Thin wrapper around Paramiko for remote SSH/SFTP operations."""
@@ -409,13 +447,18 @@ class SshWorkflow(VWorkflow):
         snakemake_bin = self.ssh_config.get("snakemake_path") or "snakemake"
         cores = self.ssh_config.get("cores", "all")
         conda_path = self.ssh_config.get("conda_path") or ""
-        path_export = ""
         if conda_path:
             conda_dir = conda_path.rsplit("/", 1)[0]
-            path_export = f'export PATH="{conda_dir}:$PATH"\n'
+            conda_setup = f'CONDA_DIR="{conda_dir}"\n'
+        else:
+            conda_setup = 'CONDA_DIR="$(conda info --base 2>/dev/null || true)"\n'
         wrapper = f'''#!/bin/bash
 set -e
-{path_export}cd "$(dirname "$0")"
+# Deterministic run environment: drop user-shell leakage (.bashrc etc.) so
+# workflow behaviour never depends on the submitter's shell configuration.
+{conda_setup}unset PYTHONPATH LD_LIBRARY_PATH
+export PATH="${{CONDA_DIR:+$CONDA_DIR/bin:}}$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+cd "$(dirname "$0")"
 nohup {snakemake_bin} --use-conda --cores {cores} --snakefile Snakefile > snakemake.log 2>&1 &
 echo $! > yuki.pid
 wait $!
@@ -818,9 +861,7 @@ echo $? > yuki.exit
         Skips writing the directive for pure-copy procedures that do not need
         a conda environment.
         """
-        if environment in ("rawdata", "datalist", "lhcb_ap_datalist", "script"):
-            return
-        if environment == DEFAULT_ENVIRONMENT:
+        if not environment_needs_conda(environment):
             return
         conda_env = self._resolve_conda_environment(environment)
         snake_file.addline("conda:", indent)
@@ -828,27 +869,8 @@ echo $? > yuki.exit
 
     def _resolve_conda_environment(self, environment):
         """Map a job environment string to a conda environment name."""
-        if not environment:
-            environment = DEFAULT_ENVIRONMENT
-
         config_path = os.path.join(
             os.path.expanduser(os.environ.get("YUKIDIR", "~/.Yuki")),
             "config.json"
         )
-
-        resolved = EnvInterpreter.resolve(environment, config_path)
-        if resolved is not None:
-            return resolved
-
-        stripped = environment
-        for prefix in ("docker://", "docker.io/", "docker:"):
-            if stripped.startswith(prefix):
-                stripped = stripped[len(prefix):]
-                break
-
-        if stripped != environment:
-            resolved = EnvInterpreter.resolve(stripped, config_path)
-            if resolved is not None:
-                return resolved
-
-        return stripped.replace("/", "_").replace(":", "_")
+        return resolve_conda_environment(environment, config_path)
