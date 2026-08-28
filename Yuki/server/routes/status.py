@@ -196,6 +196,56 @@ def impression(project_uuid, impression_name):
     """Get impression path."""
     return config.get_job_path(project_uuid, impression_name)
 
+
+@bp.route("/whereabouts/<project_uuid>/<impression_name>", methods=['GET'])
+def whereabouts(project_uuid, impression_name):
+    """Report where an impression's data lives (runner cache / yuki)."""
+    job_path = config.get_job_path(project_uuid, impression_name)
+    dist_path = os.path.join(job_path, "distribution.json")
+    locations = {}
+    if os.path.isfile(dist_path):
+        try:
+            with open(dist_path, encoding="utf-8") as fh:
+                locations = json.load(fh).get("locations", {}) or {}
+        except (OSError, ValueError):
+            locations = {}
+
+    runners_id = config.get_config_file().read_variable("runners_id", {})
+    id_to_name = {rid: name for name, rid in runners_id.items()}
+    runners = {}
+    for loc, value in locations.items():
+        if not loc.startswith("runner:"):
+            continue
+        runner_id = loc[len("runner:"):]
+        block = value if isinstance(value, dict) else {}
+        entry = {}
+        if block.get("workflow"):
+            entry["workflow"] = block["workflow"]
+        if block.get("cache"):
+            entry["cache"] = block["cache"]
+        runners[id_to_name.get(runner_id, runner_id)] = entry
+
+    registered = None
+    remote_marker = os.path.join(job_path, "remote.json")
+    if os.path.isfile(remote_marker):
+        marker = ConfigFile(remote_marker)
+        host_id = marker.read_variable("host_runner_id", "")
+        registered = {
+            "host_runner": id_to_name.get(host_id, host_id),
+            "source_path": marker.read_variable("source_path", ""),
+            "remote_path": marker.read_variable("remote_path", ""),
+        }
+
+    note = None
+    if not os.path.isfile(dist_path):
+        note = "distribution.json not recorded"
+    elif not locations:
+        note = "no distribution entries recorded"
+    return jsonify({"impression": impression_name,
+                    "yuki": locations.get("yuki"),
+                    "runners": runners, "registered": registered,
+                    "note": note})
+
 def _walk_files(full_path, base_dir):
     """Relative paths of every file under full_path, sorted for display.
 

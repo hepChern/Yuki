@@ -374,6 +374,70 @@ def env_map_remove(source):
         raise click.ClickException(str(e)) from e
 
 
+# ------ Runner cache purge ------ #
+@cli.command('purge-ssh-runner-cache')
+@click.argument('runner')
+@click.option('--project', default=None,
+              help='Only purge cached impressions of this project.')
+@click.option('--impression', default=None,
+              help='Only purge this cached impression.')
+@click.option('--dry-run', is_flag=True,
+              help='List what would be purged without deleting anything.')
+@click.option('--yes', '-y', is_flag=True,
+              help='Skip the confirmation prompt.')
+def purge_ssh_runner_cache(runner, project, impression, dry_run, yes):  # pylint: disable=too-many-locals
+    """Evict cached impressions from an ssh runner.
+
+    RUNNER is the runner name from the Yuki registry. The remote
+    <remote_workdir>/impressions cache is deleted per entry and the
+    local registration bookkeeping (remote.json, status.json,
+    distribution.json cache state) is cleared to match. Registered data
+    only lives on the runner — restore it afterwards with register-data.
+    """
+    from Yuki.kernel import runner_config
+    from Yuki.kernel.remote_data_ops import purge_runner_cache
+
+    config_file = runner_config.open_config()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        raise click.ClickException(f"runner '{runner}' not found")
+    runner_id = runners_id[runner]
+    backend_types = config_file.read_variable("backend_types", {})
+    if backend_types.get(runner_id) != "ssh":
+        raise click.ClickException(f"runner '{runner}' is not an ssh runner")
+
+    if not dry_run and not yes:
+        filters = []
+        if project:
+            filters.append(f"project {project}")
+        if impression:
+            filters.append(f"impression {impression}")
+        scope = f" for {' '.join(filters)}" if filters else ""
+        click.confirm(
+            f"Purge the impressions cache on ssh runner '{runner}'{scope}?",
+            abort=True)
+
+    summary = purge_runner_cache(runner_id, project=project,
+                                 impression=impression, dry_run=dry_run,
+                                 echo=click.echo)
+    for skipped in summary["skipped"]:
+        click.echo(f"  Skipped: {skipped['impression']} — "
+                   f"{skipped['reason']}")
+    if summary["dry_run"]:
+        click.echo(f"Dry run — {len(summary['purged'])} cache entr"
+                   f"{'y' if len(summary['purged']) == 1 else 'ies'} "
+                   f"would be purged, nothing was deleted.")
+    else:
+        click.echo(f"\n✓ Purged {len(summary['purged'])} cache entr"
+                   f"{'y' if len(summary['purged']) == 1 else 'ies'} "
+                   f"from runner '{runner}'")
+        registered = [e for e in summary["purged"]
+                      if e["kind"] == "registered"]
+        if registered:
+            click.echo("  Registered data lives only on this runner — "
+                       "restore it with register-data.")
+
+
 # Main
 def main():
     """Main entry point for Yuki CLI."""

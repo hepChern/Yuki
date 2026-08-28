@@ -168,3 +168,23 @@ def task_transfer_results(job_id, project_uuid, impression,
         job_id, project_uuid, impression,
         source, destination,
         pattern=pattern, force=force)
+
+
+@celeryapp.task
+def task_cache_results(job_id, runner_id, project_uuid, impression):
+    """Cache the impression's workflow stageout on its runner (background)."""
+    yuki_dir = remote_data_ops._yuki_dir()  # pylint: disable=protected-access
+
+    def update(state):
+        current = remote_data_ops.read_job_state(
+            yuki_dir, job_id, jobs_dir_name="cache-jobs") or {}
+        current.update(state)
+        remote_data_ops.write_job_state(yuki_dir, job_id, current,
+                                        jobs_dir_name="cache-jobs")
+
+    try:
+        remote_data_ops.cache_results_job(
+            runner_id, project_uuid, impression, update)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        update({"status": "failed", "result": None,
+                "error": str(e) or type(e).__name__})

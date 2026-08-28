@@ -469,6 +469,141 @@ def test_verify_data_unknown_impression_404(monkeypatch, tmp_path):
     assert r.status_code == 404
 
 
+def test_purge_runner_cache_route(monkeypatch, tmp_path):
+    """POST /purge-runner-cache resolves the runner and purges."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    summary = {"purged": [{"project": "proj", "impression": "imp-a",
+                           "kind": "registered",
+                           "remote_dir": "/w/impressions/proj/imp-a"}],
+               "skipped": [], "dry_run": True}
+    with mock.patch.object(remote_data_ops, "purge_runner_cache",
+                           return_value=summary) as m_purge:
+        r = _app(remote_data_routes.bp).test_client().post(
+            "/purge-runner-cache",
+            json={"runner": "cluster", "project": "proj", "dry_run": True})
+    assert r.status_code == 200
+    assert r.get_json() == summary
+    m_purge.assert_called_once_with("r-uuid", project="proj",
+                                    impression=None, dry_run=True,
+                                    yuki_dir=str(tmp_path))
+
+
+def test_purge_runner_cache_route_unknown_runner(monkeypatch, tmp_path):
+    """An unknown runner name is rejected with 404."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    r = _app(remote_data_routes.bp).test_client().post(
+        "/purge-runner-cache", json={"runner": "ghost"})
+    assert r.status_code == 404
+    assert "not found" in r.get_json()["error"].lower()
+
+
+def test_purge_runner_cache_route_non_ssh_runner(monkeypatch, tmp_path):
+    """Purging against a non-ssh runner is rejected."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj, name="local", backend="native")
+    r = _app(remote_data_routes.bp).test_client().post(
+        "/purge-runner-cache", json={"runner": "local"})
+    assert r.status_code == 400
+    assert "ssh" in r.get_json()["error"]
+
+
+def test_purge_runner_cache_route_ssh_failure(monkeypatch, tmp_path):
+    """An ssh failure surfaces as a 500 JSON error."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    with mock.patch.object(remote_data_ops, "purge_runner_cache",
+                           side_effect=ConnectionError("banner")):
+        r = _app(remote_data_routes.bp).test_client().post(
+            "/purge-runner-cache", json={"runner": "cluster"})
+    assert r.status_code == 500
+    assert "banner" in r.get_json()["error"]
+
+
+def test_purge_runner_cache_route_form_body(monkeypatch, tmp_path):
+    """The route accepts a form body with string flags."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    with mock.patch.object(remote_data_ops, "purge_runner_cache",
+                           return_value={"purged": [], "skipped": [],
+                                         "dry_run": False}) as m_purge:
+        r = _app(remote_data_routes.bp).test_client().post(
+            "/purge-runner-cache",
+            data={"runner": "cluster", "impression": "imp-a",
+                  "dry_run": "true"})
+    assert r.status_code == 200
+    m_purge.assert_called_once_with("r-uuid", project=None,
+                                    impression="imp-a", dry_run=True,
+                                    yuki_dir=str(tmp_path))
+
+
+def test_cache_results_starts_job(monkeypatch, tmp_path):
+    """A cache-results request enqueues the celery task and records state."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    with mock.patch.object(remote_data_routes, "task_cache_results") as task:
+        r = _app(remote_data_routes.bp).test_client().post(
+            "/cache-results",
+            json={"runner": "cluster", "project_uuid": "proj",
+                  "impression": "imp1"})
+    assert r.status_code == 200
+    job_id = r.get_json()["job_id"]
+    task.apply_async.assert_called_once_with(
+        args=[job_id, "r-uuid", "proj", "imp1"])
+    state = remote_data_ops.read_job_state(str(tmp_path), job_id,
+                                           jobs_dir_name="cache-jobs")
+    assert state["status"] == "copying"
+    assert state["impression"] == "imp1"
+
+
+def test_cache_results_unknown_runner(monkeypatch, tmp_path):
+    """An unknown runner name is rejected with 404."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    r = _app(remote_data_routes.bp).test_client().post(
+        "/cache-results",
+        json={"runner": "ghost", "project_uuid": "proj", "impression": "i"})
+    assert r.status_code == 404
+    assert "not found" in r.get_json()["error"].lower()
+
+
+def test_cache_results_non_ssh_runner(monkeypatch, tmp_path):
+    """A non-ssh runner is rejected."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj, name="local", backend="native")
+    r = _app(remote_data_routes.bp).test_client().post(
+        "/cache-results",
+        json={"runner": "local", "project_uuid": "proj", "impression": "i"})
+    assert r.status_code == 400
+    assert "ssh" in r.get_json()["error"]
+
+
+def test_cache_results_missing_field(monkeypatch, tmp_path):
+    """A request missing required fields is rejected with 400."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _register_runner(config_obj)
+    r = _app(remote_data_routes.bp).test_client().post(
+        "/cache-results", json={"runner": "cluster", "project_uuid": "proj"})
+    assert r.status_code == 400
+    assert "missing required field" in r.get_json()["error"]
+
+
+def test_cache_results_status(monkeypatch, tmp_path):
+    """Job status is served by id; unknown ids give 404."""
+    _temp_config(monkeypatch, tmp_path)
+    remote_data_ops.write_job_state(
+        str(tmp_path), "job-9",
+        {"status": "done", "result": {"cached": 3}, "error": None},
+        jobs_dir_name="cache-jobs")
+    r = _app(remote_data_routes.bp).test_client().get(
+        "/cache-results/job-9")
+    assert r.get_json()["status"] == "done"
+    r2 = _app(remote_data_routes.bp).test_client().get(
+        "/cache-results/ghost")
+    assert r2.status_code == 404
+
+
 def test_verify_data_ssh_retry_succeeds(monkeypatch, tmp_path):
     """A transient ssh banner error is retried before succeeding."""
     config_obj = _temp_config(monkeypatch, tmp_path)

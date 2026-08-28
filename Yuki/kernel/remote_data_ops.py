@@ -3,6 +3,7 @@
 Helpers that build shell commands executed ON an ssh runner, plus the
 local Yuki-side storage paths for registration job state.
 """
+import datetime
 import json
 import os
 import shlex
@@ -10,6 +11,7 @@ import shutil
 import tempfile
 
 from CelebiChrono.utils.metadata import ConfigFile
+from Yuki.kernel.status_constants import CODA
 
 REMOTE_MD5_SCRIPT = r'''
 import hashlib, json, os, sys
@@ -125,17 +127,18 @@ def _jobs_dir(yuki_dir):
     return os.path.join(yuki_dir, JOBS_DIR_NAME)
 
 
-def write_job_state(yuki_dir, job_id, state):
-    """Persist a registration job's state to $YUKIDIR/register-jobs/<id>.json."""
-    os.makedirs(_jobs_dir(yuki_dir), exist_ok=True)
-    with open(os.path.join(_jobs_dir(yuki_dir), f"{job_id}.json"),
+def write_job_state(yuki_dir, job_id, state, jobs_dir_name=JOBS_DIR_NAME):
+    """Persist a job's state to $YUKIDIR/<jobs_dir_name>/<id>.json."""
+    jobs_dir = os.path.join(yuki_dir, jobs_dir_name)
+    os.makedirs(jobs_dir, exist_ok=True)
+    with open(os.path.join(jobs_dir, f"{job_id}.json"),
               "w", encoding="utf-8") as f:
         json.dump(state, f)
 
 
-def read_job_state(yuki_dir, job_id):
-    """Read a registration job's state, or None."""
-    path = os.path.join(_jobs_dir(yuki_dir), f"{job_id}.json")
+def read_job_state(yuki_dir, job_id, jobs_dir_name=JOBS_DIR_NAME):
+    """Read a job's state, or None."""
+    path = os.path.join(yuki_dir, jobs_dir_name, f"{job_id}.json")
     if not os.path.exists(path):
         return None
     try:
@@ -227,10 +230,13 @@ def find_job_by_impression(yuki_dir, impression_uuid):
     return None
 
 
-def _ssh_settings(runner_id):
-    """Merged ssh settings for a runner."""
+def _ssh_settings(runner_id, yuki_dir=None):
+    """Merged ssh settings for a runner (yuki_dir injects the config root)."""
     from Yuki.kernel import runner_config
-    return runner_config.get_ssh_settings(runner_config.open_config(), runner_id)
+    config_file = runner_config.open_config()
+    if yuki_dir:
+        config_file = ConfigFile(os.path.join(yuki_dir, "config.json"))
+    return runner_config.get_ssh_settings(config_file, runner_id)
 
 
 def _ssh_connection(runner_id):
@@ -254,10 +260,12 @@ def list_managed_files(runner_id, managed_path):
                 for rel, _rpath, size in ssh.walk_files(managed_path)]
 
 
-def _runner_name(runner_id):
+def _runner_name(runner_id, yuki_dir=None):
     """Runner name for a runner id (fallback: the id itself)."""
     from Yuki.kernel import runner_config
     cfg = runner_config.open_config()
+    if yuki_dir:
+        cfg = ConfigFile(os.path.join(yuki_dir, "config.json"))
     runners_id = cfg.read_variable("runners_id", {})
     for name, rid in runners_id.items():
         if rid == runner_id:
@@ -298,6 +306,168 @@ def remove_remote_progress_file(runner_id, job_id):
                 timeout=15)
     except Exception:  # pylint: disable=broad-exception-caught
         pass
+
+
+def purge_runner_cache(runner_id, project=None, impression=None,  # pylint: disable=too-many-locals,too-many-branches,too-many-arguments,too-many-positional-arguments
+                       dry_run=False, echo=None, yuki_dir=None):
+    """Evict cache entries from an ssh runner's impressions cache.
+
+    Deletes matching ``<remote_workdir>/impressions/<project>/<impression>``
+    directories (chmod'd writable first; cached data is stored read-only)
+    and clears the local bookkeeping that pointed at them: the
+    ``remote.json``/``status.json`` registration markers and the runner's
+    cache entry in ``distribution.json``.
+
+    Impressions whose registration is still running are skipped.
+
+    Returns {"purged": [...], "skipped": [...], "dry_run": bool}.
+    """
+    echo = echo or print
+    yuki_dir = yuki_dir or _yuki_dir()
+    settings = _ssh_settings(runner_id, yuki_dir)
+    cache_root = (f"{settings.get('remote_workdir', '/tmp/yuki-workflows')}"
+                  f"/impressions")
+
+    purged, skipped = [], []
+    with _ssh_connection(runner_id) as ssh:
+        for proj in ssh.listdir(cache_root):
+            if project and proj != project:
+                continue
+            proj_dir = f"{cache_root}/{proj}"
+            for imp in ssh.listdir(proj_dir):
+                if impression and imp != impression:
+                    continue
+                remote_dir = f"{proj_dir}/{imp}"
+                imp_local = os.path.join(yuki_dir, "Storage", proj, imp)
+                status_file = os.path.join(imp_local, "status.json")
+                if os.path.isfile(status_file):
+                    status = ConfigFile(status_file).read_variable("status", "")
+                    if status == "running":
+                        skipped.append({
+                            "project": proj, "impression": imp,
+                            "reason": "registration still running"})
+                        echo(f"[SKIP] {remote_dir} — registration still running")
+                        continue
+                kind = "cache"
+                if os.path.isfile(os.path.join(imp_local, "remote.json")):
+                    kind = "registered"
+                echo(f"{'Would purge' if dry_run else 'Purging'} "
+                     f"{remote_dir} ({kind})")
+                if not dry_run:
+                    cmd = (f"find {shlex.quote(remote_dir)} -mindepth 1 "
+                           f"-maxdepth 1 -exec chmod -R u+w -- {{}} + && "
+                           f"rm -rf {shlex.quote(remote_dir)}")
+                    _out, _err, code = ssh.exec(cmd, timeout=3600)
+                    if code != 0:
+                        skipped.append({
+                            "project": proj, "impression": imp,
+                            "reason": "remote delete failed"})
+                        continue
+                    _clear_local_markers(imp_local, runner_id, yuki_dir)
+                purged.append({"project": proj, "impression": imp,
+                               "kind": kind, "remote_dir": remote_dir})
+    return {"purged": purged, "skipped": skipped, "dry_run": dry_run}
+
+
+def _clear_local_markers(imp_dir, runner_id, yuki_dir=None):
+    """Drop the impression's registration markers and the purged runner's
+    distribution cache entry."""
+    for name in ("remote.json", "status.json"):
+        path = os.path.join(imp_dir, name)
+        if os.path.isfile(path):
+            os.remove(path)
+    dist_path = os.path.join(imp_dir, "distribution.json")
+    if not os.path.isfile(dist_path):
+        return
+    with open(dist_path, encoding="utf-8") as fh:
+        dist = json.load(fh)
+    locations = dist.get("locations", {})
+    key = f"runner:{_runner_name(runner_id, yuki_dir)}"
+    if key in locations:
+        locations[key].pop("cache", None)
+        if not locations[key]:
+            del locations[key]
+        with open(dist_path, "w", encoding="utf-8") as fh:
+            json.dump(dist, fh, indent=2)
+
+
+def cache_results_job(runner_id, project_uuid, impression,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                      update, yuki_dir=None):
+    """Cache the impression's workflow stageout on its runner.
+
+    Manual version of the workflow's own cache rule: fast-copies
+    <remote_workdir>/workflows/<project>/<workflow>/imp<short>/stageout
+    into the runner's managed impressions cache (read-only) and records
+    a 'transferred' cache entry in distribution.json.
+
+    update(state) is called with each progress state; the caller owns
+    the job-state file.
+    """
+    yuki_dir = yuki_dir or _yuki_dir()
+    imp_dir = os.path.join(yuki_dir, "Storage", project_uuid, impression)
+    from Yuki.kernel.vjob import VJob
+    job = VJob(imp_dir, runner_id)
+    workflow_id = job.workflow_id()
+    if not workflow_id:
+        result = {"cached": 0, "reason": "no workflow on this runner"}
+        update({"status": "done", "result": result, "error": None})
+        return result
+
+    status = job.status(musical=True)
+    if status != CODA:
+        result = {"cached": 0,
+                  "reason": f"job status is {status} — nothing to cache"}
+        update({"status": "done", "result": result, "error": None})
+        return result
+
+    settings = _ssh_settings(runner_id, yuki_dir)
+    base = settings.get("remote_workdir", "/tmp/yuki-workflows")
+    src = (f"{base}/workflows/{project_uuid}/{workflow_id}"
+           f"/imp{job.short_uuid()}/stageout")
+    cache_dir = f"{base}/impressions/{project_uuid}/{impression}"
+
+    update({"status": "copying", "result": None, "error": None})
+    with _ssh_connection(runner_id) as ssh:
+        if not ssh.exists(src):
+            result = {"cached": 0, "reason": "no stageout on the runner"}
+            update({"status": "done", "result": result, "error": None})
+            return result
+        out, err, code = ssh.exec(
+            build_remote_fast_copy_command(src, cache_dir), timeout=10800)
+        if code != 0:
+            raise RuntimeError(f"remote copy failed: {err or out}")
+        files = [{"name": rel, "size": size}
+                 for rel, _rpath, size in ssh.walk_files(cache_dir)]
+    _record_cache_distribution(imp_dir, runner_id, files, yuki_dir)
+    result = {"cached": len(files),
+              "bytes": sum(f.get("size", 0) for f in files)}
+    update({"status": "done", "result": result, "error": None})
+    return result
+
+
+def _record_cache_distribution(imp_dir, runner_id, files, yuki_dir=None):
+    """Record the cached copy in distribution.json (origin 'transferred')."""
+    dist_path = os.path.join(imp_dir, "distribution.json")
+    dist = {}
+    if os.path.isfile(dist_path):
+        try:
+            with open(dist_path, encoding="utf-8") as fh:
+                dist = json.load(fh)
+        except (OSError, ValueError):
+            dist = {}
+    entry = {
+        "origin": "transferred",
+        "files": len(files),
+        "bytes": sum(f.get("size", 0) for f in files),
+        "updated": datetime.datetime.now(
+            datetime.timezone.utc).isoformat(),
+    }
+    locations = dist.setdefault("locations", {})
+    key = f"runner:{_runner_name(runner_id, yuki_dir)}"
+    locations.setdefault(key, {})["cache"] = entry
+    os.makedirs(imp_dir, exist_ok=True)
+    with open(dist_path, "w", encoding="utf-8") as fh:
+        json.dump(dist, fh, indent=2)
 
 
 def verify_registered_data(project_uuid, impression_uuid):  # pylint: disable=too-many-locals

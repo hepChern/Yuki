@@ -9,7 +9,7 @@ from flask import Blueprint, request, jsonify
 from CelebiChrono.utils import csys
 from ...kernel import remote_data_ops
 from ..config import config
-from ..tasks import task_register_remote_data
+from ..tasks import task_cache_results, task_register_remote_data
 
 bp = Blueprint('remote_data', __name__)
 
@@ -89,6 +89,86 @@ def register_remote_data_impression_status(impression_uuid):
         state = dict(state)
         state["progress"] = remote_data_ops.read_remote_progress(
             state.get("runner_id", ""), job_id)
+    return jsonify(state)
+
+
+@bp.route("/purge-runner-cache", methods=['POST'])
+def purge_runner_cache_route():
+    """Purge cached impressions from an ssh runner (synchronous)."""
+    data = request.get_json(silent=True) or request.form
+    runner = data.get("runner", "")
+    if not runner:
+        return jsonify({"error": "missing required field: runner"}), 400
+
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"Runner '{runner}' not found"}), 404
+    runner_id = runners_id[runner]
+    backend_types = config_file.read_variable("backend_types", {})
+    if backend_types.get(runner_id, "reana") != "ssh":
+        return jsonify({"error": "purge-ssh-runner-cache requires an ssh "
+                                 "runner"}), 400
+
+    dry_run = str(data.get("dry_run", "")).lower() in ("1", "true", "yes")
+    try:
+        summary = remote_data_ops.purge_runner_cache(
+            runner_id,
+            project=data.get("project") or None,
+            impression=data.get("impression") or None,
+            dry_run=dry_run,
+            yuki_dir=remote_data_ops._yuki_dir())  # pylint: disable=protected-access
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        return jsonify({"error": str(e)}), 500
+    return jsonify(summary)
+
+
+@bp.route("/cache-results", methods=['POST'])
+def cache_results_route():
+    """Start a job caching the impression's workflow stageout on its runner."""
+    data = request.get_json(silent=True) or request.form
+    runner = data.get("runner", "")
+    project_uuid = data.get("project_uuid", "")
+    impression = data.get("impression", "")
+    if not (runner and project_uuid and impression):
+        return jsonify({"error": "missing required field: "
+                                 "runner/project_uuid/impression"}), 400
+
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"Runner '{runner}' not found"}), 404
+    runner_id = runners_id[runner]
+    backend_types = config_file.read_variable("backend_types", {})
+    if backend_types.get(runner_id, "reana") != "ssh":
+        return jsonify({"error": "cache-results requires an ssh runner"}), 400
+
+    job_id = csys.generate_uuid()
+    yuki_dir = remote_data_ops._yuki_dir()  # pylint: disable=protected-access
+    remote_data_ops.write_job_state(yuki_dir, job_id, {
+        "status": "copying", "result": None, "error": None,
+        "runner_id": runner_id, "project_uuid": project_uuid,
+        "impression": impression,
+    }, jobs_dir_name="cache-jobs")
+    try:
+        task_cache_results.apply_async(
+            args=[job_id, runner_id, project_uuid, impression])
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        remote_data_ops.write_job_state(yuki_dir, job_id, {
+            "status": "failed", "result": None, "error": str(e),
+        }, jobs_dir_name="cache-jobs")
+        return jsonify({"job_id": job_id, "error": str(e)}), 500
+    return jsonify({"job_id": job_id})
+
+
+@bp.route("/cache-results/<job_id>", methods=['GET'])
+def cache_results_status(job_id):
+    """Poll a cache-results job's state."""
+    state = remote_data_ops.read_job_state(
+        remote_data_ops._yuki_dir(), job_id,  # pylint: disable=protected-access
+        jobs_dir_name="cache-jobs")
+    if state is None:
+        return jsonify({"error": "job not found"}), 404
     return jsonify(state)
 
 
