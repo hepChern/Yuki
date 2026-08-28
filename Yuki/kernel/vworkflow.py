@@ -20,9 +20,9 @@ from Yuki.kernel.vjob import VJob
 from Yuki.kernel.container_job import ContainerJob
 from Yuki.kernel.image_job import ImageJob
 from Yuki.kernel.status_constants import (
-    SILENCE, PRELUDE, IN_MOVEMENT, DISSONANCE, FAILED,
-    CODA, FINAL_NOTE,
-    translate_to_musical
+    PRELUDE, IN_MOVEMENT, DISSONANCE, FAILED,
+    CODA, FINAL_NOTE, STOPPED, DELETED,
+    translate_to_musical, is_terminal_status
 )
 from Yuki.utils import snakefile
 from .file_staging import walk_files
@@ -227,7 +227,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         try:
             self.logger("Executing backend")
             self._execute_backend()
-        except Exception:
+        except Exception as e:
             self.logger("Failed to execute backend")
             self.set_workflow_status("failed")
             for job in self.jobs:
@@ -235,7 +235,12 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                     continue
                 if job.job_type() == "algorithm":
                     continue
-                job.set_status(FAILED, "Backend execution failed")
+                if is_terminal_status(job.status(musical=True)):
+                    # Preserve the backend's own terminal marking (e.g. the
+                    # ssh handler's dissonance on remote-start failure) and
+                    # never clobber a previously completed status.
+                    continue
+                job.set_status(FAILED, f"Backend execution failed: {e}")
             raise
 
     @abstractmethod
@@ -251,19 +256,57 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
 
         Notes:
         - Polls the statuses of workflows referred to by input jobs.
-        - Uses a bounded number of retries to avoid infinite wait.
-        - If dependencies do not finish within the retry window, resets job states
-          and returns False.
+        - Fails fast when an input is in a terminal failure state: the workflow
+          and its execution jobs are marked failed, naming the blocking inputs.
+        - Uses a bounded number of retries to avoid infinite wait; exhausting the
+          window also fails loudly instead of leaving jobs pending forever.
         """
+        def _pending_input_jobs():
+            return [j for j in self.jobs if j.is_input
+                    and j.status(musical=False) not in (FINAL_NOTE, CODA)
+                    and j.status(musical=True) != "archived"
+                    and j.job_type() != "algorithm"]
+
+        def _failed_inputs(input_jobs):
+            return [j for j in input_jobs
+                    if j.status(musical=True) in (FAILED, DISSONANCE, STOPPED, DELETED)]
+
+        def _describe(job):
+            name = job.short_uuid()
+            try:
+                path = job.config_file.read_variable("current_path", "")
+                if isinstance(path, str) and path:
+                    name = f"{name} ({path})"
+            except Exception:
+                pass
+            return name
+
+        def _fail(message):
+            self.set_workflow_status("failed")
+            for job in self.jobs:
+                if job.is_input:
+                    continue
+                if job.status(musical=True) == "archived":
+                    continue
+                if job.job_type() == "algorithm":
+                    continue
+                job.set_status(FAILED, message)
+            self.logger(message)
+
+        all_finished = False
         # First, check whether the dependencies are satisfied
         for i_tries in range(60):
             self.logger(f"Checking finished (Attempt {i_tries+1}/60)")
+            input_jobs = _pending_input_jobs()
+            failed_inputs = _failed_inputs(input_jobs)
+            if failed_inputs:
+                names = ", ".join(_describe(j) for j in failed_inputs)
+                _fail(f"Blocked: upstream input {names} is failed "
+                      f"- fix the upstream task and resubmit")
+                return False
+
             all_finished = True
             workflow_list = []
-            input_jobs = [j for j in self.jobs if j.is_input
-                           and j.status(musical=False) not in (FINAL_NOTE, CODA)
-                           and j.status(musical=True) != "archived"
-                           and j.job_type() != "algorithm"]
             for j in input_jobs:
                 print(j, j.status(musical=True), j.status(musical=False), j.job_type())
             total_inputs = len(input_jobs)
@@ -274,12 +317,11 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                              f"workflow {workflow.uuid}")
                 if workflow and workflow not in workflow_list:
                     workflow_list.append(workflow)
-                # FIXME: may check if some of the dependence fail
 
             for workflow in workflow_list:
                 workflow.update_workflow_status()
 
-            for i, job in enumerate(self.jobs):
+            for job in self.jobs:
                 if not job.is_input:
                     continue
                 if job.status(musical=True) == FINAL_NOTE:
@@ -315,15 +357,10 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         self.logger("All done")
 
         if not all_finished:
-            for job in self.jobs:
-                if job.is_input:
-                    continue
-                if job.status(musical=True) == "archived":
-                    continue
-                if job.job_type() == "algorithm":
-                    continue
-                job.set_status(SILENCE, "Dependencies not finished, resetting to initial state")
-            self.logger("Some dependencies are not finished yet.")
+            pending = _pending_input_jobs()
+            names = ", ".join(_describe(j) for j in pending) or "unknown inputs"
+            _fail(f"Dependency wait timed out after 60 attempts "
+                  f"- inputs still not finished: {names}")
             return False
 
         return True

@@ -432,8 +432,11 @@ echo $? > yuki.exit
             out, err, code = ssh.exec(f"cd {self.remote_exec_path} && bash yuki_run.sh")
             if code != 0:
                 detail = err.strip() if err.strip() else out.strip()
+                log_tail = self._read_remote_snakemake_tail(ssh)
+                if log_tail:
+                    detail = (detail + f" (snakemake.log: {log_tail})").strip()
                 raise RuntimeError(
-                    f"Failed to start remote Snakemake: {detail} (exit {code})"
+                    f"Remote Snakemake failed: {detail} (exit {code})"
                 )
             self.logger("[SSH] Remote Snakemake started")
 
@@ -499,6 +502,25 @@ echo $? > yuki.exit
                         "Skipped: upstream dependency failed before this job ran",
                     )
 
+    def _read_remote_exit(self, ssh):
+        """Return the remote wrapper's exit code, or None while still running."""
+        exit_file = f"{self.remote_exec_path}/yuki.exit"
+        if not ssh.exists(exit_file):
+            return None
+        try:
+            out, _err, _code = ssh.exec(f"cat {exit_file}")
+            return int(out.strip())
+        except (TypeError, ValueError):
+            return None
+
+    def _read_remote_snakemake_tail(self, ssh, max_chars=2000):
+        """Return the tail of the remote snakemake log for failure detail."""
+        log_file = f"{self.remote_exec_path}/snakemake.log"
+        if not ssh.exists(log_file):
+            return ""
+        out, _err, _code = ssh.exec(f"tail -c {max_chars} {log_file}")
+        return out
+
     def update_workflow_status(self):
         """Update workflow status from remote execution."""
         try:
@@ -520,8 +542,17 @@ echo $? > yuki.exit
                     if not ssh.exists(done_file):
                         all_done = False
                         break
+                exit_code = self._read_remote_exit(ssh)
+                failure_detail = (
+                    self._read_remote_snakemake_tail(ssh)
+                    if exit_code not in (None, 0) else ""
+                )
 
             status = "finished" if all_done else "running"
+            if exit_code is not None and exit_code != 0:
+                # The remote wrapper finished but snakemake exited nonzero:
+                # the backend run is dead, so the workflow has failed.
+                status = "failed"
 
             results = {
                 "status": status,
@@ -539,6 +570,9 @@ echo $? > yuki.exit
                         1 for job_uuid in jobs
                         if ssh.exists(f"{self.remote_exec_path}/{job_uuid}.done")
                     )
+
+            if status == "failed":
+                results["failure_detail"] = failure_detail
 
             self.logger(
                 f"[SSH] Workflow status: {status}, "

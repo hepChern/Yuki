@@ -1,5 +1,6 @@
 """Unit tests for NativeWorkflow per-job status propagation."""
 # pylint: disable=protected-access
+import json
 import os
 import shutil
 import tempfile
@@ -190,8 +191,6 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
 
     def test_copy_files_local_writes_nested_stage_manifest(self):
         """Nested rawdata/input files must be recorded with full relative paths."""
-        import json
-
         job = self._make_job("a" * 32)
         job.environment.return_value = "rawdata"
         job.path = os.path.join(self.tmpdir, "jobs", "a" * 32)
@@ -271,6 +270,155 @@ class TestNativeWorkflowPropagation(unittest.TestCase):
         self.assertEqual(
             report["skipped"],
             [{"file": "celebi_user_step0.log", "reason": "already in Yuki"}])
+
+
+class TestWaitForDependenciesFailFast(unittest.TestCase):
+    """_wait_for_dependencies must fail fast (and loudly) on terminal failures."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self._home_patcher = patch.dict(os.environ, {"HOME": self.tmpdir})
+        self._home_patcher.start()
+
+        self.project_uuid = "p" * 32
+        self.workflow_uuid = "w" * 32
+
+        from Yuki.kernel.native_workflow import NativeWorkflow
+        self.workflow = NativeWorkflow(self.project_uuid, [], None)
+        self.workflow.uuid = self.workflow_uuid
+        self.workflow.local_exec_path = os.path.join(
+            self.tmpdir, ".Yuki", "LocalWorkflows", self.workflow_uuid
+        )
+        os.makedirs(self.workflow.path, exist_ok=True)
+        self.workflow.jobs = []
+
+    def tearDown(self):
+        self._home_patcher.stop()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _make_job(self, uuid_full, status_value="prelude",  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                  is_input=False, job_type_value="task"):
+        job = MagicMock()
+        job.uuid = uuid_full
+        job.is_input = is_input
+        job.path = "/fake/" + uuid_full
+        job.job_type.return_value = job_type_value
+        job.status.return_value = status_value
+        job.short_uuid.return_value = uuid_full[:7]
+        job.workflow_id.return_value = ""
+        return job
+
+    def _workflow_results(self):
+        results_path = os.path.join(self.workflow.path, "results.json")
+        self.assertTrue(os.path.exists(results_path))
+        with open(results_path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_failed_input_fails_fast_without_polling(self):
+        """A permanently failed input immediately fails the workflow and its
+        execution jobs, naming the blocking input."""
+        from Yuki.kernel.status_constants import FAILED
+
+        input_job = self._make_job("a" * 32, status_value="failed", is_input=True)
+        exec_job = self._make_job("b" * 32)
+        self.workflow.jobs = [input_job, exec_job]
+
+        # Polling dependency workflows would be pointless: fail fast must not
+        # reach VWorkflow.create.
+        with patch("Yuki.kernel.vworkflow.VWorkflow.create",
+                   side_effect=AssertionError("should not poll workflows")):
+            result = self.workflow._wait_for_dependencies()
+
+        self.assertIs(result, False)
+        self.assertEqual(self._workflow_results()["results"]["status"], "failed")
+        status_arg, detail_arg = exec_job.set_status.call_args.args
+        self.assertEqual(status_arg, FAILED)
+        self.assertIn("Blocked", detail_arg)
+        self.assertIn(input_job.short_uuid(), detail_arg)
+
+    def test_dependency_wait_timeout_fails_loudly(self):
+        """Exhausting the wait window marks the workflow and jobs failed with
+        a message naming the still-pending inputs."""
+        from Yuki.kernel.status_constants import FAILED
+
+        input_job = self._make_job("a" * 32, status_value="prelude", is_input=True)
+        exec_job = self._make_job("b" * 32)
+        self.workflow.jobs = [input_job, exec_job]
+
+        dep_workflow = MagicMock()
+        dep_workflow.update_workflow_status.return_value = None
+
+        with patch("Yuki.kernel.vworkflow.VWorkflow.create",
+                   return_value=dep_workflow), \
+             patch("Yuki.kernel.vworkflow.time.sleep"):
+            result = self.workflow._wait_for_dependencies()
+
+        self.assertIs(result, False)
+        self.assertEqual(self._workflow_results()["results"]["status"], "failed")
+        status_arg, detail_arg = exec_job.set_status.call_args.args
+        self.assertEqual(status_arg, FAILED)
+        self.assertIn("timed out", detail_arg)
+        self.assertIn(input_job.short_uuid(), detail_arg)
+
+    def test_backend_failure_message_includes_exception(self):
+        """The generic backend failure message carries the exception text."""
+        from Yuki.kernel.status_constants import FAILED
+
+        exec_job = self._make_job("b" * 32)
+        self.workflow.jobs = [exec_job]
+        self.workflow.construct_workflow_jobs = MagicMock()
+        self.workflow._wait_for_dependencies = MagicMock(return_value=True)
+        self.workflow.construct_snake_file = MagicMock()
+        self.workflow._execute_backend = MagicMock(
+            side_effect=RuntimeError("remote snakemake died"))
+
+        with self.assertRaises(RuntimeError):
+            self.workflow.run()
+
+        exec_job.set_status.assert_any_call(
+            FAILED, "Backend execution failed: remote snakemake died")
+
+    def test_backend_failure_preserves_terminal_job_status(self):
+        """Backend failures only mark non-terminal jobs failed.
+
+        A job the backend already moved to a terminal state (e.g. the
+        ssh handler's dissonance on remote-start failure, or a coda from
+        an earlier run) must not be clobbered with a generic failure.
+        """
+        from Yuki.kernel.status_constants import DISSONANCE, FAILED
+
+        dissonant_job = self._make_job("a" * 32, status_value=DISSONANCE)
+        running_job = self._make_job("b" * 32, status_value="in_movement")
+        self.workflow.jobs = [dissonant_job, running_job]
+        self.workflow.construct_workflow_jobs = MagicMock()
+        self.workflow._wait_for_dependencies = MagicMock(return_value=True)
+        self.workflow.construct_snake_file = MagicMock()
+        self.workflow._execute_backend = MagicMock(
+            side_effect=RuntimeError("remote snakemake died"))
+
+        with self.assertRaises(RuntimeError):
+            self.workflow.run()
+
+        dissonant_calls = [call.args[0] for call in
+                           dissonant_job.set_status.call_args_list]
+        self.assertNotIn(FAILED, dissonant_calls)
+        running_job.set_status.assert_any_call(
+            FAILED, "Backend execution failed: remote snakemake died")
+
+    def test_successful_wait_returns_true(self):
+        """Fully finished inputs let the wait complete and return True."""
+        from Yuki.kernel.status_constants import CODA
+
+        input_job = self._make_job("a" * 32, status_value=CODA, is_input=True)
+        exec_job = self._make_job("b" * 32)
+        self.workflow.jobs = [input_job, exec_job]
+
+        with patch("Yuki.kernel.vworkflow.VWorkflow.create",
+                   side_effect=AssertionError("should not poll workflows")):
+            result = self.workflow._wait_for_dependencies()
+
+        self.assertIs(result, True)
+        exec_job.set_status.assert_not_called()
 
 
 if __name__ == "__main__":

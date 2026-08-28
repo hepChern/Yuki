@@ -186,7 +186,8 @@ def is_terminal_status(status: str) -> bool:
         True if the status is terminal, False otherwise
     """
     musical_status = translate_to_musical(status)
-    terminal_statuses = {CODA, FINAL_NOTE, FAILED, STOPPED, DELETED}
+    terminal_statuses = {CODA, FINAL_NOTE, FAILED, DISSONANCE,
+                         STOPPED, DELETED}
     return musical_status in terminal_statuses
 
 

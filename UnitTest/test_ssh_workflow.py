@@ -194,6 +194,25 @@ class TestSshWorkflow(unittest.TestCase):
         return job
 
     @patch("paramiko.SSHClient")
+    def test_start_snakemake_failure_includes_log_tail(self, mock_ssh_cls):
+        """A failed remote start surfaces the runner's snakemake.log tail."""
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_sftp.files[
+            f"{self.workflow.remote_exec_path}/snakemake.log"] = b"boom"
+        self.mock_client.exec_command.side_effect = [
+            (MagicMock(), _MockStdout(""), _MockStderr("")),           # chmod +x
+            (MagicMock(), _MockStdout("", exit_code=1), _MockStderr("")),  # wrapper
+            (MagicMock(), _MockStdout("MissingInputException in rule select"),
+             _MockStderr("")),                                          # log tail
+        ]
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.workflow._start_remote_snakemake()
+
+        self.assertIn("MissingInputException", str(ctx.exception))
+        self.assertIn("(exit 1)", str(ctx.exception))
+
+    @patch("paramiko.SSHClient")
     def test_execute_backend_uploads_snakefile_and_starts_command(self, mock_ssh_cls):
         """_execute_backend uploads the Snakefile and runs the wrapper."""
         mock_ssh_cls.return_value = self.mock_client
@@ -264,6 +283,42 @@ class TestSshWorkflow(unittest.TestCase):
             results = json.load(f)
         self.assertEqual(results["results"]["status"], "finished")
         self.assertEqual(results["results"]["progress"]["completed"], 1)
+
+    @patch("paramiko.SSHClient")
+    def test_update_workflow_status_detects_remote_exit_nonzero(self, mock_ssh_cls):
+        """A nonzero remote yuki.exit marks the workflow failed with the
+        snakemake log tail, and never-run jobs fail with a skip message."""
+        from Yuki.kernel.status_constants import FAILED
+
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_sftp.dirs.add(self.workflow.remote_exec_path)
+        self.mock_sftp.files[f"{self.workflow.remote_exec_path}/yuki.exit"] = b"1"
+        self.mock_sftp.files[f"{self.workflow.remote_exec_path}/snakemake.log"] = b"x"
+
+        def exec_side_effect(command, timeout=300):  # pylint: disable=unused-argument
+            if "yuki.exit" in command:
+                return MagicMock(), _MockStdout("1"), _MockStderr("")
+            if "snakemake.log" in command:
+                return (MagicMock(),
+                        _MockStdout("EnvironmentNameNotFound: Could not find conda environment"),
+                        _MockStderr(""))
+            return MagicMock(), _MockStdout(""), _MockStderr("")
+
+        self.mock_client.exec_command.side_effect = exec_side_effect
+
+        job = self._make_job("a" * 32)
+        self.workflow.jobs = [job]
+        os.makedirs(self.workflow.path, exist_ok=True)
+
+        self.workflow.update_workflow_status()
+
+        results_path = os.path.join(self.workflow.path, "results.json")
+        with open(results_path, encoding="utf-8") as f:
+            results = json.load(f)
+        self.assertEqual(results["results"]["status"], "failed")
+        self.assertIn("EnvironmentNameNotFound", results["results"]["failure_detail"])
+        job.set_status.assert_called_with(
+            FAILED, "Skipped: upstream dependency failed before this job ran")
 
     @patch("paramiko.SSHClient")
     def test_propagate_done_jobs_become_finished(self, mock_ssh_cls):
