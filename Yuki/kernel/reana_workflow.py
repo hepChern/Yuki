@@ -614,7 +614,8 @@ class ReanaWorkflow(VWorkflow):
         log_file.write_variable("logs", worrkflow_logs)
 
     def homekeep(self):
-        """Perform homekeeping tasks for the workflow.
+        """Outdated: use collect plus delete_workspace (GET /delete-workflow).
+        Perform homekeeping tasks for the workflow.
         Download all the results for the jobs in the workflow.
         """
         # if os.path.exists(os.path.join(self.path, "homekeep.done")):
@@ -654,3 +655,14 @@ class ReanaWorkflow(VWorkflow):
         homekeep_done_path = os.path.join(self.path, "homekeep.done")
         with open(homekeep_done_path, "w", encoding='utf-8') as f:
             f.write("done")
+
+    def delete_workspace(self):
+        """Delete the online workflow on the REANA server."""
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
+        client.delete_workflow(
+            self.get_name(),
+            True, True,
+            self.get_access_token(self.machine_id)
+        )

@@ -90,3 +90,21 @@ def test_native_delete_workspace_missing_dir_no_raise(tmp_path):
     workflow.logger = lambda msg: None
 
     workflow.delete_workspace()  # no raise
+
+
+def test_reana_delete_workspace_calls_client():
+    """The online workflow is deleted with workspace + all-runs flags."""
+    from Yuki.kernel import reana_workflow
+    workflow = reana_workflow.ReanaWorkflow.__new__(
+        reana_workflow.ReanaWorkflow)
+    workflow.machine_id = "r1"
+    workflow.get_name = mock.MagicMock(return_value="w-proj-wf1")
+    workflow.get_access_token = mock.MagicMock(return_value="tok")
+    workflow.set_environment = mock.MagicMock()
+
+    with mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
+            mock.patch.object(reana_workflow, "client") as client:
+        workflow.delete_workspace()
+
+    client.delete_workflow.assert_called_once_with(
+        "w-proj-wf1", True, True, "tok")
