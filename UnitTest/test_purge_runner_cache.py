@@ -320,13 +320,31 @@ def _purge_route_app(monkeypatch, tmp_path):
     return app
 
 
-def test_purge_route_superseded_with_filters_400(monkeypatch, tmp_path):
-    """superseded combined with project/impression filters is rejected."""
+def test_purge_route_superseded_with_impression_400(monkeypatch, tmp_path):
+    """superseded combined with an impression filter is rejected."""
     r = _purge_route_app(monkeypatch, tmp_path).test_client().post(
         "/purge-runner-cache",
-        json={"runner": "farm", "superseded": True, "project": "p1"})
+        json={"runner": "farm", "superseded": True, "impression": "i1"})
     assert r.status_code == 400
     assert "cannot be combined" in r.get_json()["error"]
+
+
+def test_purge_route_superseded_with_project_passes_through(monkeypatch,
+                                                           tmp_path):
+    """superseded combined with a project filter is allowed (scoped purge)."""
+    from Yuki.server.routes import remote_data as remote_data_routes
+    app = _purge_route_app(monkeypatch, tmp_path)
+    with mock.patch.object(remote_data_routes.remote_data_ops,
+                           "purge_runner_cache",
+                           return_value={"purged": [], "skipped": [],
+                                         "dry_run": True}) as purge:
+        r = app.test_client().post(
+            "/purge-runner-cache",
+            json={"runner": "farm", "superseded": True, "project": "p1",
+                  "dry_run": True})
+    assert r.status_code == 200
+    assert purge.call_args[1]["superseded"] is True
+    assert purge.call_args[1]["project"] == "p1"
 
 
 def test_purge_route_superseded_passes_through(monkeypatch, tmp_path):

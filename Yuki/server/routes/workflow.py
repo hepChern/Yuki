@@ -126,8 +126,10 @@ def purge_runner_workflows():
         return jsonify({"error": f"runner '{runner}' has backend "
                                  f"'{backend_type}'"}), 400
     dry_run = str(data.get("dry_run", "")).lower() in ("1", "true", "yes")
+    project_uuid = data.get("project_uuid") or None
     try:
-        summary = workflow_purge.purge_stale_workflows(runner_id, dry_run)
+        summary = workflow_purge.purge_stale_workflows(
+            runner_id, dry_run, project_uuid=project_uuid)
     except Exception as e:  # pylint: disable=broad-exception-caught
         return jsonify({"error": str(e)}), 500
     return jsonify(summary)

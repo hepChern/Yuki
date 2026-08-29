@@ -22,13 +22,15 @@ def _project_live_workflows(project, yuki_dir):
         project, live_set.get("live", []), yuki_dir)
 
 
-def purge_stale_workflows(runner_id, dry_run=False, yuki_dir=None):
+def purge_stale_workflows(runner_id, dry_run=False, yuki_dir=None,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                           project_uuid=None):
     """Delete the runner-side workspaces of workflows whose projects'
     synced live sets exclude them.
 
     Workflows are found in the local mirror
     ~/.Yuki/Workflows/<project>/<workflow> where config.json machine_id
-    equals runner_id (covers ssh, native, and reana uniformly). Live
+    equals runner_id (covers ssh, native, and reana uniformly). With
+    project_uuid given, only that project's workflows are scanned. Live
     workflows are derived fresh at purge time from the projects' run
     configs (a re-run after the last sync points at a new workflow the
     stored snapshot does not list); running workflows and workflows
@@ -45,7 +47,9 @@ def purge_stale_workflows(runner_id, dry_run=False, yuki_dir=None):
         return {"purged": purged, "skipped": skipped,
                 "dry_run": bool(dry_run)}
 
-    for project in sorted(os.listdir(workflows_root)):
+    projects = [project_uuid] if project_uuid else sorted(
+        os.listdir(workflows_root))
+    for project in projects:
         project_dir = os.path.join(workflows_root, project)
         if not os.path.isdir(project_dir):
             continue

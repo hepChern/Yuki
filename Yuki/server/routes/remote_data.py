@@ -112,9 +112,9 @@ def purge_runner_cache_route():
 
     superseded = str(data.get("superseded", "")).lower() in (
         "1", "true", "yes")
-    if superseded and (data.get("project") or data.get("impression")):
+    if superseded and data.get("impression"):
         return jsonify({"error": "superseded scope cannot be combined "
-                                 "with project/impression filters"}), 400
+                                 "with an impression filter"}), 400
 
     dry_run = str(data.get("dry_run", "")).lower() in ("1", "true", "yes")
     try:

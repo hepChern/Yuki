@@ -197,10 +197,12 @@ def test_purge_runner_workflows_returns_summary(monkeypatch):
         purge.purge_stale_workflows.return_value = summary
         r = app.test_client().post(
             "/purge-runner-workflows",
-            json={"runner": "pkufarm", "dry_run": True})
+            json={"runner": "pkufarm", "dry_run": True,
+                  "project_uuid": "proj"})
     assert r.status_code == 200
     assert r.get_json()["dry_run"] is True
-    purge.purge_stale_workflows.assert_called_once_with("r1", True)
+    purge.purge_stale_workflows.assert_called_once_with(
+        "r1", True, project_uuid="proj")
 
 
 def test_purge_runner_workflows_unknown_runner_404(monkeypatch):
@@ -248,3 +250,23 @@ def test_purge_runner_workflows_kernel_error_500(monkeypatch):
             "/purge-runner-workflows", json={"runner": "pkufarm"})
     assert r.status_code == 500
     assert r.get_json() == {"error": "x"}
+
+
+def test_purge_stale_workflows_project_scope(monkeypatch, tmp_path):
+    """With project_uuid given, only that project's workflows are scanned."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    liveness.save_live_set("proj", [], [])
+    _workflow_mirror(tmp_path, "proj", "wf-stale", "r1")
+    _workflow_mirror(tmp_path, "other", "wf-other", "r1")
+
+    fake_workflow = mock.MagicMock()
+    fake_workflow.status.return_value = "finished"
+    with mock.patch.object(workflow_purge, "VWorkflow") as vwf:
+        vwf.create.return_value = fake_workflow
+        summary = workflow_purge.purge_stale_workflows(
+            "r1", project_uuid="proj")
+
+    assert summary["purged"] == [
+        {"project": "proj", "workflow": "wf-stale"}]
+    assert all(s["project"] == "proj" for s in summary["skipped"])
+    fake_workflow.delete_workspace.assert_called_once_with()
