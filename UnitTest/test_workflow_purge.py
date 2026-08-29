@@ -113,3 +113,59 @@ def test_purge_stale_workflows_delete_failure_is_skip(monkeypatch,
 
     assert summary["purged"] == []
     assert "delete failed" in summary["skipped"][0]["reason"]
+
+
+def _purge_app(monkeypatch, config_vars):
+    from Yuki.server.routes import workflow as workflow_routes
+    from flask import Flask
+    app = Flask(__name__)
+    app.register_blueprint(workflow_routes.bp)
+    config_obj = mock.MagicMock()
+    from CelebiChrono.utils.metadata import ConfigFile
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    config_obj.config_path = os.path.join(tmp, "config.json")
+    config_obj.get_config_file.return_value = ConfigFile(
+        config_obj.config_path)
+    with open(config_obj.config_path, "w", encoding="utf-8") as f:
+        json.dump(config_vars, f)
+    monkeypatch.setattr(workflow_routes, "config", config_obj)
+    return app
+
+
+def test_purge_runner_workflows_returns_summary(monkeypatch):
+    """/purge-runner-workflows delegates to the kernel purge."""
+    from Yuki.server.routes import workflow as workflow_routes
+    app = _purge_app(monkeypatch, {
+        "runners_id": {"pkufarm": "r1"},
+        "backend_types": {"r1": "ssh"},
+    })
+    summary = {"purged": [], "skipped": [], "dry_run": True}
+    with mock.patch.object(workflow_routes, "workflow_purge") as purge:
+        purge.purge_stale_workflows.return_value = summary
+        r = app.test_client().post(
+            "/purge-runner-workflows",
+            json={"runner": "pkufarm", "dry_run": True})
+    assert r.status_code == 200
+    assert r.get_json()["dry_run"] is True
+    purge.purge_stale_workflows.assert_called_once_with("r1", True)
+
+
+def test_purge_runner_workflows_unknown_runner_404(monkeypatch):
+    app = _purge_app(monkeypatch, {
+        "runners_id": {"pkufarm": "r1"},
+        "backend_types": {"r1": "ssh"},
+    })
+    r = app.test_client().post(
+        "/purge-runner-workflows", json={"runner": "nope"})
+    assert r.status_code == 404
+
+
+def test_purge_runner_workflows_missing_runner_400(monkeypatch):
+    app = _purge_app(monkeypatch, {
+        "runners_id": {"pkufarm": "r1"},
+        "backend_types": {"r1": "ssh"},
+    })
+    r = app.test_client().post(
+        "/purge-runner-workflows", json={})
+    assert r.status_code == 400

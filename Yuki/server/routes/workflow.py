@@ -6,6 +6,8 @@ from flask import Blueprint, request, jsonify
 from Yuki.kernel.impression_storage import ImpressionStorage
 from Yuki.kernel.vworkflow import VWorkflow
 from Yuki.kernel.status_constants import IN_MOVEMENT, translate_to_musical
+from ...kernel import workflow_purge
+from ..config import config
 
 bp = Blueprint('workflow', __name__)
 
@@ -98,3 +100,34 @@ def delete_workflow(project_uuid, workflow_uuid):
                     "project_uuid": project_uuid,
                     "workflow": workflow_uuid,
                     "backend_type": backend_type})
+
+
+@bp.route("/purge-runner-workflows", methods=['POST'])
+def purge_runner_workflows():
+    """Delete the non-live workflow workspaces on a runner.
+
+    Workflows whose project's synced live set excludes them (and which
+    are not running) have their runner-side workspace deleted via the
+    per-backend delete_workspace. Live, running, and unknown workflows
+    are skipped with reasons. The local Workflows mirror is kept.
+    """
+    data = request.get_json(silent=True) or request.form
+    runner = data.get("runner", "")
+    if not runner:
+        return jsonify({"error": "missing required field: runner"}), 400
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"Runner '{runner}' not found"}), 404
+    runner_id = runners_id[runner]
+    backend_types = config_file.read_variable("backend_types", {})
+    backend_type = backend_types.get(runner_id, "reana")
+    if backend_type not in ("ssh", "native", "reana"):
+        return jsonify({"error": f"runner '{runner}' has backend "
+                                 f"'{backend_type}'"}), 400
+    dry_run = str(data.get("dry_run", "")).lower() in ("1", "true", "yes")
+    try:
+        summary = workflow_purge.purge_stale_workflows(runner_id, dry_run)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        return jsonify({"error": str(e)}), 500
+    return jsonify(summary)
