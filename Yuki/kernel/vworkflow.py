@@ -712,3 +712,11 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         - NotImplementedError if subclass does not implement termination behavior.
         """
         # ...existing code...
+
+    def delete_workspace(self):
+        """Delete the runner-side workspace - must be implemented by subclass.
+
+        Raises:
+        - NotImplementedError if subclass does not implement workspace deletion.
+        """
+        raise NotImplementedError
