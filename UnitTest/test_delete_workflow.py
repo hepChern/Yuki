@@ -194,3 +194,11 @@ def test_delete_workflow_backend_failure_500(monkeypatch, tmp_path):
 
     assert r.status_code == 500
     assert "ssh down" in r.get_json()["error"]
+
+
+def test_homekeep_is_deprecated():
+    """/homekeep returns 410 and points at delete-workflow."""
+    from Yuki.server.routes import status as status_routes
+    r = _app(status_routes.bp).test_client().get("/homekeep/proj")
+    assert r.status_code == 410
+    assert "delete-workflow" in r.get_json()["error"]

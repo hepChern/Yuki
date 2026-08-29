@@ -610,20 +610,12 @@ def workflows(project_uuid):
 
 @bp.route("/homekeep/<project_uuid>", methods=['GET'])
 def homekeep(project_uuid):
-    """Trigger homekeep for all workflows in a project."""
-    workflows_path = os.path.join(
-        os.environ["HOME"],
-        ".Yuki",
-        "Workflows",
-        project_uuid
-    )
-    if not os.path.exists(workflows_path):
-        return ""
-    workflow_ids = os.listdir(workflows_path)
-    for workflow_id in workflow_ids:
-        workflow = VWorkflow.create(project_uuid, [], workflow_id)
-        workflow.homekeep()
-    return "ok"
+    """Deprecated: collect results, then free the workspace explicitly."""
+    del project_uuid  # kept for route compatibility
+    return jsonify({
+        "error": ("homekeep is outdated; collect results then free the "
+                  "workspace with /delete-workflow/<project>/<workflow>")
+    }), 410
 
 # The error log folder is like:
 # You can use the VJob.log(index)
