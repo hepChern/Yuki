@@ -237,3 +237,22 @@ def test_delete_workflow_backend_type_failure_returns_json_500(
     assert r.status_code == 500
     assert "corrupt config" in r.get_json()["error"]
     wf.delete_workspace.assert_called_once_with()
+
+
+def test_delete_workflow_records_purge(monkeypatch, tmp_path):
+    """The single-workflow delete records workspace_purged_at."""
+    from Yuki.server.routes import workflow as workflow_routes
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _mirror(tmp_path, "proj", "wf1", "finished")
+    wf = _mock_workflow("finished")
+    wf.path = str(tmp_path / ".Yuki" / "Workflows" / "proj" / "wf1")
+
+    with mock.patch.object(workflow_routes, "VWorkflow") as vwf, \
+            mock.patch.object(workflow_routes.workflow_purge,
+                              "record_workspace_purged") as record:
+        vwf.create.return_value = wf
+        r = _app(workflow_routes.bp).test_client().get(
+            "/delete-workflow/proj/wf1")
+
+    assert r.status_code == 200
+    record.assert_called_once_with(wf)

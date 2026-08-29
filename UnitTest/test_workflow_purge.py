@@ -270,3 +270,116 @@ def test_purge_stale_workflows_project_scope(monkeypatch, tmp_path):
         {"project": "proj", "workflow": "wf-stale"}]
     assert all(s["project"] == "proj" for s in summary["skipped"])
     fake_workflow.delete_workspace.assert_called_once_with()
+
+
+def _runner_config(tmp_path, backend="reana", remote_workdir="/remote",
+                  workdir=None):
+    """Write a global config with the runner's backend and settings."""
+    with open(tmp_path / "config.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "runners_id": {"farm": "r1"},
+            "backend_types": {"r1": backend},
+            "runner_settings": {"r1": dict(
+                {"remote_workdir": remote_workdir},
+                **({"workdir": workdir} if workdir else {}))},
+        }, f)
+
+
+def _record_purged(wf_dir, timestamp="2026-08-29T12:00:00+00:00"):
+    """Write workspace_purged_at into a mirror config.json."""
+    cfg = json.load(open(os.path.join(wf_dir, "config.json")))
+    cfg["workspace_purged_at"] = timestamp
+    with open(os.path.join(wf_dir, "config.json"), "w") as f:
+        json.dump(cfg, f)
+
+
+def test_purge_stale_workflows_skips_recorded_purged(monkeypatch, tmp_path):
+    """Mirrors already recording a purge are skipped and summarized."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    liveness.save_live_set("proj", [], [])
+    wf_dir = _workflow_mirror(tmp_path, "proj", "wf-gone", "r1")
+    _record_purged(wf_dir)
+
+    with mock.patch.object(workflow_purge, "VWorkflow") as vwf:
+        summary = workflow_purge.purge_stale_workflows("r1")
+
+    assert summary["purged"] == []
+    assert summary["already_gone"] == 1
+    vwf.create.assert_not_called()
+
+
+def test_purge_stale_workflows_records_after_delete(monkeypatch, tmp_path):
+    """A successful delete records workspace_purged_at in the mirror."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    liveness.save_live_set("proj", [], [])
+    wf_dir = _workflow_mirror(tmp_path, "proj", "wf-stale", "r1")
+
+    fake_workflow = mock.MagicMock()
+    fake_workflow.status.return_value = "finished"
+    fake_workflow.path = str(wf_dir)
+    with mock.patch.object(workflow_purge, "VWorkflow") as vwf:
+        vwf.create.return_value = fake_workflow
+        summary = workflow_purge.purge_stale_workflows("r1")
+
+    assert summary["purged"] == [{"project": "proj",
+                                  "workflow": "wf-stale"}]
+    cfg = json.load(open(os.path.join(wf_dir, "config.json")))
+    assert "workspace_purged_at" in cfg
+
+
+def test_purge_stale_workflows_heals_missing_ssh_workspaces(monkeypatch,
+                                                            tmp_path):
+    """Missing remote dirs get the record retroactively and are skipped."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    _runner_config(tmp_path, backend="ssh", remote_workdir="/remote")
+    liveness.save_live_set("proj", [], [])
+    gone = _workflow_mirror(tmp_path, "proj", "wf-gone", "r1")
+    stays = _workflow_mirror(tmp_path, "proj", "wf-stays", "r1")
+
+    fake_ssh = mock.MagicMock()
+    fake_ssh.__enter__.return_value = fake_ssh
+    fake_ssh.__exit__.return_value = False
+    # The batch existence command echoes only the dirs that exist.
+    fake_ssh.exec.return_value = (
+        "/remote/workflows/proj/wf-stays", "", 0)
+
+    fake_workflow = mock.MagicMock()
+    fake_workflow.status.return_value = "finished"
+    fake_workflow.path = str(stays)
+    with mock.patch.object(workflow_purge, "VWorkflow") as vwf, \
+            mock.patch.object(workflow_purge, "_SshConnection",
+                              return_value=fake_ssh):
+        vwf.create.return_value = fake_workflow
+        summary = workflow_purge.purge_stale_workflows("r1")
+
+    assert summary["purged"] == [{"project": "proj",
+                                  "workflow": "wf-stays"}]
+    assert summary["already_gone"] == 1
+    cfg = json.load(open(os.path.join(gone, "config.json")))
+    assert "workspace_purged_at" in cfg
+    fake_workflow.delete_workspace.assert_called_once_with()
+
+
+def test_purge_stale_workflows_heals_missing_native_workspaces(
+        monkeypatch, tmp_path):
+    """Native candidates whose dir is gone are healed, not listed."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    _runner_config(tmp_path, backend="native",
+                   workdir=str(tmp_path / "localwf"))
+    liveness.save_live_set("proj", [], [])
+    gone = _workflow_mirror(tmp_path, "proj", "wf-gone", "r1")
+    stays = _workflow_mirror(tmp_path, "proj", "wf-stays", "r1")
+    (tmp_path / "localwf" / "wf-stays").mkdir(parents=True)
+
+    fake_workflow = mock.MagicMock()
+    fake_workflow.status.return_value = "finished"
+    fake_workflow.path = str(stays)
+    with mock.patch.object(workflow_purge, "VWorkflow") as vwf:
+        vwf.create.return_value = fake_workflow
+        summary = workflow_purge.purge_stale_workflows("r1")
+
+    assert summary["purged"] == [{"project": "proj",
+                                  "workflow": "wf-stays"}]
+    assert summary["already_gone"] == 1
+    cfg = json.load(open(os.path.join(gone, "config.json")))
+    assert "workspace_purged_at" in cfg

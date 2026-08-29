@@ -93,6 +93,7 @@ def delete_workflow(project_uuid, workflow_uuid):
         if translate_to_musical(wf.status()) == IN_MOVEMENT:
             return jsonify({"error": "workflow is running; kill it first"}), 409
         wf.delete_workspace()
+        workflow_purge.record_workspace_purged(wf)
         backend_type = wf.backend_type()
     except Exception as e:  # pylint: disable=broad-exception-caught
         return jsonify({"error": str(e)}), 500
