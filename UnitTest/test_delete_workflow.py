@@ -202,3 +202,38 @@ def test_homekeep_is_deprecated():
     r = _app(status_routes.bp).test_client().get("/homekeep/proj")
     assert r.status_code == 410
     assert "delete-workflow" in r.get_json()["error"]
+
+
+def test_delete_workflow_create_failure_returns_json_500(monkeypatch,
+                                                         tmp_path):
+    """A workflow-construction failure returns the JSON 500 contract."""
+    from Yuki.server.routes import workflow as workflow_routes
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _mirror(tmp_path, "proj", "wf1", "finished")
+
+    with mock.patch.object(workflow_routes, "VWorkflow") as vwf:
+        vwf.create.side_effect = ImportError("reana_client is not available")
+        r = _app(workflow_routes.bp).test_client().get(
+            "/delete-workflow/proj/wf1")
+
+    assert r.status_code == 500
+    assert "reana_client" in r.get_json()["error"]
+
+
+def test_delete_workflow_backend_type_failure_returns_json_500(
+        monkeypatch, tmp_path):
+    """A payload-read failure after deletion still returns JSON 500."""
+    from Yuki.server.routes import workflow as workflow_routes
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _mirror(tmp_path, "proj", "wf1", "finished")
+    wf = _mock_workflow("finished")
+    wf.backend_type.side_effect = OSError("corrupt config")
+
+    with mock.patch.object(workflow_routes, "VWorkflow") as vwf:
+        vwf.create.return_value = wf
+        r = _app(workflow_routes.bp).test_client().get(
+            "/delete-workflow/proj/wf1")
+
+    assert r.status_code == 500
+    assert "corrupt config" in r.get_json()["error"]
+    wf.delete_workspace.assert_called_once_with()

@@ -86,14 +86,15 @@ def delete_workflow(project_uuid, workflow_uuid):
     if not os.path.isdir(workflow_dir):
         return jsonify({"error": f"workflow '{workflow_uuid}' not found"}), 404
 
-    workflow = VWorkflow.create(project_uuid, [], workflow_uuid)
-    if translate_to_musical(workflow.status()) == IN_MOVEMENT:
-        return jsonify({"error": "workflow is running; kill it first"}), 409
     try:
-        workflow.delete_workspace()
+        wf = VWorkflow.create(project_uuid, [], workflow_uuid)
+        if translate_to_musical(wf.status()) == IN_MOVEMENT:
+            return jsonify({"error": "workflow is running; kill it first"}), 409
+        wf.delete_workspace()
+        backend_type = wf.backend_type()
     except Exception as e:  # pylint: disable=broad-exception-caught
         return jsonify({"error": str(e)}), 500
     return jsonify({"status": "deleted",
                     "project_uuid": project_uuid,
                     "workflow": workflow_uuid,
-                    "backend_type": workflow.backend_type()})
+                    "backend_type": backend_type})
