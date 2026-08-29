@@ -106,7 +106,8 @@ class ContainerJob(VJob):
 
     def _process_user_commands_for_reana(self):
         """
-        Process and prepare user-defined commands for REANA execution.
+        Process and prepare user-defined commands for REANA execution. The
+        task's own celebi.yaml commands win over the linked algorithm's.
 
         Returns:
             list: List of processed commands ready for REANA execution
@@ -117,11 +118,11 @@ class ContainerJob(VJob):
 
         print(f"    >>>> >>>> User command processing start time: {time.time() - start_time}")
 
-        img = self.image()
-        if img is not None:
-            raw_commands = img.yaml_file.read_variable("commands", [])
-        else:
-            raw_commands = []
+        raw_commands = self.yaml_file.read_variable("commands", [])
+        if not raw_commands:
+            img = self.image()
+            if img is not None:
+                raw_commands = img.yaml_file.read_variable("commands", [])
         processed_commands = []
 
         print(raw_commands)
@@ -280,11 +281,11 @@ class ContainerJob(VJob):
         if self.is_input or self.compute_backend() == "htcondorcern":
             return []
 
-        img = self.image()
-        if img is not None:
-            raw_commands = img.yaml_file.read_variable("commands", [])
-        else:
-            raw_commands = []
+        raw_commands = self.yaml_file.read_variable("commands", [])
+        if not raw_commands:
+            img = self.image()
+            if img is not None:
+                raw_commands = img.yaml_file.read_variable("commands", [])
         processed_commands = []
 
         for i, command in enumerate(raw_commands):
