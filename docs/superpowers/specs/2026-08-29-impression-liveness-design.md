@@ -7,9 +7,11 @@
 ## Goal
 
 Teach Yuki which impressions are **live** — the current version of a task or
-algorithm, plus its transitive inputs — and which are **superseded**, so the
-system can expose liveness, warn on destructive operations, and make
-runner-side cache GC safe. Celebi owns the project graph and pushes the live
+algorithm, plus its transitive inputs — and which are **superseded**, so
+that stale data on runners can be reclaimed safely with two commands:
+`celebi-cli purge-stale-cache <runner>` (superseded impressions' cache
+entries) and `celebi-cli purge-stale-workflows <runner>` (non-live
+workflows' workspaces). Celebi owns the project graph and pushes the live
 set to Yuki over a dedicated endpoint; Yuki stores it, derives workflow
 liveness from it, and serves it.
 
@@ -69,37 +71,48 @@ replace). Body:
 "live_workflows": [...], "superseded": [...], "updated": iso}`;
 `404` `{"error": ...}` when no live.json exists for the project.
 
-**Enrichments:**
+**`POST /purge-runner-cache`** — gains a `superseded=1` scope: when set
+(project/impression filters must be absent), selects exactly the cache
+entries whose impressions are explicitly superseded
+(`liveness.impression_live(...) is False`) — the classification that makes
+runner GC safe without per-entry confirmations. Dry-run lists them.
+Existing explicit project/impression purges are unchanged.
 
-- `GET /whereabouts/<project>/<impression>` adds `"live": true|false|null`
-  (null = the project has no live.json).
-- `GET /runner-data/<runner>` cache entries and workflow entries each gain a
-  `"live": true|false|null` field (impression liveness for cache entries;
-  derived-workflow membership for workflow entries).
-- `POST /purge-runner-cache` gains a `superseded=1` scope: selects exactly
-  the cache entries whose impressions are explicitly superseded — the
-  classification that makes runner GC safe without per-entry confirmations.
-  Dry-run lists them. Explicit project/impression purges are unchanged, but
-  purge responses carry `"live": true` on entries whose impression is live —
-  a warning, not a block.
-- `GET /delete-workflow/<project>/<workflow>` response adds `"live": true`
-  when the workflow produced live impressions — a warning, not a block
-  (consistent with the no-gate delete model).
+**`POST /purge-runner-workflows`** — body `{"runner": <name>,
+"dry_run": bool}`. Scans the local mirrors
+`~/.Yuki/Workflows/<project>/<wf>` whose config `machine_id` equals the
+runner's id (covers ssh, native, and reana uniformly); for each workflow
+whose project's synced set explicitly excludes it
+(`liveness.workflow_live(project, wf) is False`), and which is not running,
+deletes the workspace via the per-backend `delete_workspace()` (#4
+semantics; mirror always kept). Live workflows, running workflows, and
+workflows without an explicitly-synced set (unknown) are skipped. Response:
+`{"purged": [{"project", "workflow"}], "skipped": [{"project", "workflow",
+"reason"}], "dry_run": bool}`; a per-workflow delete failure is a skip with
+reason, never an abort. `404` unknown runner, `400` non-ssh/native/reana
+backend.
 
-### CelebiChrono (celebi-cli)
+### CelebiChrono (celebi-cli) — the two commands
 
+- **`celebi-cli purge-stale-cache <runner> [--dry-run] [--yes]`** — calls
+  `POST /purge-runner-cache` with `superseded=1`; confirmation prompt unless
+  `--yes`; dry-run lists what would go. Prints the purged/skipped summary.
+- **`celebi-cli purge-stale-workflows <runner> [--dry-run] [--yes]`** —
+  calls `POST /purge-runner-workflows`; same prompt/dry-run pattern.
 - **`celebi-cli sync-live`** — computes the project's live + superseded sets
   (walk all tasks/algorithms: `impression` pointer + `impression_history`;
   transitive inputs via `dependencies` / `alias_to_impression`), PUTs them to
   DITE, prints a summary. Best-effort: network failure prints a warning and
-  exits 0 — a stale set is safe by the unknown-is-live rule.
-- **`celebi-cli live`** — `GET /live/<project>` and prints live impressions
-  (with per-runner workflow id / status where known) and live workflows,
-  plus the superseded count.
+  exits 0 — a stale set is safe by the unknown-is-live rule. Required
+  infrastructure for both purge commands.
 - **`impress_command`** (`celebi_cli/commands/communication.py`) triggers a
   best-effort `sync-live` after impress succeeds. (There is no unimpress
   command; superseded arises from re-impress and object deletion — the
   full-set computation covers both.)
+
+**Out of scope for this iteration** (kept as later work): `celebi-cli live`
+view command; `live` fields on `/whereabouts` and `/runner-data`; the
+`/delete-workflow` response live warning.
 
 ## Architecture
 
@@ -118,21 +131,27 @@ replace). Body:
 - **`Yuki/server/routes/liveness.py`** (new blueprint `liveness`, registered
   in `app.py`) — the `PUT /live-set/<project>` and `GET /live/<project>`
   routes.
-- **Enrichments**: `status.py` whereabouts adds `live` via
-  `liveness.impression_live`; `runner_inventory.py` adds `live` to cache and
-  workflow entries; `remote_data_ops.purge_runner_cache` gains a
-  `superseded=False` parameter that filters the walk to explicitly-superseded
-  impressions (using `liveness.impression_live(...) is False`), and the
-  purge route passes `superseded` through and annotates responses with
-  `live` flags.
+- **`Yuki/kernel/workflow_purge.py`** (new) — `purge_stale_workflows(
+  runner_id, dry_run)`: mirror scan (config `machine_id` == runner id) →
+  keep only `workflow_live(...) is False` and non-running workflows →
+  `VWorkflow.create(...).delete_workspace()` per workflow, collecting
+  purged/skipped with reasons.
+- **`remote_data_ops.purge_runner_cache`** gains a `superseded=False`
+  parameter that filters the cache walk to explicitly-superseded
+  impressions (using `liveness.impression_live(...) is False`); the
+  `/purge-runner-cache` route passes `superseded` through.
+- **`routes/workflow.py`** gains `POST /purge-runner-workflows` calling
+  `workflow_purge.purge_stale_workflows`.
 
 ### CelebiChrono
 
 - **`CelebiChrono/kernel/liveness.py`** (new) — `compute_live_sets(project)`
   returning `(live: list, superseded: list)`; pure project-graph logic, no
   network, usable by shell and cli.
-- **`celebi_cli/commands/liveness.py`** (new) — `sync-live` and `live`
-  commands, using the existing chern_communicator HTTP helpers.
+- **`celebi_cli/commands/liveness.py`** (new) — `sync-live`,
+  `purge-stale-cache`, and `purge-stale-workflows` commands, using the
+  existing chern_communicator HTTP helpers and the existing purge CLI
+  prompt/dry-run pattern.
 - **`communication.py`** — impress hook calls `sync-live` best-effort.
 
 ## Error handling & safety rules
@@ -150,33 +169,37 @@ replace). Body:
 ## Testing
 
 - **Yuki** (new `UnitTest/test_liveness.py` + updates to existing files):
-  - `save_live_set` validation (bad uuid → error listing it), derivation
-    from a tmp Storage with per-machine run configs, atomic write + load
-    round-trip;
+  - `save_live_set` validation (bad uuid → error listing it; uuid in both
+    lists → error), derivation from a tmp Storage with per-machine run
+    configs, atomic write + load round-trip;
   - `impression_live` / `workflow_live` true/false/None semantics;
   - route tests: PUT happy path, PUT invalid uuids 400 (nothing stored),
     PUT failure 500 (nothing stored), GET 200, GET 404;
-  - whereabouts `live` field (true / false / null);
-  - runner-data entries carry `live`;
-  - purge `superseded=1` selects only superseded entries (dry-run lists
-    them), and an explicit purge of a live entry carries `"live": true`.
+  - `purge_runner_cache` with `superseded=True` selects only superseded
+    entries (dry-run lists them) and leaves live/unknown entries alone;
+  - `purge_stale_workflows`: mirror scan filters by runner id; live,
+    running, and unknown workflows are skipped with reasons; per-backend
+    `delete_workspace` dispatched for the non-live ones; a delete failure
+    becomes a skip; dry-run deletes nothing; route tests (200/404/400).
 - **CelebiChrono**: `compute_live_sets` on a tmp project (task with current
   impression + history + inputs, algorithm, detached impression);
   `sync-live` against a fake DITE endpoint (existing mock-HTTP patterns);
-  impress hook fires the sync (mocked) and never raises.
+  `purge-stale-cache` / `purge-stale-workflows` send the right payloads to
+  a fake endpoint and honor `--dry-run`/`--yes`; impress hook fires the
+  sync (mocked) and never raises.
 
 ## Files touched
 
 | Repo | File | Change |
 |---|---|---|
 | Yuki | `Yuki/kernel/liveness.py` | new — registry owner |
-| Yuki | `Yuki/server/routes/liveness.py` | new — blueprint |
+| Yuki | `Yuki/kernel/workflow_purge.py` | new — stale-workflow purge |
+| Yuki | `Yuki/server/routes/liveness.py` | new — blueprint (PUT/GET) |
 | Yuki | `Yuki/server/app.py` | register blueprint |
-| Yuki | `Yuki/server/routes/status.py` | whereabouts `live` field |
-| Yuki | `Yuki/kernel/runner_inventory.py` | `live` fields |
 | Yuki | `Yuki/kernel/remote_data_ops.py` | purge `superseded` scope |
-| Yuki | `Yuki/server/routes/remote_data.py` | pass `superseded`, annotate |
+| Yuki | `Yuki/server/routes/remote_data.py` | pass `superseded` through |
+| Yuki | `Yuki/server/routes/workflow.py` | `POST /purge-runner-workflows` |
 | Yuki | `UnitTest/test_liveness.py` + updates | tests |
 | CelebiChrono | `kernel/liveness.py` | new — `compute_live_sets` |
-| CelebiChrono | `celebi_cli/commands/liveness.py` | new — `sync-live`, `live` |
+| CelebiChrono | `celebi_cli/commands/liveness.py` | new — `sync-live`, `purge-stale-cache`, `purge-stale-workflows` |
 | CelebiChrono | `celebi_cli/commands/communication.py` | impress hook |
