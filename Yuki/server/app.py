@@ -11,7 +11,7 @@ from flask import Flask, render_template, redirect, url_for, request
 from .tasks import celeryapp
 from .routes import (
     upload, execution, status, runner, workflow,
-    transfer, impression, booking, remote_data,
+    transfer, impression, booking, remote_data, liveness,
 )
 
 
@@ -50,6 +50,7 @@ def create_app():
     flask_app.register_blueprint(impression.bp)
     flask_app.register_blueprint(booking.bp)
     flask_app.register_blueprint(remote_data.bp)
+    flask_app.register_blueprint(liveness.bp)
 
     # Main index route
     @flask_app.route('/', methods=['GET', 'POST'])

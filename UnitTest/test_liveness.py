@@ -78,3 +78,57 @@ def test_load_live_set_missing_or_corrupt(monkeypatch, tmp_path):
     with open(live_dir / "proj.json", "w", encoding="utf-8") as f:
         f.write("{not json")
     assert liveness.load_live_set("proj") is None
+
+
+def _app():
+    from Yuki.server.routes import liveness as liveness_routes
+    from flask import Flask
+    app = Flask(__name__)
+    app.register_blueprint(liveness_routes.bp)
+    return app
+
+
+def test_put_live_set_stores_and_reports(monkeypatch, tmp_path):
+    """/live-set stores the set and returns the summary."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    r = _app().test_client().put(
+        "/live-set/proj",
+        json={"live": ["a" * 32], "superseded": ["b" * 32]})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["stored"] is True
+    assert body["live"] == 1
+    assert body["superseded"] == 1
+    assert os.path.isfile(tmp_path / "Live" / "proj.json")
+
+
+def test_put_live_set_invalid_400_nothing_stored(monkeypatch, tmp_path):
+    """Invalid input returns 400 and stores nothing."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    r = _app().test_client().put(
+        "/live-set/proj", json={"live": ["nope"], "superseded": []})
+    assert r.status_code == 400
+    assert "nope" in r.get_json()["error"]
+    assert not os.path.exists(tmp_path / "Live" / "proj.json")
+
+
+def test_get_live_returns_stored_set(monkeypatch, tmp_path):
+    """/live returns the stored set with derived workflows."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    _write_run_config(tmp_path, "proj", "a" * 32, "r1", "wf-1")
+    _app().test_client().put(
+        "/live-set/proj",
+        json={"live": ["a" * 32], "superseded": []})
+    r = _app().test_client().get("/live/proj")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["live_impressions"] == ["a" * 32]
+    assert body["live_workflows"] == ["wf-1"]
+    assert body["superseded"] == []
+
+
+def test_get_live_unknown_project_404(monkeypatch, tmp_path):
+    """/live without a synced set returns 404."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    r = _app().test_client().get("/live/proj")
+    assert r.status_code == 404
