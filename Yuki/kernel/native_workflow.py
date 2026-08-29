@@ -386,6 +386,11 @@ class NativeWorkflow(VWorkflow):
                 continue
             job.set_status(FAILED, "Native workflow killed by user")
 
+    def delete_workspace(self):
+        """Delete the local execution workspace."""
+        self.logger(f"[LOCAL] Deleting local workspace: {self.local_exec_path}")
+        shutil.rmtree(self.local_exec_path, ignore_errors=True)
+
     # pylint: disable=too-many-locals,too-many-arguments,too-many-positional-arguments
     def _collect_artifacts(self, impression, artifact_dir, marker_name, label,
                            *, refresh=False):

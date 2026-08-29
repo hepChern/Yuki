@@ -64,3 +64,29 @@ def test_ssh_delete_workspace_failure_raises():
 
     with pytest.raises(RuntimeError):
         workflow.delete_workspace()
+
+
+def test_native_delete_workspace_removes_local_dir(tmp_path):
+    """The local execution workspace is removed."""
+    from Yuki.kernel.native_workflow import NativeWorkflow
+    workflow = NativeWorkflow.__new__(NativeWorkflow)
+    workflow.local_exec_path = str(tmp_path / "wf1")
+    workflow.logger = lambda msg: None
+    os.makedirs(workflow.local_exec_path)
+    with open(os.path.join(workflow.local_exec_path, "a.done"), "w",
+              encoding="utf-8") as f:
+        f.write("x")
+
+    workflow.delete_workspace()
+
+    assert not os.path.exists(workflow.local_exec_path)
+
+
+def test_native_delete_workspace_missing_dir_no_raise(tmp_path):
+    """Deleting an already-gone workspace does not raise."""
+    from Yuki.kernel.native_workflow import NativeWorkflow
+    workflow = NativeWorkflow.__new__(NativeWorkflow)
+    workflow.local_exec_path = str(tmp_path / "gone")
+    workflow.logger = lambda msg: None
+
+    workflow.delete_workspace()  # no raise
