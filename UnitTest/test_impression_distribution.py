@@ -171,3 +171,152 @@ def test_update_distribution_migrates_legacy_flat_entries(tmp_path):
     assert dist["locations"]["runner:pkufarm"]["cache"]["origin"] == \
         "transferred"
     assert dist["locations"]["runner:pkufarm"]["cache"]["files"] == 2
+
+
+def _ssh_storage(tmp_path):
+    """An ImpressionStorage whose runner is an ssh runner."""
+    storage = _storage(tmp_path)
+    storage.backend_types = {"runner-1": "ssh"}
+    storage._get_runner_contexts = lambda: []
+    storage._remote_hosted_files = lambda kind: ([], None)
+    return storage
+
+
+def test_update_distribution_refresh_cache_ssh_records_cached_entry(tmp_path):
+    """refresh_cache live-checks the ssh cache and records a verified entry."""
+    storage = _ssh_storage(tmp_path)
+    with mock.patch("Yuki.kernel.remote_data_ops.list_cache_files",
+                    create=True,
+                    return_value=[{"name": "a.root", "size": 10},
+                                  {"name": "b.root", "size": 20}]) as lister:
+        storage.update_distribution(refresh_cache=True,
+                                    cache_runner_id="runner-1")
+    lister.assert_called_once_with("runner-1", "proj-1", "imp7")
+
+    dist = _read_dist(storage)
+    cache = dist["locations"]["runner:cern"]["cache"]
+    assert cache["origin"] == "cached"
+    assert cache["verified"] is True
+    assert cache["files"] == 2
+    assert cache["bytes"] == 30
+    assert "updated" in cache
+
+
+def test_update_distribution_refresh_cache_skips_registered(tmp_path):
+    """Registered (remote.json) impressions never get the live ssh check."""
+    storage = _ssh_storage(tmp_path)
+    marker = tmp_path / "job" / "remote.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({"host_runner_id": "runner-1"}))
+    storage._remote_hosted_files = lambda kind: (
+        [{"name": "dataset.root", "size": 99, "in_runner": True}], None)
+
+    with mock.patch("Yuki.kernel.remote_data_ops.list_cache_files",
+                    create=True) as lister:
+        storage.update_distribution(refresh_cache=True,
+                                    cache_runner_id="runner-1")
+    lister.assert_not_called()
+
+    dist = _read_dist(storage)
+    assert dist["locations"]["runner:cern"]["cache"]["origin"] == \
+        "registered"
+
+
+def test_update_distribution_refresh_cache_preserves_transferred(tmp_path):
+    """A transferred cache entry survives a refresh_cache live check."""
+    storage = _ssh_storage(tmp_path)
+    _write_dist(storage, {
+        "produced_on": None,
+        "locations": {
+            "runner:cern": {"cache": {"origin": "transferred",
+                                      "files": 2, "bytes": 20,
+                                      "updated": "t0"}},
+        },
+    })
+    with mock.patch("Yuki.kernel.remote_data_ops.list_cache_files",
+                    create=True,
+                    return_value=[{"name": "a.root", "size": 10}]):
+        storage.update_distribution(refresh_cache=True,
+                                    cache_runner_id="runner-1")
+
+    dist = _read_dist(storage)
+    cache = dist["locations"]["runner:cern"]["cache"]
+    assert cache["origin"] == "transferred"
+    assert cache["files"] == 2
+    assert cache["updated"] == "t0"
+
+
+def test_update_distribution_refresh_cache_drops_stale_entry(tmp_path):
+    """A cached entry pointing at a now-empty cache dir is removed."""
+    storage = _ssh_storage(tmp_path)
+    _write_dist(storage, {
+        "produced_on": None,
+        "locations": {
+            "runner:cern": {"cache": {"origin": "cached", "files": 2,
+                                      "bytes": 20, "updated": "t0"}},
+        },
+    })
+    with mock.patch("Yuki.kernel.remote_data_ops.list_cache_files",
+                    create=True, return_value=[]):
+        storage.update_distribution(refresh_cache=True,
+                                    cache_runner_id="runner-1")
+
+    dist = _read_dist(storage)
+    assert "cache" not in dist["locations"].get("runner:cern", {})
+
+
+def test_update_distribution_refresh_cache_ssh_failure_is_best_effort(
+        tmp_path):
+    """An unreachable ssh cache never breaks the refresh."""
+    storage = _ssh_storage(tmp_path)
+    with mock.patch("Yuki.kernel.remote_data_ops.list_cache_files",
+                    create=True, side_effect=OSError("boom")):
+        dist = storage.update_distribution(refresh_cache=True,
+                                           cache_runner_id="runner-1")
+
+    assert not dist["locations"]
+
+
+def _reana_storage(tmp_path):
+    """An ImpressionStorage whose runner is a reana runner."""
+    storage = _storage(tmp_path)
+    storage.backend_types = {"runner-1": "reana"}
+    storage._runner_files = lambda _j, _w, _k, _d: ([], None)
+    storage._remote_hosted_files = lambda kind: ([], None)
+    return storage
+
+
+def test_update_distribution_refresh_cache_reana_assumed_entry(tmp_path):
+    """A finished job with cache_on_runner gets an assumed cache entry."""
+    storage = _reana_storage(tmp_path)
+    job = mock.Mock()
+    job.workflow_id.return_value = "wf-1"
+    job.cache_on_runner.return_value = True
+    job.status.return_value = "coda"
+    wf = mock.Mock()
+    storage._get_runner_contexts = lambda: [("cern", job, wf)]
+
+    storage.update_distribution(refresh_cache=True)
+
+    dist = _read_dist(storage)
+    cache = dist["locations"]["runner:cern"]["cache"]
+    assert cache["origin"] == "cached"
+    assert cache["verified"] is False
+    assert cache["files"] is None
+    assert cache["bytes"] is None
+
+
+def test_update_distribution_refresh_cache_reana_without_flag(tmp_path):
+    """Without cache_on_runner a reana job records no cache entry."""
+    storage = _reana_storage(tmp_path)
+    job = mock.Mock()
+    job.workflow_id.return_value = "wf-1"
+    job.cache_on_runner.return_value = False
+    job.status.return_value = "coda"
+    wf = mock.Mock()
+    storage._get_runner_contexts = lambda: [("cern", job, wf)]
+
+    storage.update_distribution(refresh_cache=True)
+
+    dist = _read_dist(storage)
+    assert "cache" not in dist["locations"].get("runner:cern", {})

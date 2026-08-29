@@ -260,6 +260,14 @@ def list_managed_files(runner_id, managed_path):
                 for rel, _rpath, size in ssh.walk_files(managed_path)]
 
 
+def list_cache_files(runner_id, project_uuid, impression):
+    """List files in an ssh runner's impressions cache for an impression."""
+    settings = _ssh_settings(runner_id)
+    cache_dir = (f"{settings.get('remote_workdir', '/tmp/yuki-workflows')}"
+                 f"/impressions/{project_uuid}/{impression}")
+    return list_managed_files(runner_id, cache_dir)
+
+
 def _runner_name(runner_id, yuki_dir=None):
     """Runner name for a runner id (fallback: the id itself)."""
     from Yuki.kernel import runner_config

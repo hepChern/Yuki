@@ -197,9 +197,25 @@ def impression(project_uuid, impression_name):
     return config.get_job_path(project_uuid, impression_name)
 
 
+def _refresh_distribution(project_uuid, impression_name):
+    """Best-effort refresh of the impression's data-status registry.
+
+    The registry is maintained opportunistically (workflow completion,
+    transfers), so a read refreshes the cheap parts — produced workflow
+    entries and the yuki entry — without the live cache checks. Failures
+    are swallowed: whereabouts must never 500 over a stale registry.
+    """
+    try:
+        from Yuki.kernel.impression_storage import ImpressionStorage
+        ImpressionStorage(project_uuid, impression_name).update_distribution()
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
+
+
 @bp.route("/whereabouts/<project_uuid>/<impression_name>", methods=['GET'])
 def whereabouts(project_uuid, impression_name):
     """Report where an impression's data lives (runner cache / yuki)."""
+    _refresh_distribution(project_uuid, impression_name)
     job_path = config.get_job_path(project_uuid, impression_name)
     dist_path = os.path.join(job_path, "distribution.json")
     locations = {}

@@ -5,6 +5,8 @@ import os
 from celery import Celery
 from CelebiChrono.utils import metadata
 from ..kernel import remote_data_ops, result_transfer
+from ..kernel.impression_storage import ImpressionStorage
+from ..kernel.status_constants import CODA, FAILED, translate_to_musical
 from ..kernel.vjob import VJob
 from ..kernel.vworkflow import VWorkflow
 
@@ -99,7 +101,26 @@ def task_update_workflow_status(project_uuid, workflow_id):
     print("# >>> task_update_workflow_status")
     workflow = VWorkflow.create(project_uuid, [], workflow_id)
     workflow.update_workflow_status()
+    _refresh_distributions(project_uuid, workflow)
     print("# <<< task_update_workflow_status")
+
+
+def _refresh_distributions(project_uuid, workflow):
+    """Refresh the data-status registry of every job once the workflow ends.
+
+    Runs only when the workflow reached a terminal state, and is strictly
+    best-effort: a failing refresh must never fail the status update.
+    """
+    if translate_to_musical(workflow.status()) not in (CODA, FAILED):
+        return
+    for job in workflow.jobs:
+        if job.job_type() == "algorithm":
+            continue
+        try:
+            ImpressionStorage(project_uuid, job.uuid).update_distribution(
+                refresh_cache=True, cache_runner_id=workflow.machine_id)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
 
 
 @celeryapp.task

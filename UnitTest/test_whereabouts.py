@@ -1,4 +1,5 @@
 """Tests for the /whereabouts route (data-location registry)."""
+# pylint: disable=protected-access
 import json
 import os
 from unittest import mock
@@ -47,6 +48,12 @@ def _write_remote_marker(tmp_path, project, impression, host_runner):
     marker.write_variable("remote_path", "/remote/imp")
 
 
+def _no_refresh():
+    """Context manager replacing the distribution refresh with a no-op."""
+    return mock.patch.object(status_routes, "_refresh_distribution",
+                             create=True)
+
+
 def test_whereabouts_returns_distribution(monkeypatch, tmp_path):
     """The route reports yuki, per-runner states, and registration."""
     config_obj = _temp_config(monkeypatch, tmp_path)
@@ -61,8 +68,9 @@ def test_whereabouts_returns_distribution(monkeypatch, tmp_path):
     })
     _write_remote_marker(tmp_path, "proj", "imp1", "r1")
 
-    r = _app(status_routes.bp).test_client().get(
-        "/whereabouts/proj/imp1")
+    with _no_refresh():
+        r = _app(status_routes.bp).test_client().get(
+            "/whereabouts/proj/imp1")
     body = r.get_json()
     assert body["yuki"]["origin"] == "collected"
     assert body["runners"]["pkufarm212"]["cache"]["files"] == 3
@@ -76,8 +84,9 @@ def test_whereabouts_no_distribution(monkeypatch, tmp_path):
     config_obj = _temp_config(monkeypatch, tmp_path)
     _write_runners(config_obj, {"pkufarm212": "r1"})
 
-    r = _app(status_routes.bp).test_client().get(
-        "/whereabouts/proj/imp1")
+    with _no_refresh():
+        r = _app(status_routes.bp).test_client().get(
+            "/whereabouts/proj/imp1")
     body = r.get_json()
     assert body["yuki"] is None
     assert body["runners"] == {}
@@ -94,7 +103,27 @@ def test_whereabouts_corrupt_distribution(monkeypatch, tmp_path):
     with open(imp_dir / "distribution.json", "w", encoding="utf-8") as f:
         f.write("{not valid json")
 
-    r = _app(status_routes.bp).test_client().get(
-        "/whereabouts/proj/imp1")
+    with _no_refresh():
+        r = _app(status_routes.bp).test_client().get(
+            "/whereabouts/proj/imp1")
     assert r.status_code == 200
     assert r.get_json()["yuki"] is None
+
+
+def test_whereabouts_refreshes_distribution_before_reading(monkeypatch,
+                                                           tmp_path):
+    """The route refreshes the registry on every read."""
+    config_obj = _temp_config(monkeypatch, tmp_path)
+    _write_runners(config_obj, {"pkufarm212": "r1"})
+
+    with _no_refresh() as refresh:
+        _app(status_routes.bp).test_client().get(
+            "/whereabouts/proj/imp1")
+    refresh.assert_called_once_with("proj", "imp1")
+
+
+def test_refresh_distribution_helper_swallows_failures():
+    """A broken refresh never raises out of the helper."""
+    with mock.patch("Yuki.kernel.impression_storage.ImpressionStorage",
+                    side_effect=OSError("boom")):
+        status_routes._refresh_distribution("proj", "imp1")  # no raise

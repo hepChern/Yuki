@@ -8,6 +8,7 @@ import os
 import json
 from CelebiChrono.utils.metadata import ConfigFile
 from . import file_types
+from . import remote_data_ops
 from .vjob import VJob
 from .vworkflow import VWorkflow
 from .status_constants import CODA, FAILED, DISSONANCE, IN_MOVEMENT
@@ -27,6 +28,7 @@ class ImpressionStorage:
         config_file = config.get_config_file()
         self.runners = config_file.read_variable("runners", [])
         self.runners_id = config_file.read_variable("runners_id", {})
+        self.backend_types = config_file.read_variable("backend_types", {})
 
         # Metadata access
         self.job_config = ConfigFile(config.get_job_config_path(project_uuid, impression))
@@ -184,7 +186,6 @@ class ImpressionStorage:
 
         note = None
         if runner_files is None:
-            from . import remote_data_ops
             try:
                 runner_files = remote_data_ops.list_managed_files(
                     host_runner, managed_path)
@@ -341,7 +342,8 @@ class ImpressionStorage:
             return f"{name} {workflow.uuid}"
         return "UNDEFINED"
 
-    def update_distribution(self, overrides=None):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    def update_distribution(self, overrides=None,  # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-arguments,too-many-positional-arguments
+                            refresh_cache=False, cache_runner_id=None):
         """Refresh and persist the impression's distribution.json registry.
 
         The registry records, at impression granularity, where the data
@@ -352,12 +354,18 @@ class ImpressionStorage:
           - 'workflow': data that only exists in the workflow's storage
             (origin 'produced'), recomputed on every refresh
           - 'cache': data in the runner's managed impressions cache
-            (origin 'transferred' or 'registered')
+            (origin 'transferred', 'registered', or 'cached')
         Transferred entries are written by the transfer task; they are
         preserved here and block recomputation of that state.
         overrides: {location: state_entry}; for 'yuki' it replaces the
         yuki entry, for a runner it replaces the 'cache' state (used by
         the transfer task to record the destination).
+        refresh_cache: additionally reconcile the cache state with the
+        runners: ssh caches are live-checked (verified entries), reana
+        jobs that requested caching and finished record an assumed
+        entry (EOS is not inspectable from Yuki).
+        cache_runner_id: the runner whose ssh cache is live-checked
+        (the ssh check only runs when this is provided).
         """
         dist_path = os.path.join(self.job_path, "distribution.json")
         existing = {}
@@ -405,6 +413,13 @@ class ImpressionStorage:
             if files:
                 locations.setdefault(f"runner:{name}", {})["workflow"] = \
                     make_entry("produced", files)
+
+            if refresh_cache:
+                self._record_assumed_reana_cache(locations, name, job,
+                                                 machine_id)
+
+        if refresh_cache and cache_runner_id:
+            self._refresh_ssh_cache(locations, cache_runner_id)
 
         # yuki: union of local stageout dirs across machines
         if "yuki" not in locations:
@@ -461,3 +476,65 @@ class ImpressionStorage:
             fh.write(new_content)
         os.replace(tmp_path, dist_path)
         return dist
+
+    @staticmethod
+    def _cache_updated_entry(origin, files, verified):
+        """Build a cache entry with a UTC timestamp."""
+        entry = {
+            "origin": origin,
+            "verified": verified,
+            "files": len(files) if files is not None else None,
+            "bytes": sum(f.get("size", 0) for f in files)
+            if files is not None else None,
+            "updated": datetime.datetime.now(
+                datetime.timezone.utc).isoformat(),
+        }
+        return entry
+
+    def _record_assumed_reana_cache(self, locations, name, job, machine_id):
+        """Record an unverifiable cache entry for a reana job.
+
+        The reana cache lives on EOS, which Yuki cannot inspect; a job
+        that requested caching and finished is assumed to have its
+        stageout cached by the workflow's own cache rule.
+        """
+        if self.backend_types.get(machine_id, "reana") != "reana":
+            return
+        if not job.cache_on_runner():
+            return
+        if job.status(musical=True) != CODA:
+            return
+        block = locations.setdefault(f"runner:{name}", {})
+        if block.get("cache", {}).get("origin") == "transferred":
+            return
+        block["cache"] = self._cache_updated_entry("cached", None, False)
+
+    def _refresh_ssh_cache(self, locations, cache_runner_id):
+        """Live-check an ssh runner's impressions cache for this impression.
+
+        Files present -> a verified 'cached' entry; empty/missing -> any
+        stale 'cached' entry is dropped. Transferred entries and
+        registered (remote.json) impressions are never touched.
+        """
+        if self.backend_types.get(cache_runner_id, "reana") != "ssh":
+            return
+        if os.path.exists(os.path.join(self.job_path, "remote.json")):
+            return
+        name = next((n for n, rid in self.runners_id.items()
+                     if rid == cache_runner_id), None)
+        if not name:
+            return
+        try:
+            files = remote_data_ops.list_cache_files(
+                cache_runner_id, self.project_uuid, self.impression)
+        except Exception:  # pylint: disable=broad-exception-caught
+            return  # runner unreachable: keep the current registry
+        block = locations.setdefault(f"runner:{name}", {})
+        existing = block.get("cache", {})
+        if existing.get("origin") == "transferred":
+            return
+        if not files:
+            if existing.get("origin") == "cached":
+                del block["cache"]
+            return
+        block["cache"] = self._cache_updated_entry("cached", files, True)
