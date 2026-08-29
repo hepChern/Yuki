@@ -486,7 +486,7 @@ def test_purge_runner_cache_route(monkeypatch, tmp_path):
     assert r.get_json() == summary
     m_purge.assert_called_once_with("r-uuid", project="proj",
                                     impression=None, dry_run=True,
-                                    yuki_dir=str(tmp_path))
+                                    superseded=False, yuki_dir=str(tmp_path))
 
 
 def test_purge_runner_cache_route_unknown_runner(monkeypatch, tmp_path):
@@ -535,7 +535,7 @@ def test_purge_runner_cache_route_form_body(monkeypatch, tmp_path):
     assert r.status_code == 200
     m_purge.assert_called_once_with("r-uuid", project=None,
                                     impression="imp-a", dry_run=True,
-                                    yuki_dir=str(tmp_path))
+                                    superseded=False, yuki_dir=str(tmp_path))
 
 
 def test_cache_results_starts_job(monkeypatch, tmp_path):

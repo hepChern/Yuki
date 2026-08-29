@@ -1,7 +1,6 @@
 """Tests for the live-set registry (kernel/liveness.py)."""
 import json
 import os
-from unittest import mock
 
 from Yuki.kernel import liveness
 
