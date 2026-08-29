@@ -12,6 +12,7 @@ import tempfile
 
 from CelebiChrono.utils.metadata import ConfigFile
 from Yuki.kernel.status_constants import CODA
+from . import liveness
 
 REMOTE_MD5_SCRIPT = r'''
 import hashlib, json, os, sys
@@ -317,18 +318,16 @@ def remove_remote_progress_file(runner_id, job_id):
 
 
 def purge_runner_cache(runner_id, project=None, impression=None,  # pylint: disable=too-many-locals,too-many-branches,too-many-arguments,too-many-positional-arguments
-                       dry_run=False, echo=None, yuki_dir=None):
+                       dry_run=False, echo=None, yuki_dir=None,
+                       superseded=False):
     """Evict cache entries from an ssh runner's impressions cache.
 
-    Deletes matching ``<remote_workdir>/impressions/<project>/<impression>``
-    directories (chmod'd writable first; cached data is stored read-only)
-    and clears the local bookkeeping that pointed at them: the
-    ``remote.json``/``status.json`` registration markers and the runner's
-    cache entry in ``distribution.json``.
-
-    Impressions whose registration is still running are skipped.
-
-    Returns {"purged": [...], "skipped": [...], "dry_run": bool}.
+    With superseded=True, only cache entries whose impressions are
+    explicitly marked superseded in the project's live set are selected
+    (project/impression filters must not be set). Deletes matching
+    ``<remote_workdir>/impressions/<project>/<impression>`` directories
+    (chmod'd writable first; cached data is stored read-only) and clears
+    the local bookkeeping that pointed at them.
     """
     echo = echo or print
     yuki_dir = yuki_dir or _yuki_dir()
@@ -347,6 +346,11 @@ def purge_runner_cache(runner_id, project=None, impression=None,  # pylint: disa
                     continue
                 remote_dir = f"{proj_dir}/{imp}"
                 imp_local = os.path.join(yuki_dir, "Storage", proj, imp)
+                if superseded:
+                    live = liveness.impression_live(
+                        proj, imp, yuki_dir)
+                    if live is not False:
+                        continue
                 status_file = os.path.join(imp_local, "status.json")
                 if os.path.isfile(status_file):
                     status = ConfigFile(status_file).read_variable("status", "")

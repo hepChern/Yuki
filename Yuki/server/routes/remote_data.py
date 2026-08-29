@@ -110,6 +110,12 @@ def purge_runner_cache_route():
         return jsonify({"error": "purge-ssh-runner-cache requires an ssh "
                                  "runner"}), 400
 
+    superseded = str(data.get("superseded", "")).lower() in (
+        "1", "true", "yes")
+    if superseded and (data.get("project") or data.get("impression")):
+        return jsonify({"error": "superseded scope cannot be combined "
+                                 "with project/impression filters"}), 400
+
     dry_run = str(data.get("dry_run", "")).lower() in ("1", "true", "yes")
     try:
         summary = remote_data_ops.purge_runner_cache(
@@ -117,6 +123,7 @@ def purge_runner_cache_route():
             project=data.get("project") or None,
             impression=data.get("impression") or None,
             dry_run=dry_run,
+            superseded=superseded,
             yuki_dir=remote_data_ops._yuki_dir())  # pylint: disable=protected-access
     except Exception as e:  # pylint: disable=broad-exception-caught
         return jsonify({"error": str(e)}), 500

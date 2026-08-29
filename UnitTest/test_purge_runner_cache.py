@@ -265,3 +265,81 @@ def test_cli_confirmation_aborts(monkeypatch, tmp_path):
                          ["purge-ssh-runner-cache", "farm"], user_input="n\n")
     assert result.exit_code == 1
     assert not m_purge.called
+
+
+def test_purge_runner_cache_superseded_scope(tmp_path):
+    """superseded=True selects only explicitly-superseded impressions."""
+    from Yuki.kernel import liveness
+    _write_runner_config(tmp_path)
+    live_a, old_b = "a" * 32, "b" * 32
+    liveness.save_live_set("proj1", [live_a], [old_b],
+                           yuki_dir=str(tmp_path))
+    fake = _FakeSsh(tree={"remote": {"work": {"impressions": {
+        "proj1": {live_a: {}, old_b: {}},
+    }}}})
+    with mock.patch("Yuki.kernel.remote_data_ops._ssh_connection",
+                    return_value=fake):
+        summary = purge_runner_cache("r1", superseded=True, dry_run=True,
+                                     yuki_dir=str(tmp_path))
+
+    assert {e["impression"] for e in summary["purged"]} == {old_b}
+    assert summary["dry_run"] is True
+    assert not any("rm -rf" in c for c in fake.exec_calls)
+
+
+def test_purge_superseded_never_touches_unknown(tmp_path):
+    """Impressions without a synced set are skipped (unknown is live)."""
+    _write_runner_config(tmp_path)
+    live_a = "a" * 32
+    fake = _FakeSsh(tree={"remote": {"work": {"impressions": {
+        "proj1": {live_a: {}},
+    }}}})
+    with mock.patch("Yuki.kernel.remote_data_ops._ssh_connection",
+                    return_value=fake):
+        summary = purge_runner_cache("r1", superseded=True, dry_run=True,
+                                     yuki_dir=str(tmp_path))
+    assert summary["purged"] == []
+
+
+def _purge_route_app(monkeypatch, tmp_path):
+    """A Flask app with the remote_data blueprint and a temp config."""
+    from Yuki.server.routes import remote_data as remote_data_routes
+    from CelebiChrono.utils.metadata import ConfigFile
+    from flask import Flask
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    app = Flask(__name__)
+    app.register_blueprint(remote_data_routes.bp)
+    config_obj = mock.MagicMock()
+    config_obj.config_path = str(tmp_path / "config.json")
+    config_obj.get_config_file.return_value = ConfigFile(
+        config_obj.config_path)
+    with open(config_obj.config_path, "w", encoding="utf-8") as f:
+        json.dump({"runners_id": {"farm": "r1"},
+                   "backend_types": {"r1": "ssh"}}, f)
+    monkeypatch.setattr(remote_data_routes, "config", config_obj)
+    return app
+
+
+def test_purge_route_superseded_with_filters_400(monkeypatch, tmp_path):
+    """superseded combined with project/impression filters is rejected."""
+    r = _purge_route_app(monkeypatch, tmp_path).test_client().post(
+        "/purge-runner-cache",
+        json={"runner": "farm", "superseded": True, "project": "p1"})
+    assert r.status_code == 400
+    assert "cannot be combined" in r.get_json()["error"]
+
+
+def test_purge_route_superseded_passes_through(monkeypatch, tmp_path):
+    """The route forwards superseded and dry_run to the kernel purge."""
+    from Yuki.server.routes import remote_data as remote_data_routes
+    app = _purge_route_app(monkeypatch, tmp_path)
+    with mock.patch.object(remote_data_routes.remote_data_ops,
+                           "purge_runner_cache",
+                           return_value={"purged": [], "skipped": [],
+                                         "dry_run": True}) as purge:
+        r = app.test_client().post(
+            "/purge-runner-cache",
+            json={"runner": "farm", "superseded": True, "dry_run": True})
+    assert r.status_code == 200
+    assert purge.call_args[1]["superseded"] is True
+    assert purge.call_args[1]["dry_run"] is True
