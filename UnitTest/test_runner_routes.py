@@ -529,3 +529,74 @@ def test_runner_ssh_config_without_environment_param(monkeypatch):
     r = c.get("/runner-ssh-config/cluster")
     assert r.status_code == 200
     assert "conda_env" not in r.get_json()
+
+
+def _write_runner_config(config_obj, variables):
+    with open(config_obj.config_path, "w", encoding="utf-8") as f:
+        json.dump(variables, f)
+
+
+def test_runner_data_returns_inventory(monkeypatch):
+    """/runner-data serves the inventory for an ssh runner."""
+    _temp_config(monkeypatch)
+    _write_runner_config(runner_routes.config, {
+        "runners_id": {"pkufarm": "r1"},
+        "backend_types": {"r1": "ssh"},
+    })
+    inventory = {
+        "cache": {"total_files": 1, "total_bytes": 10, "entries": [
+            {"project": "p", "impression": "i", "files": 1,
+             "bytes": 10, "known": "registered"}]},
+        "workflows": {"total_files": 0, "total_bytes": 0, "entries": []},
+    }
+    with mock.patch.object(runner_routes.runner_inventory,
+                           "inventory_runner",
+                           return_value=inventory) as inv:
+        r = _app(runner_routes.bp).test_client().get(
+            "/runner-data/pkufarm")
+
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["runner"] == "pkufarm"
+    assert body["backend_type"] == "ssh"
+    assert body["cache"]["entries"][0]["known"] == "registered"
+    inv.assert_called_once_with("r1", "ssh")
+
+
+def test_runner_data_unknown_runner_404(monkeypatch):
+    """Unknown runners get a 404."""
+    _temp_config(monkeypatch)
+    _write_runner_config(runner_routes.config, {
+        "runners_id": {"pkufarm": "r1"},
+        "backend_types": {"r1": "ssh"},
+    })
+    r = _app(runner_routes.bp).test_client().get("/runner-data/nope")
+    assert r.status_code == 404
+
+
+def test_runner_data_reana_backend_400(monkeypatch):
+    """Reana runners have no listable data and get a 400."""
+    _temp_config(monkeypatch)
+    _write_runner_config(runner_routes.config, {
+        "runners_id": {"cern": "r2"},
+        "backend_types": {"r2": "reana"},
+    })
+    r = _app(runner_routes.bp).test_client().get("/runner-data/cern")
+    assert r.status_code == 400
+    assert "error" in r.get_json()
+
+
+def test_runner_data_inventory_failure_500(monkeypatch):
+    """An inventory failure surfaces as a 500 with the error."""
+    _temp_config(monkeypatch)
+    _write_runner_config(runner_routes.config, {
+        "runners_id": {"pkufarm": "r1"},
+        "backend_types": {"r1": "ssh"},
+    })
+    with mock.patch.object(runner_routes.runner_inventory,
+                           "inventory_runner",
+                           side_effect=OSError("down")):
+        r = _app(runner_routes.bp).test_client().get(
+            "/runner-data/pkufarm")
+    assert r.status_code == 500
+    assert "down" in r.get_json()["error"]

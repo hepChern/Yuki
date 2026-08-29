@@ -5,6 +5,7 @@ import os
 from flask import Blueprint, request, jsonify
 from CelebiChrono.utils import csys
 from ...kernel import runner_config
+from ...kernel import runner_inventory
 from ...kernel.ssh_workflow import (
     environment_needs_conda, resolve_conda_environment)
 from .. import runner_probe
@@ -499,3 +500,25 @@ def runner_envs(runner):
         result = {"envs": [],
                   "error": f"backend '{backend_type}' has no conda environments"}
     return jsonify(result)
+
+
+@bp.route("/runner-data/<runner>", methods=['GET'])
+def runner_data(runner):
+    """Return the full data inventory of a runner (cache + workflows)."""
+    config_file = config.get_config_file()
+    runners_id = config_file.read_variable("runners_id", {})
+    if runner not in runners_id:
+        return jsonify({"error": f"runner '{runner}' not found"}), 404
+    runner_id = runners_id[runner]
+    backend_types = config_file.read_variable("backend_types", {})
+    backend_type = backend_types.get(runner_id, "reana")
+    if backend_type not in ("ssh", "native"):
+        return jsonify({"error": f"runner '{runner}' is a {backend_type} "
+                                 "runner — no listable data"}), 400
+    try:
+        inventory = runner_inventory.inventory_runner(
+            runner_id, backend_type)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"runner": runner,
+                    "backend_type": backend_type, **inventory})
