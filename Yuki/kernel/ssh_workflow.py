@@ -662,6 +662,18 @@ echo $? > yuki.exit
                 continue
             job.set_status(FAILED, "SSH workflow killed by user")
 
+    def delete_workspace(self):
+        """Delete the remote workflow workspace on the runner."""
+        self.logger(f"[SSH] Deleting remote workspace: {self.remote_exec_path}")
+        with self._ssh() as ssh:
+            out, err, code = ssh.exec(
+                f"rm -rf {shlex.quote(self.remote_exec_path)}",
+                timeout=3600)
+            if code != 0:
+                raise RuntimeError(
+                    f"Failed to delete remote workspace: "
+                    f"{err or out} (exit {code})")
+
     # pylint: disable=too-many-locals,too-many-arguments,too-many-positional-arguments
     def _collect_remote_artifacts(self, impression, artifact_dir, marker_name,
                                   label, *, refresh=False):
