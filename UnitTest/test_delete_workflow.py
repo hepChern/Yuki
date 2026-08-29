@@ -108,3 +108,89 @@ def test_reana_delete_workspace_calls_client():
 
     client.delete_workflow.assert_called_once_with(
         "w-proj-wf1", True, True, "tok")
+
+
+def _app(bp):
+    from flask import Flask
+    app = Flask(__name__)
+    app.register_blueprint(bp)
+    return app
+
+
+def _mirror(tmp_path, project, workflow, status):
+    """Create the workflow mirror dir with a results.json status."""
+    wf_dir = tmp_path / ".Yuki" / "Workflows" / project / workflow
+    wf_dir.mkdir(parents=True)
+    with open(wf_dir / "results.json", "w", encoding="utf-8") as f:
+        json.dump({"results": {"status": status}}, f)
+
+
+def _mock_workflow(status="finished"):
+    workflow = mock.MagicMock()
+    workflow.status.return_value = status
+    workflow.backend_type.return_value = "ssh"
+    return workflow
+
+
+def test_delete_workflow_deletes_and_reports(monkeypatch, tmp_path):
+    """A terminal workflow's workspace is deleted with a success payload."""
+    from Yuki.server.routes import workflow as workflow_routes
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _mirror(tmp_path, "proj", "wf1", "finished")
+    wf = _mock_workflow("finished")
+
+    with mock.patch.object(workflow_routes, "VWorkflow") as vwf:
+        vwf.create.return_value = wf
+        r = _app(workflow_routes.bp).test_client().get(
+            "/delete-workflow/proj/wf1")
+
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["status"] == "deleted"
+    assert body["project_uuid"] == "proj"
+    assert body["workflow"] == "wf1"
+    assert body["backend_type"] == "ssh"
+    wf.delete_workspace.assert_called_once_with()
+
+
+def test_delete_workflow_unknown_workflow_404(monkeypatch, tmp_path):
+    """A workflow without a mirror directory gets a 404."""
+    from Yuki.server.routes import workflow as workflow_routes
+    monkeypatch.setenv("HOME", str(tmp_path))
+    r = _app(workflow_routes.bp).test_client().get(
+        "/delete-workflow/proj/nope")
+    assert r.status_code == 404
+
+
+def test_delete_workflow_running_409(monkeypatch, tmp_path):
+    """A running workflow is refused with a 409."""
+    from Yuki.server.routes import workflow as workflow_routes
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _mirror(tmp_path, "proj", "wf1", "in movement")
+    wf = _mock_workflow("in movement")
+
+    with mock.patch.object(workflow_routes, "VWorkflow") as vwf:
+        vwf.create.return_value = wf
+        r = _app(workflow_routes.bp).test_client().get(
+            "/delete-workflow/proj/wf1")
+
+    assert r.status_code == 409
+    assert "running" in r.get_json()["error"]
+    wf.delete_workspace.assert_not_called()
+
+
+def test_delete_workflow_backend_failure_500(monkeypatch, tmp_path):
+    """A backend failure surfaces as a 500 with the error message."""
+    from Yuki.server.routes import workflow as workflow_routes
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _mirror(tmp_path, "proj", "wf1", "finished")
+    wf = _mock_workflow("finished")
+    wf.delete_workspace.side_effect = OSError("ssh down")
+
+    with mock.patch.object(workflow_routes, "VWorkflow") as vwf:
+        vwf.create.return_value = wf
+        r = _app(workflow_routes.bp).test_client().get(
+            "/delete-workflow/proj/wf1")
+
+    assert r.status_code == 500
+    assert "ssh down" in r.get_json()["error"]
