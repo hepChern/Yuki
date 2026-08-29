@@ -112,7 +112,59 @@ def test_purge_stale_workflows_delete_failure_is_skip(monkeypatch,
         summary = workflow_purge.purge_stale_workflows("r1")
 
     assert summary["purged"] == []
-    assert "delete failed" in summary["skipped"][0]["reason"]
+    assert "purge failed" in summary["skipped"][0]["reason"]
+
+
+def test_purge_stale_workflows_corrupt_mirror_is_skip(monkeypatch,
+                                                      tmp_path):
+    """A corrupt mirror config is a per-entry skip, never a sweep abort."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    liveness.save_live_set("proj", [], [])
+    bad_dir = tmp_path / "Workflows" / "proj" / "wf-bad"
+    bad_dir.mkdir(parents=True)
+    with open(bad_dir / "config.json", "w", encoding="utf-8") as f:
+        f.write("{not json")
+    _workflow_mirror(tmp_path, "proj", "wf-good", "r1")
+
+    fake_workflow = mock.MagicMock()
+    fake_workflow.status.return_value = "finished"
+    with mock.patch.object(workflow_purge, "VWorkflow") as vwf:
+        vwf.create.return_value = fake_workflow
+        summary = workflow_purge.purge_stale_workflows("r1")
+
+    bad_skip = next(s for s in summary["skipped"]
+                    if s["workflow"] == "wf-bad")
+    assert "purge failed" in bad_skip["reason"]
+    assert summary["purged"] == [
+        {"project": "proj", "workflow": "wf-good"}]
+
+
+def test_purge_stale_workflows_derives_liveness_at_purge_time(
+        monkeypatch, tmp_path):
+    """Workflows from re-runs after the last sync are still live."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    run_dir = tmp_path / "Storage" / "proj" / ("a" * 32) / "r1"
+    run_dir.mkdir(parents=True)
+    with open(run_dir / "config.json", "w", encoding="utf-8") as f:
+        json.dump({"workflow": "wf-old"}, f)
+    liveness.save_live_set("proj", ["a" * 32], [])
+    # A re-run after the sync points the live impression at a new workflow.
+    with open(run_dir / "config.json", "w", encoding="utf-8") as f:
+        json.dump({"workflow": "wf-new"}, f)
+
+    _workflow_mirror(tmp_path, "proj", "wf-new", "r1")
+    _workflow_mirror(tmp_path, "proj", "wf-old", "r1")
+
+    fake_workflow = mock.MagicMock()
+    fake_workflow.status.return_value = "finished"
+    with mock.patch.object(workflow_purge, "VWorkflow") as vwf:
+        vwf.create.return_value = fake_workflow
+        summary = workflow_purge.purge_stale_workflows("r1")
+
+    skipped = {(s["workflow"], s["reason"]) for s in summary["skipped"]}
+    assert ("wf-new", "workflow is live") in skipped
+    assert summary["purged"] == [
+        {"project": "proj", "workflow": "wf-old"}]
 
 
 def _purge_app(monkeypatch, config_vars):
@@ -169,3 +221,30 @@ def test_purge_runner_workflows_missing_runner_400(monkeypatch):
     r = app.test_client().post(
         "/purge-runner-workflows", json={})
     assert r.status_code == 400
+
+
+def test_purge_runner_workflows_unsupported_backend_400(monkeypatch):
+    """A runner whose backend type is not purgeable returns 400."""
+    app = _purge_app(monkeypatch, {
+        "runners_id": {"pkufarm": "r1"},
+        "backend_types": {"r1": "docker"},
+    })
+    r = app.test_client().post(
+        "/purge-runner-workflows", json={"runner": "pkufarm"})
+    assert r.status_code == 400
+    assert "backend" in r.get_json()["error"]
+
+
+def test_purge_runner_workflows_kernel_error_500(monkeypatch):
+    """A kernel purge failure surfaces as a 500 with the error."""
+    from Yuki.server.routes import workflow as workflow_routes
+    app = _purge_app(monkeypatch, {
+        "runners_id": {"pkufarm": "r1"},
+        "backend_types": {"r1": "ssh"},
+    })
+    with mock.patch.object(workflow_routes, "workflow_purge") as purge:
+        purge.purge_stale_workflows.side_effect = RuntimeError("x")
+        r = app.test_client().post(
+            "/purge-runner-workflows", json={"runner": "pkufarm"})
+    assert r.status_code == 500
+    assert r.get_json() == {"error": "x"}

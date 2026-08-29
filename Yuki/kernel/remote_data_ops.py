@@ -328,6 +328,10 @@ def purge_runner_cache(runner_id, project=None, impression=None,  # pylint: disa
     ``<remote_workdir>/impressions/<project>/<impression>`` directories
     (chmod'd writable first; cached data is stored read-only) and clears
     the local bookkeeping that pointed at them.
+
+    Impressions whose registration is still running are skipped.
+
+    Returns {"purged": [...], "skipped": [...], "dry_run": bool}.
     """
     echo = echo or print
     yuki_dir = yuki_dir or _yuki_dir()

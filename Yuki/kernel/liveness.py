@@ -26,10 +26,12 @@ def validate_sets(live, superseded):
     for uuid in live:
         if not isinstance(uuid, str) or not UUID_RE.match(uuid):
             problems.append(f"invalid live entry: {uuid!r}")
+            continue
         seen_live.add(uuid)
     for uuid in superseded:
         if not isinstance(uuid, str) or not UUID_RE.match(uuid):
             problems.append(f"invalid superseded entry: {uuid!r}")
+            continue
         seen_sup.add(uuid)
     for uuid in seen_live & seen_sup:
         problems.append(f"uuid in both lists: {uuid}")

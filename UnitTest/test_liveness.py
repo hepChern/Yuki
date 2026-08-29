@@ -1,6 +1,7 @@
 """Tests for the live-set registry (kernel/liveness.py)."""
 import json
 import os
+from unittest import mock
 
 from Yuki.kernel import liveness
 
@@ -44,6 +45,15 @@ def test_save_live_set_rejects_invalid_entries(monkeypatch, tmp_path):
     with __import__("pytest").raises(ValueError) as exc:
         liveness.save_live_set("proj", ["a" * 32], ["a" * 32])
     assert "both" in str(exc.value)
+    assert not os.path.exists(tmp_path / "Live" / "proj.json")
+
+
+def test_save_live_set_rejects_unhashable_entry(monkeypatch, tmp_path):
+    """An unhashable entry is named in the ValueError, not a TypeError."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    with __import__("pytest").raises(ValueError) as exc:
+        liveness.save_live_set("proj", [["x"]], [])
+    assert "invalid live entry" in str(exc.value)
     assert not os.path.exists(tmp_path / "Live" / "proj.json")
 
 
@@ -108,6 +118,20 @@ def test_put_live_set_invalid_400_nothing_stored(monkeypatch, tmp_path):
         "/live-set/proj", json={"live": ["nope"], "superseded": []})
     assert r.status_code == 400
     assert "nope" in r.get_json()["error"]
+    assert not os.path.exists(tmp_path / "Live" / "proj.json")
+
+
+def test_put_live_set_500_on_storage_failure(monkeypatch, tmp_path):
+    """A storage failure returns 500 with the error; nothing is stored."""
+    monkeypatch.setenv("YUKIDIR", str(tmp_path))
+    from Yuki.server.routes import liveness as liveness_routes
+    with mock.patch.object(liveness_routes.liveness, "save_live_set",
+                           side_effect=OSError("disk")):
+        r = _app().test_client().put(
+            "/live-set/proj",
+            json={"live": ["a" * 32], "superseded": []})
+    assert r.status_code == 500
+    assert "disk" in r.get_json()["error"]
     assert not os.path.exists(tmp_path / "Live" / "proj.json")
 
 
