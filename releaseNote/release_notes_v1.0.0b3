@@ -64,3 +64,7 @@
 + Cache the runner file listing of finished jobs even when it is empty.
   - The per-workflow `filelist.json` cache was only written for non-empty live listings, so a finished job with an empty runner (the stable post-collect state) re-queried the runner on every `/file-status` call.
   - Any successful live listing of a finished job is now cached; a cached empty listing is reported as "no stageout files on the runner (cached from <stamp>)". Running jobs are still listed live and failed listings are still never cached.
++ Serve `/file-status` from saved listings refreshed on status updates.
+  - `/file-status` no longer lists the runner: it reads `<machine>/<kind>.filelist.json` (workflow-id keyed, so a re-run starts fresh) and returns immediately, with a "listing from <stamp>" note.
+  - The listings are refreshed by the status-update path (Celery): pre-execution statuses write empty listings locally without contacting the runner, in-movement and terminal statuses list live (stageout and logs). A failed refresh keeps the previous files and records the error, reported by `/file-status` as a "refresh failed" warning.
+  - Writes are atomic (tmp + rename), and the refresh runs before the terminal distribution recording so the final distribution sees the final file set. This supersedes the finished-job-only caching of the previous entry.
