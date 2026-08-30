@@ -125,13 +125,35 @@ def test_file_status_no_cache_while_running(tmp_path):
     assert not os.path.exists(tmp_path / "job" / "runner-1" / "stageout.filelist.json")
 
 
-def test_file_status_does_not_cache_empty_listing(tmp_path):
-    """A finished job whose live listing returns empty (e.g. a transient runner
-    failure) is not cached, so the next call retries the runner."""
+def test_file_status_caches_empty_listing_for_finished_job(tmp_path):
+    """A finished job's empty live listing is cached: the runner of a
+    finished job no longer changes, so the next call skips the live query."""
     s, _ims = _storage(tmp_path)
     wf = mock.Mock()
     wf.list_runner_files.return_value = []
     s._get_runner_contexts = lambda: [("runner", _finished_job(), wf)]
+
+    s.file_status("stageout")
+    detail = s.file_status("stageout", detailed=True)
+
+    assert wf.list_runner_files.call_count == 1          # 2nd call from cache
+    assert detail["files"] == []
+    note = detail["notes"][0]
+    assert note["level"] == "info"
+    assert "no stageout files on the runner" in note["message"]
+    assert "cached from" in note["message"]
+    assert os.path.isfile(tmp_path / "job" / "runner-1" / "stageout.filelist.json")
+
+
+def test_file_status_no_cache_empty_listing_while_running(tmp_path):
+    """A running job's empty listing is never cached; the next call retries."""
+    s, _ims = _storage(tmp_path)
+    job = mock.Mock()
+    job.status.return_value = "orchestrating"            # any non-CODA status
+    job.workflow_id.return_value = "wf-1"
+    wf = mock.Mock()
+    wf.list_runner_files.return_value = []
+    s._get_runner_contexts = lambda: [("runner", job, wf)]
 
     s.file_status("stageout")
     s.file_status("stageout")

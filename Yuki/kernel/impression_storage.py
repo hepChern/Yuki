@@ -232,10 +232,12 @@ class ImpressionStorage:
 
         A finished job's listing is served from <machine_dir>/<kind>.filelist.json
         (keyed by the job's workflow id, so a re-run invalidates it) to avoid a
-        REANA round-trip on every status. The cache is only written once the job
-        is finished and the live listing is non-empty, so a transient runner
-        failure is never persisted. A running job is always listed live, since
-        its file set is still changing.
+        REANA round-trip on every status. The cache is written once the job is
+        finished, even for an empty listing: the runner of a finished job no
+        longer changes, and an empty listing is the stable post-collect state.
+        Only successful live listings are cached, so a transient runner failure
+        is never persisted. A running job is always listed live, since its file
+        set is still changing.
 
         The note is None or {"level": info|warning|error, "message": str}
         explaining the outcome: a cached listing, an empty live listing, or an
@@ -261,9 +263,12 @@ class ImpressionStorage:
             if cached_files is not None:
                 stamp = datetime.datetime.fromtimestamp(
                     os.path.getmtime(cache_path)).strftime("%Y-%m-%d %H:%M")
+                message = (f"cached listing from {stamp}" if cached_files
+                           else (f"no {kind} files on the runner "
+                                 f"(cached from {stamp})"))
                 return cached_files, {
                     "level": "info",
-                    "message": f"cached listing from {stamp}",
+                    "message": message,
                 }
 
         try:
@@ -281,7 +286,7 @@ class ImpressionStorage:
                 "message": f"runner unreachable [{type(exc).__name__}]: {exc}",
             }
 
-        if finished and runner_files:
+        if finished:
             try:
                 os.makedirs(machine_dir, exist_ok=True)
                 with open(cache_path, "w", encoding="utf-8") as fh:
