@@ -375,6 +375,22 @@ class NativeWorkflow(VWorkflow):
         self.update_workflow_status()
         return self.status()
 
+    def force_kill(self):
+        """Mark the local workflow killed (best-effort).
+
+        The native backend runs in a foreground process that Yuki does
+        not track; the recorded status is what clears the stale
+        'running' state.
+        """
+        self.logger("[LOCAL] Force-killing local workflow (marking killed)")
+        self.set_workflow_status("killed")
+        for job in self.jobs:
+            if job.is_input:
+                continue
+            if job.job_type() == "algorithm":
+                continue
+            job.set_status(FAILED, "Native workflow force-killed by user")
+
     def kill(self):
         """Kill local workflow execution."""
         self.logger("[LOCAL] Killing local workflow (manual intervention required)")

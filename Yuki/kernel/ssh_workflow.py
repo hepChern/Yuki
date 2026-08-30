@@ -8,13 +8,15 @@ import json
 import os
 import shlex
 import stat
+import time
 from logging import getLogger
 
 from CelebiChrono.utils import metadata
 from Yuki.kernel import runner_config
 from Yuki.utils.env_interpreter import EnvInterpreter
 from .vworkflow import VWorkflow
-from .status_constants import FAILED, DISSONANCE, translate_to_musical, is_terminal_status
+from .status_constants import (FAILED, DISSONANCE, STOPPED,
+                               translate_to_musical, is_terminal_status)
 from .file_staging import walk_files
 
 logger = getLogger("YukiLogger")
@@ -637,6 +639,45 @@ echo $? > yuki.exit
         self.logger("[SSH] Checking status...")
         self.update_workflow_status()
         return self.status()
+
+    def force_kill(self):
+        """Force-stop the remote workflow: TERM, then KILL, then pkill.
+
+        Works even when the pid file is missing or the process ignores
+        SIGTERM (zombie runs): the workspace status is marked killed
+        either way, so a stale 'running' clears and the workflow
+        becomes purgeable.
+        """
+        self.logger(f"[SSH] Force-killing remote workflow: "
+                    f"{self.remote_exec_path}")
+        try:
+            with self._ssh() as ssh:
+                pid_file = f"{self.remote_exec_path}/yuki.pid"
+                out, _err, code = ssh.exec(f"cat {shlex.quote(pid_file)}")
+                pid = out.strip() if code == 0 else ""
+                if pid:
+                    ssh.exec(f"kill -TERM {pid}")
+                    time.sleep(3)
+                    _out, _err, alive = ssh.exec(
+                        f"kill -0 {pid} 2>/dev/null")
+                    if alive == 0:
+                        ssh.exec(f"kill -9 {pid}")
+                # Catch orphaned snakemake children regardless of the pid.
+                ssh.exec(f"pkill -f {shlex.quote(self.remote_exec_path)} "
+                         "|| true")
+                ssh.exec(f"echo 137 > "
+                         f"{shlex.quote(self.remote_exec_path + '/yuki.exit')}")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger(f"[SSH] Remote force-kill failed "
+                        f"(marking killed anyway): {exc}")
+
+        self.set_workflow_status("killed")
+        for job in self.jobs:
+            if job.is_input:
+                continue
+            if job.job_type() == "algorithm":
+                continue
+            job.set_status(STOPPED, "Workflow force-killed by user")
 
     def kill(self):
         """Kill remote workflow execution."""

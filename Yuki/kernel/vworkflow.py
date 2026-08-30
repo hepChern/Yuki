@@ -720,3 +720,11 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         - NotImplementedError if subclass does not implement workspace deletion.
         """
         raise NotImplementedError
+
+    def force_kill(self):
+        """Force-stop the workflow - must be implemented by subclass.
+
+        Raises:
+        - NotImplementedError if subclass does not implement force-killing.
+        """
+        raise NotImplementedError

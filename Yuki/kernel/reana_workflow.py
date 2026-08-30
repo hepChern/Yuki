@@ -199,6 +199,18 @@ class ReanaWorkflow(VWorkflow):
             self.get_access_token(self.machine_id)
         )
 
+    def force_kill(self):
+        """Force-stop the online workflow on the REANA server."""
+        if not REANA_AVAILABLE:
+            raise ImportError("reana_client is not available")
+        self.set_environment(self.machine_id)
+        client.stop_workflow(
+            self.get_name(),
+            True,
+            self.get_access_token(self.machine_id)
+        )
+        self.set_workflow_status("killed")
+
     def writeline(self, line):
         """Write a line to the YAML file."""
         self.yaml_file.writeline(line)  # pylint: disable=no-member

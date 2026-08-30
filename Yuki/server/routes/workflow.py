@@ -103,6 +103,31 @@ def delete_workflow(project_uuid, workflow_uuid):
                     "backend_type": backend_type})
 
 
+@bp.route("/kill-workflow/<project_uuid>/<workflow_uuid>",
+           methods=['GET'])
+def kill_workflow(project_uuid, workflow_uuid):
+    """Force-stop a workflow (works even for zombie runs).
+
+    Escalates TERM -> KILL on ssh runners, force-stops reana workflows,
+    and marks the status killed so a stale 'running' clears.
+    """
+    workflow_dir = os.path.join(os.environ["HOME"], ".Yuki", "Workflows",
+                                project_uuid, workflow_uuid)
+    if not os.path.isdir(workflow_dir):
+        return jsonify({"error": f"workflow '{workflow_uuid}' "
+                                 "not found"}), 404
+    try:
+        wf = VWorkflow.create(project_uuid, [], workflow_uuid)
+        wf.force_kill()
+        backend_type = wf.backend_type()
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"status": "killed",
+                    "project_uuid": project_uuid,
+                    "workflow": workflow_uuid,
+                    "backend_type": backend_type})
+
+
 @bp.route("/purge-runner-workflows", methods=['POST'])
 def purge_runner_workflows():
     """Delete the non-live workflow workspaces on a runner.
