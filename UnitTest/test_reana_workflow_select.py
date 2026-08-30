@@ -176,3 +176,35 @@ def test_download_logs_refresh_bypasses_collected_marker(tmp_path):
         cli.download_file.return_value = (b"grown",)
         report = wf.download_logs("imp7", refresh=True)
     assert "celebi_user_step0.log" in report["collected"]
+
+
+def test_update_workflow_status_terminal_transition_records(tmp_path):
+    """The status write that first observes finished records the registry."""
+    wf = _make_wf()
+    wf.uuid = "wf-1"
+    wf.path = str(tmp_path)
+    with mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
+         mock.patch.object(reana_workflow, "client") as cli, \
+         mock.patch("Yuki.kernel.impression_storage."
+                    "refresh_workflow_distributions") as refresh:
+        cli.get_workflow_status.return_value = {"status": "finished",
+                                                "logs": "{}"}
+        wf.update_workflow_status()
+    refresh.assert_called_once_with("proj-1", wf, "finished")
+
+
+def test_update_workflow_status_repeated_terminal_poll_skips(tmp_path):
+    """A poll that finds the workflow already terminal does not re-record."""
+    wf = _make_wf()
+    wf.uuid = "wf-1"
+    wf.path = str(tmp_path)
+    (tmp_path / "results.json").write_text(
+        '{"results": {"status": "finished"}}')
+    with mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
+         mock.patch.object(reana_workflow, "client") as cli, \
+         mock.patch("Yuki.kernel.impression_storage."
+                    "refresh_workflow_distributions") as refresh:
+        cli.get_workflow_status.return_value = {"status": "finished",
+                                                "logs": "{}"}
+        wf.update_workflow_status()
+    refresh.assert_not_called()

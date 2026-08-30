@@ -19,60 +19,67 @@ def test_task_transfer_results_calls_run_transfer():
         assert result == {"transferred": ["a.txt"]}
 
 
-@pytest.mark.parametrize("status", ["finished", "coda", "failed"])
-def test_task_update_workflow_status_refreshes_distribution(status):
-    """Terminal workflows refresh every non-algorithm job's registry."""
+def test_task_update_workflow_status_delegates_to_workflow():
+    """The task refreshes status via the workflow's own status write.
+
+    Distribution refresh on the terminal transition happens inside
+    update_workflow_status, not separately in the task.
+    """
     from Yuki.server import tasks
+    workflow = mock.Mock()
+
+    with mock.patch.object(tasks, "VWorkflow") as vwf:
+        vwf.create.return_value = workflow
+        tasks.task_update_workflow_status("proj", "wf-1")
+
+    vwf.create.assert_called_once_with("proj", [], "wf-1")
+    workflow.update_workflow_status.assert_called_once_with()
+
+
+@pytest.mark.parametrize("status", ["finished", "coda", "failed"])
+def test_refresh_workflow_distributions_terminal(status):
+    """Terminal workflows refresh every non-algorithm job's registry."""
+    from Yuki.kernel.impression_storage import refresh_workflow_distributions
     task_job = mock.Mock()
     task_job.job_type.return_value = "task"
     task_job.uuid = "imp1"
-    task_job.is_input = True
     algo_job = mock.Mock()
     algo_job.job_type.return_value = "algorithm"
     algo_job.uuid = "imp2"
     workflow = mock.Mock()
     workflow.jobs = [task_job, algo_job]
     workflow.machine_id = "runner-1"
-    workflow.status.return_value = status
 
-    with mock.patch.object(tasks, "VWorkflow") as vwf, \
-            mock.patch.object(tasks, "ImpressionStorage", create=True) as ims:
-        vwf.create.return_value = workflow
-        tasks.task_update_workflow_status("proj", "wf-1")
+    with mock.patch("Yuki.kernel.impression_storage.ImpressionStorage") as ims:
+        refresh_workflow_distributions("proj", workflow, status)
 
     ims.assert_called_once_with("proj", "imp1")
     ims.return_value.update_distribution.assert_called_once_with(
         refresh_cache=True, cache_runner_id="runner-1")
 
 
-def test_task_update_workflow_status_no_refresh_while_running():
-    """A non-terminal workflow leaves the registry alone."""
-    from Yuki.server import tasks
+def test_refresh_workflow_distributions_no_refresh_while_running():
+    """A non-terminal workflow status leaves the registry alone."""
+    from Yuki.kernel.impression_storage import refresh_workflow_distributions
     workflow = mock.Mock()
     workflow.jobs = []
-    workflow.status.return_value = "running"
 
-    with mock.patch.object(tasks, "VWorkflow") as vwf, \
-            mock.patch.object(tasks, "ImpressionStorage", create=True) as ims:
-        vwf.create.return_value = workflow
-        tasks.task_update_workflow_status("proj", "wf-1")
+    with mock.patch("Yuki.kernel.impression_storage.ImpressionStorage") as ims:
+        refresh_workflow_distributions("proj", workflow, "running")
 
     ims.assert_not_called()
 
 
-def test_task_update_workflow_status_survives_refresh_failure():
-    """A failing refresh never fails the status task itself."""
-    from Yuki.server import tasks
+def test_refresh_workflow_distributions_survives_failure():
+    """A failing refresh never fails the status update."""
+    from Yuki.kernel.impression_storage import refresh_workflow_distributions
     task_job = mock.Mock()
     task_job.job_type.return_value = "task"
     task_job.uuid = "imp1"
     workflow = mock.Mock()
     workflow.jobs = [task_job]
     workflow.machine_id = "runner-1"
-    workflow.status.return_value = "failed"
 
-    with mock.patch.object(tasks, "VWorkflow") as vwf, \
-            mock.patch.object(tasks, "ImpressionStorage", create=True) as ims:
-        vwf.create.return_value = workflow
+    with mock.patch("Yuki.kernel.impression_storage.ImpressionStorage") as ims:
         ims.return_value.update_distribution.side_effect = OSError("boom")
-        tasks.task_update_workflow_status("proj", "wf-1")  # no raise
+        refresh_workflow_distributions("proj", workflow, "failed")  # no raise

@@ -624,12 +624,19 @@ echo $? > yuki.exit
                 f"Progress: {results['progress']['completed']}/{results['progress']['total']}"
             )
 
+            # Checked before the write: after it, the recorded status is
+            # already terminal and the transition would be invisible.
+            entered_terminal = self._entered_terminal_state(status)
+
             path = os.path.join(self.path, "results.json")
             results_file = metadata.ConfigFile(path)
             results_file.write_variable("results", results)
 
             workflow_terminal = status in ("finished", "failed")
             self.propagate_job_statuses(workflow_terminal=workflow_terminal)
+
+            if entered_terminal:
+                self._record_terminal_distributions(status)
 
         except Exception as e:
             self.logger(f"[SSH] Failed to update workflow status: {e}")

@@ -162,7 +162,15 @@ class TestSshWorkflow(unittest.TestCase):
         self.mock_sftp = _MockSftp()
         self.mock_client.open_sftp.return_value = self.mock_sftp
 
+        # Status updates that observe the terminal transition refresh the
+        # distribution registry; isolate tests from that heavy side effect.
+        self._refresh_patcher = patch(
+            "Yuki.kernel.impression_storage.refresh_workflow_distributions",
+            create=True)
+        self.mock_refresh = self._refresh_patcher.start()
+
     def tearDown(self):
+        self._refresh_patcher.stop()
         self._home_patcher.stop()
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
@@ -283,6 +291,59 @@ class TestSshWorkflow(unittest.TestCase):
             results = json.load(f)
         self.assertEqual(results["results"]["status"], "finished")
         self.assertEqual(results["results"]["progress"]["completed"], 1)
+
+    @patch("paramiko.SSHClient")
+    def test_update_workflow_status_terminal_transition_records_distributions(
+            self, mock_ssh_cls):
+        """The poll that first observes finished records the data registry."""
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_sftp.dirs.add(self.workflow.remote_exec_path)
+        short = "a" * 7
+        self.mock_sftp.files[f"{self.workflow.remote_exec_path}/{short}.done"] = b""
+
+        job = self._make_job("a" * 32)
+        self.workflow.jobs = [job]
+        os.makedirs(self.workflow.path, exist_ok=True)
+
+        self.workflow.update_workflow_status()
+
+        self.mock_refresh.assert_called_once_with(
+            self.project_uuid, self.workflow, "finished")
+
+    @patch("paramiko.SSHClient")
+    def test_update_workflow_status_repeated_terminal_poll_skips_refresh(
+            self, mock_ssh_cls):
+        """A poll that finds the workflow already terminal does not re-record."""
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_sftp.dirs.add(self.workflow.remote_exec_path)
+        short = "a" * 7
+        self.mock_sftp.files[f"{self.workflow.remote_exec_path}/{short}.done"] = b""
+
+        job = self._make_job("a" * 32)
+        self.workflow.jobs = [job]
+        os.makedirs(self.workflow.path, exist_ok=True)
+        results_path = os.path.join(self.workflow.path, "results.json")
+        with open(results_path, "w", encoding="utf-8") as f:
+            json.dump({"results": {"status": "finished"}}, f)
+
+        self.workflow.update_workflow_status()
+
+        self.mock_refresh.assert_not_called()
+
+    @patch("paramiko.SSHClient")
+    def test_update_workflow_status_running_does_not_refresh(
+            self, mock_ssh_cls):
+        """A running workflow never triggers the distribution refresh."""
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_sftp.dirs.add(self.workflow.remote_exec_path)
+
+        job = self._make_job("a" * 32)
+        self.workflow.jobs = [job]
+        os.makedirs(self.workflow.path, exist_ok=True)
+
+        self.workflow.update_workflow_status()
+
+        self.mock_refresh.assert_not_called()
 
     @patch("paramiko.SSHClient")
     def test_update_workflow_status_detects_remote_exit_nonzero(self, mock_ssh_cls):

@@ -624,6 +624,34 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         results["status"] = status
         results_file.write_variable("results", results)
 
+    def _entered_terminal_state(self, new_status):
+        """True when new_status is terminal but the recorded status isn't.
+
+        Detects the status write that first observes the workflow finished
+        (or failed), so the distribution refresh runs exactly once.
+        """
+        if translate_to_musical(new_status) not in (CODA, FAILED):
+            return False
+        results_file = metadata.ConfigFile(
+            os.path.join(self.path, "results.json"))
+        previous = results_file.read_variable("results", {})
+        return translate_to_musical(previous.get("status", "")) \
+            not in (CODA, FAILED)
+
+    def _record_terminal_distributions(self, status):
+        """Record data whereabouts once the workflow reaches a terminal state.
+
+        Best-effort: a failing refresh must never fail the status update.
+        """
+        try:
+            # Lazy import: impression_storage imports this module at module
+            # level, so importing it here avoids a circular import.
+            from Yuki.kernel.impression_storage import \
+                refresh_workflow_distributions
+            refresh_workflow_distributions(self.project_uuid, self, status)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger(f"Failed to refresh distributions: {exc}")
+
     def watermark(self, impression=None):  # pylint: disable=too-many-locals
         """Add watermark to PNG images for a given impression.
 

@@ -11,7 +11,8 @@ from . import file_types
 from . import remote_data_ops
 from .vjob import VJob
 from .vworkflow import VWorkflow
-from .status_constants import CODA, FAILED, DISSONANCE, IN_MOVEMENT
+from .status_constants import (
+    CODA, FAILED, DISSONANCE, IN_MOVEMENT, translate_to_musical)
 
 class ImpressionStorage:
     """Storage manager for impression workflow operations and status tracking."""
@@ -538,3 +539,23 @@ class ImpressionStorage:
                 del block["cache"]
             return
         block["cache"] = self._cache_updated_entry("cached", files, True)
+
+
+def refresh_workflow_distributions(project_uuid, workflow, workflow_status):
+    """Refresh every job's data-status registry once the workflow ends.
+
+    Callers pass the workflow status they just determined: relying on
+    workflow.status() here could read a stale in-memory consult cache.
+    Runs only for a terminal status, and is strictly best-effort — a
+    failing refresh must never fail the status update.
+    """
+    if translate_to_musical(workflow_status) not in (CODA, FAILED):
+        return
+    for job in workflow.jobs:
+        if job.job_type() == "algorithm":
+            continue
+        try:
+            ImpressionStorage(project_uuid, job.uuid).update_distribution(
+                refresh_cache=True, cache_runner_id=workflow.machine_id)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass

@@ -56,4 +56,8 @@
   - `DISSONANCE` is now part of `is_terminal_status`.
   - SSH workflow start failures include the tail of the runner's `snakemake.log` ("Remote Snakemake failed: ... (exit N)") instead of an empty detail.
 + Job-state files can live in per-purpose directories (cache jobs in `$YUKIDIR/cache-jobs/`), generalizing the register-jobs helpers.
++ Record the runner cache at the terminal status write.
+  - The status write that first observes a workflow finished (or failed) refreshes every non-algorithm job's distribution registry (`refresh_workflow_distributions`, now in the kernel), so the workflow's own cache rule is recorded as a `cached` entry even when no status poll was in flight at completion — `whereabouts` no longer needs a manual `cache-results` to see the auto-cache.
+  - The refresh runs exactly once per workflow: the transition is detected against the previously recorded status in `results.json` (checked before the write), and repeated terminal polls skip it.
+  - `task_update_workflow_status` now delegates to the workflow's own status write instead of refreshing distributions separately.
 + Bump version to 1.0.0b3.

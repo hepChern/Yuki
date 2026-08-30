@@ -313,6 +313,10 @@ class ReanaWorkflow(VWorkflow):
             results = client.get_workflow_status(
                 self.get_name(),
                 self.get_access_token(self.machine_id))
+            status = results.get("status", "unknown")
+            # Checked before the write: after it, the recorded status is
+            # already terminal and the transition would be invisible.
+            entered_terminal = self._entered_terminal_state(status)
             path = os.path.join(self.path, "results.json")
             results_file = metadata.ConfigFile(path)
             results_file.write_variable("results", results)
@@ -323,6 +327,8 @@ class ReanaWorkflow(VWorkflow):
             log = json.loads(logstring)
             log_file.write_variable("logs", log)
             self.logger(f"Workflow status: {results.get('status', 'unknown')}")
+            if entered_terminal:
+                self._record_terminal_distributions(status)
         except Exception as e:
             self.logger(f"Failed to update the workflow status: {e}")
 
