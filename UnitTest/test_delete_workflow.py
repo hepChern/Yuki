@@ -123,6 +123,7 @@ def _mirror(tmp_path, project, workflow, status):
     wf_dir.mkdir(parents=True)
     with open(wf_dir / "results.json", "w", encoding="utf-8") as f:
         json.dump({"results": {"status": status}}, f)
+    return wf_dir
 
 
 def _mock_workflow(status="finished"):
@@ -136,8 +137,9 @@ def test_delete_workflow_deletes_and_reports(monkeypatch, tmp_path):
     """A terminal workflow's workspace is deleted with a success payload."""
     from Yuki.server.routes import workflow as workflow_routes
     monkeypatch.setenv("HOME", str(tmp_path))
-    _mirror(tmp_path, "proj", "wf1", "finished")
+    wf_dir = _mirror(tmp_path, "proj", "wf1", "finished")
     wf = _mock_workflow("finished")
+    wf.path = str(wf_dir)
 
     with mock.patch.object(workflow_routes, "VWorkflow") as vwf:
         vwf.create.return_value = wf
@@ -151,6 +153,9 @@ def test_delete_workflow_deletes_and_reports(monkeypatch, tmp_path):
     assert body["workflow"] == "wf1"
     assert body["backend_type"] == "ssh"
     wf.delete_workspace.assert_called_once_with()
+    # The purge record lands in the real mirror, not a mock-derived path.
+    cfg = json.load(open(wf_dir / "config.json", encoding="utf-8"))
+    assert "workspace_purged_at" in cfg
 
 
 def test_delete_workflow_unknown_workflow_404(monkeypatch, tmp_path):
@@ -225,8 +230,9 @@ def test_delete_workflow_backend_type_failure_returns_json_500(
     """A payload-read failure after deletion still returns JSON 500."""
     from Yuki.server.routes import workflow as workflow_routes
     monkeypatch.setenv("HOME", str(tmp_path))
-    _mirror(tmp_path, "proj", "wf1", "finished")
+    wf_dir = _mirror(tmp_path, "proj", "wf1", "finished")
     wf = _mock_workflow("finished")
+    wf.path = str(wf_dir)
     wf.backend_type.side_effect = OSError("corrupt config")
 
     with mock.patch.object(workflow_routes, "VWorkflow") as vwf:
