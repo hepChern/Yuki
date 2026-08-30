@@ -147,15 +147,15 @@ def purge_stale_workflows(runner_id, dry_run=False, yuki_dir=None,  # pylint: di
                     continue
                 if live_workflows is None:
                     skipped.append({**entry,
-                                    "reason": "no live set synced for project"})
+                                    "reason": "no live set synced"})
                     continue
                 if workflow_uuid in live_workflows:
-                    skipped.append({**entry, "reason": "workflow is live"})
+                    skipped.append({**entry, "reason": "live"})
                     continue
                 workflow = VWorkflow.create(project, [], workflow_uuid)
                 if translate_to_musical(workflow.status()) == IN_MOVEMENT:
                     skipped.append({**entry,
-                                    "reason": "workflow is running"})
+                                    "reason": "running"})
                     continue
                 candidates.append((entry, workflow_dir, workflow))
             except Exception as exc:  # pylint: disable=broad-exception-caught

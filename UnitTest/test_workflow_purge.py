@@ -42,7 +42,7 @@ def test_purge_stale_workflows_deletes_non_live(monkeypatch, tmp_path):
     assert summary["purged"] == [
         {"project": "proj", "workflow": "wf-stale"}]
     skipped = {(s["workflow"], s["reason"]) for s in summary["skipped"]}
-    assert ("wf-live", "workflow is live") in skipped
+    assert ("wf-live", "live") in skipped
     assert ("wf-other-runner", None) not in skipped  # filtered by runner
     fake_workflow.delete_workspace.assert_called_once_with()
 
@@ -60,7 +60,7 @@ def test_purge_stale_workflows_skips_running(monkeypatch, tmp_path):
         summary = workflow_purge.purge_stale_workflows("r1")
 
     assert summary["purged"] == []
-    assert summary["skipped"][0]["reason"] == "workflow is running"
+    assert summary["skipped"][0]["reason"] == "running"
     fake_workflow.delete_workspace.assert_not_called()
 
 
@@ -75,7 +75,7 @@ def test_purge_stale_workflows_without_live_set_skips_all(monkeypatch,
 
     assert summary["purged"] == []
     assert summary["skipped"][0]["reason"] == \
-        "no live set synced for project"
+        "no live set synced"
     vwf.create.assert_not_called()
 
 
@@ -162,7 +162,7 @@ def test_purge_stale_workflows_derives_liveness_at_purge_time(
         summary = workflow_purge.purge_stale_workflows("r1")
 
     skipped = {(s["workflow"], s["reason"]) for s in summary["skipped"]}
-    assert ("wf-new", "workflow is live") in skipped
+    assert ("wf-new", "live") in skipped
     assert summary["purged"] == [
         {"project": "proj", "workflow": "wf-old"}]
 
