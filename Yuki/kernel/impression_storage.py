@@ -12,7 +12,8 @@ from . import remote_data_ops
 from .vjob import VJob
 from .vworkflow import VWorkflow
 from .status_constants import (
-    CODA, FAILED, DISSONANCE, IN_MOVEMENT, translate_to_musical)
+    CODA, FAILED, DISSONANCE, IN_MOVEMENT, PRE_EXECUTION_STATUSES,
+    translate_to_musical)
 
 class ImpressionStorage:
     """Storage manager for impression workflow operations and status tracking."""
@@ -95,20 +96,20 @@ class ImpressionStorage:
         return report
 
     def file_status(self, kind="stageout", detailed=False):  # pylint: disable=too-many-locals
-        """Merge runner listing with downloaded Storage state for <kind>.
+        """Merge the saved runner listing with downloaded Storage state.
 
-        The runner listing of a finished job is immutable, so it is cached to
-        <machine>/<kind>.filelist.json after the first successful live fetch and
-        served from there afterwards — sparing a slow, sometimes flaky REANA
-        list_files on every status. See _runner_files for the policy.
+        The runner is never contacted here: the listing is read from
+        <machine>/<kind>.filelist.json, which the status-update path
+        (refresh_job_filelists, running in Celery) refreshes. See
+        _runner_files for the read policy.
 
         Remote-hosted data (registered via register-ssh-data) is listed from
         the host runner's managed impressions dir; see _remote_hosted_files.
 
         With detailed=True returns {"files": [...], "notes": [...]} where each
         note is {"runner": <name or None>, "level": info|warning|error,
-        "message": str} explaining e.g. an unreachable runner or a cached
-        listing; otherwise returns the bare files list.
+        "message": str} explaining e.g. a missing listing or a persisted
+        refresh failure; otherwise returns the bare files list.
         """
         result = []
         notes = []
@@ -116,7 +117,7 @@ class ImpressionStorage:
         result.extend(hosted)
         if hosted_note:
             notes.append(hosted_note)
-        for name, job, workflow in self._get_runner_contexts():
+        for name, job, _workflow in self._get_runner_contexts():
             machine_id = self.runners_id.get(name)
             machine_dir = os.path.join(self.job_path, machine_id)
             storage_dir = os.path.join(machine_dir, kind)
@@ -126,7 +127,7 @@ class ImpressionStorage:
                     for f in files:
                         downloaded.add(os.path.relpath(os.path.join(root, f), storage_dir))
 
-            runner_files, note = self._runner_files(job, workflow, kind, machine_dir)
+            runner_files, note = self._runner_files(job, kind, machine_dir)
             if note:
                 notes.append({"runner": name, **note})
 
@@ -227,77 +228,96 @@ class ImpressionStorage:
             })
         return result, note
 
-    def _runner_files(self, job, workflow, kind, machine_dir):
-        """Return (files, note) for the runner listing of <kind>.
+    def _runner_files(self, job, kind, machine_dir):
+        """Return (files, note) for the saved runner listing of <kind>.
 
-        A finished job's listing is served from <machine_dir>/<kind>.filelist.json
-        (keyed by the job's workflow id, so a re-run invalidates it) to avoid a
-        REANA round-trip on every status. The cache is written once the job is
-        finished, even for an empty listing: the runner of a finished job no
-        longer changes, and an empty listing is the stable post-collect state.
-        Only successful live listings are cached, so a transient runner failure
-        is never persisted. A running job is always listed live, since its file
-        set is still changing.
+        The runner is never contacted here: the listing is read from
+        <machine_dir>/<kind>.filelist.json, which the status-update path
+        (refresh_job_filelists, running in Celery) refreshes. The file is
+        keyed by the job's workflow id, so a re-run starts with an empty
+        listing until its first refresh. A persisted refresh error is
+        reported as a warning alongside the (stale) listing.
 
-        The note is None or {"level": info|warning|error, "message": str}
-        explaining the outcome: a cached listing, an empty live listing, or an
-        unreachable runner (with same-workflow cache fallback).
+        The note is None or {"level": info|warning, "message": str}
+        explaining the outcome: no listing yet, a saved listing, or a
+        failed refresh.
         """
-        finished = job.status(musical=True) == CODA
         workflow_id = job.workflow_id()
         cache_path = os.path.join(machine_dir, kind + ".filelist.json")
-
-        def read_cache():
-            """Return the cached file list if it matches the current workflow."""
-            try:
-                with open(cache_path, encoding="utf-8") as fh:
-                    cached = json.load(fh)
-                if cached.get("workflow_id") == workflow_id:
-                    return cached.get("files", [])
-            except (OSError, ValueError):
-                pass   # unreadable/corrupt/mismatched cache
-            return None
-
-        if finished and os.path.isfile(cache_path):
-            cached_files = read_cache()
-            if cached_files is not None:
-                stamp = datetime.datetime.fromtimestamp(
-                    os.path.getmtime(cache_path)).strftime("%Y-%m-%d %H:%M")
-                message = (f"cached listing from {stamp}" if cached_files
-                           else (f"no {kind} files on the runner "
-                                 f"(cached from {stamp})"))
-                return cached_files, {
-                    "level": "info",
-                    "message": message,
-                }
-
         try:
-            runner_files = workflow.list_runner_files(self.impression, kind)
-        except Exception as exc:  # runner unreachable
-            cached_files = read_cache() if os.path.isfile(cache_path) else None
-            if cached_files is not None:
-                return cached_files, {
-                    "level": "warning",
-                    "message": (f"runner unreachable [{type(exc).__name__}]: {exc} "
-                                f"— showing cached listing"),
-                }
-            return [], {
-                "level": "error",
-                "message": f"runner unreachable [{type(exc).__name__}]: {exc}",
+            with open(cache_path, encoding="utf-8") as fh:
+                cached = json.load(fh)
+            if cached.get("workflow_id") != workflow_id:
+                return [], {"level": "info",
+                            "message": f"no {kind} listing yet"}
+            files = cached.get("files", [])
+        except (OSError, ValueError):
+            return [], {"level": "info", "message": f"no {kind} listing yet"}
+
+        stamp = cached.get("stamp") or datetime.datetime.fromtimestamp(
+            os.path.getmtime(cache_path)).strftime("%Y-%m-%d %H:%M")
+        if cached.get("error"):
+            note = {"level": "warning",
+                    "message": (f"listing from {stamp}, "
+                                f"refresh failed: {cached['error']}")}
+        elif files:
+            note = {"level": "info", "message": f"listing from {stamp}"}
+        else:
+            note = {"level": "info",
+                    "message": f"no {kind} files on the runner "
+                              f"(listing from {stamp})"}
+        return files, note
+
+    def refresh_filelists(self, workflow, pre_execution):  # pylint: disable=too-many-locals
+        """Write the saved runner listings after a status update.
+
+        Called from the status-update path (Celery), never from a request.
+        For a pre-execution status the runner cannot hold files, so empty
+        listings are written locally without contacting the runner.
+        Otherwise the runner is listed live (stageout and logs); a failed
+        listing keeps the previous files and records the error in the
+        listing file so /file-status can report it. Writes are atomic
+        (tmp + rename) because /file-status reads the file concurrently.
+        """
+        machine_dir = None
+        workflow_id = None
+        for name, job, context in self._get_runner_contexts():
+            if context.uuid == workflow.uuid:
+                machine_dir = os.path.join(self.job_path, self.runners_id[name])
+                workflow_id = job.workflow_id()
+                break
+        if machine_dir is None:
+            return
+        for kind in ("stageout", "logs"):
+            files, error = [], None
+            if not pre_execution:
+                try:
+                    files = workflow.list_runner_files(self.impression, kind)
+                except Exception as exc:  # runner unreachable
+                    error = f"{type(exc).__name__}: {exc}"
+                    cache_path = os.path.join(machine_dir,
+                                              kind + ".filelist.json")
+                    try:
+                        with open(cache_path, encoding="utf-8") as fh:
+                            files = json.load(fh).get("files", [])
+                    except (OSError, ValueError):
+                        files = []
+            payload = {
+                "workflow_id": workflow_id,
+                "files": files,
+                "stamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
             }
-
-        if finished:
+            if error:
+                payload["error"] = error
+            os.makedirs(machine_dir, exist_ok=True)
+            cache_path = os.path.join(machine_dir, kind + ".filelist.json")
+            tmp_path = cache_path + ".tmp"
             try:
-                os.makedirs(machine_dir, exist_ok=True)
-                with open(cache_path, "w", encoding="utf-8") as fh:
-                    json.dump({"workflow_id": workflow_id, "files": runner_files}, fh)
+                with open(tmp_path, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh)
+                os.replace(tmp_path, cache_path)
             except OSError:
-                pass   # best-effort cache; status still works without it
-
-        if not runner_files:
-            return [], {"level": "info",
-                        "message": f"no {kind} files on the runner yet"}
-        return runner_files, None
+                pass   # best-effort; status still works without it
 
     def collect_outputs(self):
         """Retrieves only output files from runners."""
@@ -410,12 +430,12 @@ class ImpressionStorage:
                     datetime.timezone.utc).isoformat(),
             }
 
-        for name, job, workflow in self._get_runner_contexts():
+        for name, job, _workflow in self._get_runner_contexts():
             if produced_on is None and job.workflow_id():
                 produced_on = name
             machine_id = self.runners_id.get(name)
             machine_dir = os.path.join(self.job_path, machine_id)
-            files, _note = self._runner_files(job, workflow, "stageout", machine_dir)
+            files, _note = self._runner_files(job, "stageout", machine_dir)
             if files:
                 locations.setdefault(f"runner:{name}", {})["workflow"] = \
                     make_entry("produced", files)
@@ -562,5 +582,27 @@ def refresh_workflow_distributions(project_uuid, workflow, workflow_status):
         try:
             ImpressionStorage(project_uuid, job.uuid).update_distribution(
                 refresh_cache=True, cache_runner_id=workflow.machine_id)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+
+def refresh_job_filelists(project_uuid, workflow, workflow_status):
+    """Refresh every job's saved runner listing after a status update.
+
+    /file-status reads the saved <machine>/<kind>.filelist.json files, so
+    this function — called from the status-update path, which runs in
+    Celery — is the only place that lists the runner. Pre-execution
+    statuses write empty listings locally; in-movement and terminal
+    statuses fetch live listings. Strictly best-effort: a failing refresh
+    must never fail the status update.
+    """
+    pre_execution = translate_to_musical(workflow_status) \
+        in PRE_EXECUTION_STATUSES
+    for job in workflow.jobs:
+        if job.job_type() == "algorithm":
+            continue
+        try:
+            ImpressionStorage(project_uuid, job.uuid).refresh_filelists(
+                workflow, pre_execution)
         except Exception:  # pylint: disable=broad-exception-caught
             pass

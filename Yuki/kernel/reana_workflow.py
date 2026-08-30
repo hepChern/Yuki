@@ -327,6 +327,9 @@ class ReanaWorkflow(VWorkflow):
             log = json.loads(logstring)
             log_file.write_variable("logs", log)
             self.logger(f"Workflow status: {results.get('status', 'unknown')}")
+            # Refresh listings first: the terminal distribution recording
+            # below reads them and must see the final file set.
+            self._refresh_job_filelists(status)
             if entered_terminal:
                 self._record_terminal_distributions(status)
         except Exception as e:

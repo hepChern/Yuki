@@ -59,7 +59,7 @@ def test_update_distribution_records_workflow_state(tmp_path):
     job.workflow_id.return_value = "wf-1"
     wf = mock.Mock()
     storage._get_runner_contexts = lambda: [("cern", job, wf)]
-    storage._runner_files = lambda _j, _w, _k, _d: (
+    storage._runner_files = lambda _j, _k, _d: (
         [{"name": "a.root", "size": 10},
          {"name": "mass.png", "size": 3}], None)
     storage._remote_hosted_files = lambda kind: ([], None)
@@ -138,7 +138,7 @@ def test_update_distribution_tracks_workflow_and_cache_states(tmp_path):
     job.workflow_id.return_value = "wf-1"
     wf = mock.Mock()
     storage._get_runner_contexts = lambda: [("cern", job, wf)]
-    storage._runner_files = lambda _j, _w, _k, _d: (
+    storage._runner_files = lambda _j, _k, _d: (
         [{"name": "a.root", "size": 10}], None)
     storage._remote_hosted_files = lambda kind: ([], None)
 
@@ -281,7 +281,7 @@ def _reana_storage(tmp_path):
     """An ImpressionStorage whose runner is a reana runner."""
     storage = _storage(tmp_path)
     storage.backend_types = {"runner-1": "reana"}
-    storage._runner_files = lambda _j, _w, _k, _d: ([], None)
+    storage._runner_files = lambda _j, _k, _d: ([], None)
     storage._remote_hosted_files = lambda kind: ([], None)
     return storage
 

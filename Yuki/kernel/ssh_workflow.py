@@ -635,6 +635,9 @@ echo $? > yuki.exit
             workflow_terminal = status in ("finished", "failed")
             self.propagate_job_statuses(workflow_terminal=workflow_terminal)
 
+            # Refresh listings first: the terminal distribution recording
+            # below reads them and must see the final file set.
+            self._refresh_job_filelists(status)
             if entered_terminal:
                 self._record_terminal_distributions(status)
 

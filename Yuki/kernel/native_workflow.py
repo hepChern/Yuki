@@ -365,6 +365,7 @@ class NativeWorkflow(VWorkflow):
 
             workflow_terminal = status in ("finished", "failed")
             self.propagate_job_statuses(workflow_terminal=workflow_terminal)
+            self._refresh_job_filelists(status)
 
         except Exception as e:
             self.logger(f"[LOCAL] Failed to update workflow status: {e}")

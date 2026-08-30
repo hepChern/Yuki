@@ -652,6 +652,21 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger(f"Failed to refresh distributions: {exc}")
 
+    def _refresh_job_filelists(self, status):
+        """Refresh saved runner file listings after a status update.
+
+        /file-status reads the saved listings, so they are refreshed here
+        (the status-update path, running in Celery) rather than on request.
+        Best-effort: a failing refresh must never fail the status update.
+        """
+        try:
+            # Lazy import: impression_storage imports this module at module
+            # level, so importing it here avoids a circular import.
+            from Yuki.kernel.impression_storage import refresh_job_filelists
+            refresh_job_filelists(self.project_uuid, self, status)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger(f"Failed to refresh file listings: {exc}")
+
     def watermark(self, impression=None):  # pylint: disable=too-many-locals
         """Add watermark to PNG images for a given impression.
 

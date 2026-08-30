@@ -23,6 +23,14 @@ DELETED = "deleted"          # Removed from performance
 ARCHIVED = "archived"        # Archived jobs (kept for backward compatibility)
 PENDING = "pending"
 
+# Statuses reached before execution starts: the runner cannot hold any
+# files yet, so a live listing would always be empty. Includes legacy
+# REANA statuses ("created", "queued") that have no musical translation.
+PRE_EXECUTION_STATUSES = (
+    SILENCE, PRELUDE, COMPOSING, ORCHESTRATING, TUNING, DISSONANCE, PENDING,
+    "created", "queued",
+)
+
 # Legacy status names (old system)
 LEGACY_RAW = "raw"
 LEGACY_WAITING = "waiting"

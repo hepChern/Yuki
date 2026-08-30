@@ -183,14 +183,18 @@ def test_update_workflow_status_terminal_transition_records(tmp_path):
     wf = _make_wf()
     wf.uuid = "wf-1"
     wf.path = str(tmp_path)
+    wf.jobs = []
     with mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
          mock.patch.object(reana_workflow, "client") as cli, \
          mock.patch("Yuki.kernel.impression_storage."
-                    "refresh_workflow_distributions") as refresh:
+                    "refresh_workflow_distributions") as refresh, \
+         mock.patch("Yuki.kernel.impression_storage."
+                    "refresh_job_filelists") as refresh_files:
         cli.get_workflow_status.return_value = {"status": "finished",
                                                 "logs": "{}"}
         wf.update_workflow_status()
     refresh.assert_called_once_with("proj-1", wf, "finished")
+    refresh_files.assert_called_once_with("proj-1", wf, "finished")
 
 
 def test_update_workflow_status_repeated_terminal_poll_skips(tmp_path):
@@ -198,13 +202,17 @@ def test_update_workflow_status_repeated_terminal_poll_skips(tmp_path):
     wf = _make_wf()
     wf.uuid = "wf-1"
     wf.path = str(tmp_path)
+    wf.jobs = []
     (tmp_path / "results.json").write_text(
         '{"results": {"status": "finished"}}')
     with mock.patch.object(reana_workflow, "REANA_AVAILABLE", True), \
          mock.patch.object(reana_workflow, "client") as cli, \
          mock.patch("Yuki.kernel.impression_storage."
-                    "refresh_workflow_distributions") as refresh:
+                    "refresh_workflow_distributions") as refresh, \
+         mock.patch("Yuki.kernel.impression_storage."
+                    "refresh_job_filelists") as refresh_files:
         cli.get_workflow_status.return_value = {"status": "finished",
                                                 "logs": "{}"}
         wf.update_workflow_status()
     refresh.assert_not_called()
+    refresh_files.assert_called_once_with("proj-1", wf, "finished")
