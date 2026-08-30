@@ -61,3 +61,6 @@
   - The refresh runs exactly once per workflow: the transition is detected against the previously recorded status in `results.json` (checked before the write), and repeated terminal polls skip it.
   - `task_update_workflow_status` now delegates to the workflow's own status write instead of refreshing distributions separately.
 + Bump version to 1.0.0b3.
++ Cache the runner file listing of finished jobs even when it is empty.
+  - The per-workflow `filelist.json` cache was only written for non-empty live listings, so a finished job with an empty runner (the stable post-collect state) re-queried the runner on every `/file-status` call.
+  - Any successful live listing of a finished job is now cached; a cached empty listing is reported as "no stageout files on the runner (cached from <stamp>)". Running jobs are still listed live and failed listings are still never cached.
