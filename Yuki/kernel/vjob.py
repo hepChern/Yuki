@@ -159,11 +159,16 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
             "cache_on_runner", False)
         return self._cache_on_runner
 
-    def use_kerberos(self):
+    def use_kerberos(self, backend_type=None):
         """Check if the job is set to use Kerberos authentication.
 
         Also enables Kerberos automatically if any predecessor task is an
         LHCb AP data list, since AP datasets are stored on EOS.
+
+        When ``backend_type`` is "reana", a job whose outputs are cached on
+        the runner (``cache_on_runner``) also needs Kerberos, because the
+        reana cache lives on EOS. Other backends cache on the runner's own
+        filesystem, which does not imply Kerberos.
         """
         if self._use_kerberos is not None:
             return self._use_kerberos
@@ -177,6 +182,8 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
                         break
             except Exception:
                 pass
+        if not self._use_kerberos and backend_type == "reana":
+            return self.cache_on_runner()
         return self._use_kerberos
 
     def set_status(self, status, detailed_message=None):

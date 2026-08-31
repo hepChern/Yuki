@@ -394,6 +394,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
 
         backend_type = self.backend_type()
         setup_commands = []
+        setup_kerberos = False
         for job in self.jobs:
             if job.object_type() != "task" or not job.is_input:
                 continue
@@ -406,6 +407,9 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             elif job.cache_on_runner() and job.machine_id == self.machine_id:
                 container = ContainerJob(job.path, job.machine_id)
                 setup_commands.extend(container.setup_commands(backend_type))
+                # On reana the cache lives on EOS, so fetching it in the
+                # setup rule requires Kerberos.
+                setup_kerberos = setup_kerberos or backend_type == "reana"
 
         finalize_commands = []
         for job in self.jobs:
@@ -428,7 +432,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         self._write_environment_directive(
             snake_file, "docker.io/reanahub/reana-env-root6:6.18.04", 1)
         snake_file.addline("resources:", 1)
-        if setup_commands and use_kerberos:
+        if setup_commands and (use_kerberos or setup_kerberos):
             snake_file.addline('kerberos=True,', 2)
         snake_file.addline('kubernetes_memory_limit="1Gi"', 2)
         snake_file.addline("shell:", 1)
@@ -513,7 +517,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             snake_file.addline("resources:", 1)
             compute_backend = snakemake_rule["compute_backend"]
             resource_lines = []
-            if job.use_kerberos():
+            if job.use_kerberos(backend_type):
                 resource_lines.append('kerberos=True')
             if compute_backend == "htcondorcern":
                 resource_lines.append(f'compute_backend="{snakemake_rule["compute_backend"]}"')

@@ -167,7 +167,7 @@ class ContainerJob(VJob):
             "name": f"step{self.short_uuid()}"
         }
 
-        if self.use_kerberos():
+        if self.use_kerberos("reana"):
             step["kerberos"] = True
 
         cvmfs_repos = self.cvmfs()
