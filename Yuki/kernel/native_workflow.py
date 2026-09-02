@@ -313,6 +313,11 @@ class NativeWorkflow(VWorkflow):
         try:
             # Check if all output files exist
             all_done = True
+            self.logger(
+                f"[LOCAL] update_workflow_status workflow={self.uuid} "
+                f"path={self.path} machine_id={self.machine_id} "
+                f"local_exec_path={self.local_exec_path}"
+            )
             self.logger("[LOCAL] Checking jobs status...")
 
             # Get jobs from json
@@ -364,8 +369,13 @@ class NativeWorkflow(VWorkflow):
             results_file.write_variable("results", results)
 
             workflow_terminal = status in ("finished", "failed")
+            entered_terminal = self._entered_terminal_state(status)
             self.propagate_job_statuses(workflow_terminal=workflow_terminal)
-            self._refresh_job_filelists(status)
+            self.logger(
+                f"[LOCAL] propagate_job_statuses finished "
+                f"workflow_terminal={workflow_terminal}"
+            )
+            self._refresh_job_filelists(status, entered_terminal)
 
         except Exception as e:
             self.logger(f"[LOCAL] Failed to update workflow status: {e}")

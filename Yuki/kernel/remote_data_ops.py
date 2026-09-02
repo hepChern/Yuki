@@ -256,9 +256,12 @@ def list_managed_files(runner_id, managed_path):
     Returns [{"name": rel_path, "size": bytes}, ...] (flat, sorted by
     traversal order).
     """
+    print(f"[list_managed_files] runner_id={runner_id} path={managed_path}")
     with _ssh_connection(runner_id) as ssh:
-        return [{"name": rel, "size": size}
-                for rel, _rpath, size in ssh.walk_files(managed_path)]
+        files = [{"name": rel, "size": size}
+                 for rel, _rpath, size in ssh.walk_files(managed_path)]
+    print(f"[list_managed_files] found {len(files)} files")
+    return files
 
 
 def list_cache_files(runner_id, project_uuid, impression):
@@ -266,6 +269,7 @@ def list_cache_files(runner_id, project_uuid, impression):
     settings = _ssh_settings(runner_id)
     cache_dir = (f"{settings.get('remote_workdir', '/tmp/yuki-workflows')}"
                  f"/impressions/{project_uuid}/{impression}")
+    print(f"[list_cache_files] runner_id={runner_id} cache_dir={cache_dir}")
     return list_managed_files(runner_id, cache_dir)
 
 

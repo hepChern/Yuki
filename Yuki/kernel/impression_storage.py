@@ -417,7 +417,7 @@ class ImpressionStorage:
                     locations[loc] = {state: value}
             elif loc != "yuki":
                 cache = value.get("cache")
-                if cache and cache.get("origin") == "transferred":
+                if cache and cache.get("origin") in ("transferred", "cached"):
                     locations[loc] = {"cache": cache}
         produced_on = existing.get("produced_on")
 
@@ -542,28 +542,47 @@ class ImpressionStorage:
         stale 'cached' entry is dropped. Transferred entries and
         registered (remote.json) impressions are never touched.
         """
+        print(f"[_refresh_ssh_cache] impression={self.impression} "
+              f"cache_runner_id={cache_runner_id} "
+              f"backend={self.backend_types.get(cache_runner_id, 'reana')}")
         if self.backend_types.get(cache_runner_id, "reana") != "ssh":
+            print("[_refresh_ssh_cache] early-return: runner is not ssh")
             return
-        if os.path.exists(os.path.join(self.job_path, "remote.json")):
+        remote_marker = os.path.join(self.job_path, "remote.json")
+        if os.path.exists(remote_marker):
+            print(f"[_refresh_ssh_cache] early-return: remote.json marker exists "
+                  f"({remote_marker})")
             return
         name = next((n for n, rid in self.runners_id.items()
                      if rid == cache_runner_id), None)
         if not name:
+            print("[_refresh_ssh_cache] early-return: no runner name for id")
             return
+        print(f"[_refresh_ssh_cache] live-checking runner={name} "
+              f"project={self.project_uuid} impression={self.impression}")
         try:
             files = remote_data_ops.list_cache_files(
                 cache_runner_id, self.project_uuid, self.impression)
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"[_refresh_ssh_cache] list_cache_files raised: {exc}")
             return  # runner unreachable: keep the current registry
+        print(f"[_refresh_ssh_cache] found {len(files)} cached files")
         block = locations.setdefault(f"runner:{name}", {})
         existing = block.get("cache", {})
+        print(f"[_refresh_ssh_cache] existing cache entry origin={existing.get('origin')}")
         if existing.get("origin") == "transferred":
+            print("[_refresh_ssh_cache] preserving existing 'transferred' entry")
             return
         if not files:
             if existing.get("origin") == "cached":
+                print("[_refresh_ssh_cache] dropping stale 'cached' entry")
                 del block["cache"]
+            else:
+                print("[_refresh_ssh_cache] no files and no existing cached entry")
             return
         block["cache"] = self._cache_updated_entry("cached", files, True)
+        print(f"[_refresh_ssh_cache] wrote 'cached' entry: "
+              f"files={len(files)} bytes={sum(f.get('size', 0) for f in files)}")
 
 
 def refresh_workflow_distributions(project_uuid, workflow, workflow_status):
@@ -574,19 +593,45 @@ def refresh_workflow_distributions(project_uuid, workflow, workflow_status):
     Runs only for a terminal status, and is strictly best-effort — a
     failing refresh must never fail the status update.
     """
+    print(
+        f"[refresh_workflow_distributions] caller=_record_terminal_distributions "
+        f"reason=terminal_workflow_refresh "
+        f"project={project_uuid} workflow={workflow.uuid} "
+        f"status={workflow_status} total_jobs={len(workflow.jobs)}"
+    )
     if translate_to_musical(workflow_status) not in (CODA, FAILED):
+        print("[refresh_workflow_distributions] skipping: status is not terminal")
         return
+    processed = 0
+    skipped = 0
     for job in workflow.jobs:
         if job.job_type() == "algorithm":
+            print(f"[refresh_workflow_distributions] skip job={job.uuid} reason=algorithm")
+            skipped += 1
             continue
+        if getattr(job, "is_input", False):
+            print(f"[refresh_workflow_distributions] skip job={job.uuid} reason=input_job")
+            skipped += 1
+            continue
+        short_uuid = job.short_uuid() if hasattr(job, "short_uuid") else job.uuid[:7]
+        print(
+            f"[refresh_workflow_distributions] process job={job.uuid} "
+            f"short={short_uuid} "
+            f"is_input={getattr(job, 'is_input', False)}"
+        )
+        processed += 1
         try:
             ImpressionStorage(project_uuid, job.uuid).update_distribution(
                 refresh_cache=True, cache_runner_id=workflow.machine_id)
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"[refresh_workflow_distributions] error for job={job.uuid}: {exc}")
+    print(
+        f"[refresh_workflow_distributions] done: processed={processed} skipped={skipped}"
+    )
 
 
-def refresh_job_filelists(project_uuid, workflow, workflow_status):
+def refresh_job_filelists(project_uuid, workflow, workflow_status,
+                          terminal_transition=False):
     """Refresh every job's saved runner listing after a status update.
 
     /file-status reads the saved <machine>/<kind>.filelist.json files, so
@@ -600,6 +645,11 @@ def refresh_job_filelists(project_uuid, workflow, workflow_status):
         in PRE_EXECUTION_STATUSES
     for job in workflow.jobs:
         if job.job_type() == "algorithm":
+            continue
+        if getattr(job, "is_input", False):
+            continue
+        if not terminal_transition and \
+                translate_to_musical(job.status()) in (CODA, FAILED):
             continue
         try:
             ImpressionStorage(project_uuid, job.uuid).refresh_filelists(

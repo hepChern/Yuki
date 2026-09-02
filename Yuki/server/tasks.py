@@ -33,6 +33,10 @@ def task_exec_impression(project_uuid, impressions, machine_uuid):
     config = metadata.ConfigFile(os.path.join(os.environ["HOME"], ".Yuki/config.json"))
     backend_types = config.read_variable("backend_types", {})
     backend_type = backend_types.get(machine_uuid, "reana")
+    runners_id = config.read_variable("runners_id", {})
+    runner_name = {v: k for k, v in runners_id.items()}.get(machine_uuid, machine_uuid)
+    print(f"[task_exec_impression] runner={runner_name} machine_uuid={machine_uuid} "
+          f"backend_type={backend_type} impressions={impressions}")
     jobs = [
         VJob(os.path.join(os.environ["HOME"], ".Yuki/Storage", project_uuid, imp),
              machine_uuid)
@@ -101,7 +105,18 @@ def task_update_workflow_status(project_uuid, workflow_id):
     update_workflow_status itself.
     """
     print("# >>> task_update_workflow_status")
+    print(f"[task_update_workflow_status] project_uuid={project_uuid} "
+          f"workflow_id={workflow_id}")
     workflow = VWorkflow.create(project_uuid, [], workflow_id)
+    print(f"[task_update_workflow_status] backend={workflow.backend_type()} "
+          f"uuid={workflow.uuid} path={workflow.path}")
+    from ..kernel.status_constants import CODA, FAILED, translate_to_musical
+    current_status = workflow.status()
+    if translate_to_musical(current_status) in (CODA, FAILED):
+        print(f"[task_update_workflow_status] workflow already terminal "
+              f"status={current_status}; skipping update_workflow_status")
+        print("# <<< task_update_workflow_status")
+        return
     workflow.update_workflow_status()
     print("# <<< task_update_workflow_status")
 

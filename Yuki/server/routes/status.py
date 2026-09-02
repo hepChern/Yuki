@@ -64,6 +64,13 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
     Returns JSON with musical status name and detailed status message.
     Optional query parameter: legacy=true to return legacy status name.
     """
+    print(
+        f"[status] request path={request.path} "
+        f"project={project_uuid} impression={impression_name} "
+        f"remote={request.remote_addr} "
+        f"ua={request.headers.get('User-Agent', '')!r} "
+        f"referer={request.headers.get('Referer', '')!r}"
+    )
     job_path = config.get_job_path(project_uuid, impression_name)
     config_file = config.get_config_file()
     runners_list = config_file.read_variable("runners", [])
@@ -71,6 +78,15 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
 
     job_config_file = ConfigFile(config.get_job_config_path(project_uuid, impression_name))
     object_type = job_config_file.read_variable("object_type", "")
+    current_path = job_config_file.read_variable("current_path", "")
+    dependencies = job_config_file.read_variable("dependencies", [])
+    aliases = job_config_file.read_variable("alias_to_impression", {})
+    print(
+        f"[status] job_config object_type={object_type!r} "
+        f"current_path={current_path!r} "
+        f"dependencies={dependencies} "
+        f"alias_to_impression={aliases}"
+    )
 
     if object_type == "":
         return jsonify({
@@ -84,9 +100,15 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
 
         job = VJob(job_path, machine_id)
         if job.workflow_id() == "":
+            print(
+                f"[status] skipping runner={machine} machine_id={machine_id} "
+                f"because workflow_id is empty"
+            )
             continue
-        print("Checking status for job", job)
+        print(f"[status] impression={impression_name} runner={machine} "
+              f"machine_id={machine_id} workflow_id={job.workflow_id()}")
         workflow = VWorkflow.create(project_uuid, [], job.workflow_id())
+        print(f"[status] workflow backend_type={workflow.backend_type()}")
         workflow_status = workflow.status()
         # print("Status from workflow", workflow_status)
         workflow_path = os.path.join(
@@ -109,9 +131,14 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
             print(f"Time difference: {time.time() - last_update_time}")
             if (time.time() - last_update_time) > 5:
                 CHERN_CACHE.update_table[workflow.uuid] = time.time()
+                print(f"[status] scheduling task_update_workflow_status for "
+                      f"workflow={workflow.uuid} backend={workflow.backend_type()}")
                 task_update_workflow_status.apply_async(args=[project_uuid, workflow.uuid])
             else:
                 print("Skipping workflow status update to avoid frequent updates.")
+        else:
+            print(f"[status] not scheduling task_update_workflow_status for "
+                  f"workflow={workflow.uuid}: already terminal ({workflow_musical})")
 
         job_status = job.status()
         detailed_status = job.detailed_status()

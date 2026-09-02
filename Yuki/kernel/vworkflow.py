@@ -117,6 +117,9 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             from .reana_workflow import ReanaWorkflow
             workflow = ReanaWorkflow(project_uuid, jobs, uuid)
 
+        print(f"[VWorkflow.create] selected backend={mode} class={type(workflow).__name__} "
+              f"uuid={uuid or 'new'}")
+
         # Persist backend_type on creation so reloads are independent of the
         # global backend_types mapping.
         if not uuid:
@@ -319,6 +322,11 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
                     workflow_list.append(workflow)
 
             for workflow in workflow_list:
+                if is_terminal_status(workflow.status()):
+                    self.logger(f"[dependencies] workflow={workflow.uuid} "
+                                f"status={workflow.status()} already terminal; "
+                                "skipping update_workflow_status")
+                    continue
                 workflow.update_workflow_status()
 
             for job in self.jobs:
@@ -647,6 +655,11 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
 
         Best-effort: a failing refresh must never fail the status update.
         """
+        self.logger(
+            f"[_record_terminal_distributions] calling refresh_workflow_distributions "
+            f"project={self.project_uuid} workflow={self.uuid} status={status} "
+            f"reason=workflow_entered_terminal_state"
+        )
         try:
             # Lazy import: impression_storage imports this module at module
             # level, so importing it here avoids a circular import.
@@ -656,7 +669,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger(f"Failed to refresh distributions: {exc}")
 
-    def _refresh_job_filelists(self, status):
+    def _refresh_job_filelists(self, status, terminal_transition=False):
         """Refresh saved runner file listings after a status update.
 
         /file-status reads the saved listings, so they are refreshed here
@@ -667,7 +680,8 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             # Lazy import: impression_storage imports this module at module
             # level, so importing it here avoids a circular import.
             from Yuki.kernel.impression_storage import refresh_job_filelists
-            refresh_job_filelists(self.project_uuid, self, status)
+            refresh_job_filelists(self.project_uuid, self, status,
+                                  terminal_transition)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger(f"Failed to refresh file listings: {exc}")
 

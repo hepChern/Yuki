@@ -43,6 +43,7 @@ def test_refresh_workflow_distributions_terminal(status):
     task_job = mock.Mock()
     task_job.job_type.return_value = "task"
     task_job.uuid = "imp1"
+    task_job.is_input = False
     algo_job = mock.Mock()
     algo_job.job_type.return_value = "algorithm"
     algo_job.uuid = "imp2"
@@ -76,6 +77,7 @@ def test_refresh_workflow_distributions_survives_failure():
     task_job = mock.Mock()
     task_job.job_type.return_value = "task"
     task_job.uuid = "imp1"
+    task_job.is_input = False
     workflow = mock.Mock()
     workflow.jobs = [task_job]
     workflow.machine_id = "runner-1"

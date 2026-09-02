@@ -366,7 +366,11 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
 
     def update_status_from_workflow(self, workflow_path, logger=None):
         """Update job status based on workflow status."""
-        print("workflow_path", workflow_path)
+        print(
+            f"[update_status_from_workflow] job={self.short_uuid()} "
+            f"path={self.path} workflow_path={workflow_path} "
+            f"machine_id={self.machine_id}"
+        )
         if self.job_type() == "algorithm":
             return
 
@@ -389,14 +393,30 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
 
         # Check if current status is terminal (no further updates)
         if is_terminal_status(current_musical):
+            print(
+                f"[update_status_from_workflow] job={self.short_uuid()} "
+                f"already terminal current_status={current_status} "
+                f"current_musical={current_musical}"
+            )
             return
 
         # Read workflow results
         full_workflow_status = self._read_workflow_results(workflow_path, logger)
-        print("The full_workflow_status got is", full_workflow_status)
+        print(
+            f"[update_status_from_workflow] job={self.short_uuid()} "
+            f"full_workflow_status={full_workflow_status}"
+        )
         if full_workflow_status is None:
+            print(
+                f"[update_status_from_workflow] job={self.short_uuid()} "
+                f"missing workflow results"
+            )
             return
         if not is_valid_status(full_workflow_status):
+            print(
+                f"[update_status_from_workflow] job={self.short_uuid()} "
+                f"invalid workflow status={full_workflow_status}"
+            )
             return
 
         if logger:
@@ -418,6 +438,11 @@ class VJob(ABC):  # pylint: disable=too-many-instance-attributes,too-many-public
             self._write_step_logs(matched_step)
 
         # Update job status
+        print(
+            f"[update_status_from_workflow] job={self.short_uuid()} "
+            f"current_status={current_status} matched_status={status} "
+            f"workflow_status={full_workflow_status}"
+        )
         self._update_job_status(config_file, current_status, status, full_workflow_status, logger)
 
     def log(self, index, offset=0):

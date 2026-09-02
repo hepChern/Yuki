@@ -308,7 +308,11 @@ class ReanaWorkflow(VWorkflow):
         try:
             if not REANA_AVAILABLE:
                 raise ImportError("reana_client is not available")
-            self.logger(f"Updating status for workflow {self.uuid} on machine {self.machine_id}")
+            self.logger(
+                f"[REANA] update_workflow_status workflow={self.uuid} "
+                f"path={self.path} machine_id={self.machine_id} "
+                f"jobs={[(j.short_uuid(), j.is_input, j.job_type()) for j in self.jobs]}"
+            )
             self.set_environment(self.machine_id)
             results = client.get_workflow_status(
                 self.get_name(),
@@ -329,11 +333,15 @@ class ReanaWorkflow(VWorkflow):
             self.logger(f"Workflow status: {results.get('status', 'unknown')}")
             # Refresh listings first: the terminal distribution recording
             # below reads them and must see the final file set.
-            self._refresh_job_filelists(status)
+            self._refresh_job_filelists(status, entered_terminal)
             if entered_terminal:
+                self.logger(
+                    f"[REANA] workflow={self.uuid} entered terminal status={status} "
+                    "recording distributions"
+                )
                 self._record_terminal_distributions(status)
         except Exception as e:
-            self.logger(f"Failed to update the workflow status: {e}")
+            self.logger(f"[REANA] Failed to update the workflow status: {e}")
 
     def download(self, impression=None):  # pylint: disable=too-many-locals
         """Download workflow results."""

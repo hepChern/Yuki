@@ -570,6 +570,12 @@ echo $? > yuki.exit
         """Update workflow status from remote execution."""
         try:
             all_done = True
+            self.logger(
+                f"[SSH] update_workflow_status workflow={self.uuid} "
+                f"path={self.path} machine_id={self.machine_id} "
+                f"remote_exec_path={self.remote_exec_path} "
+                f"jobs={[(j.short_uuid(), j.is_input, j.job_type()) for j in self.jobs]}"
+            )
             self.logger("[SSH] Checking jobs status...")
 
             # Derive the tracked jobs from self.jobs (loaded from local
@@ -634,11 +640,19 @@ echo $? > yuki.exit
 
             workflow_terminal = status in ("finished", "failed")
             self.propagate_job_statuses(workflow_terminal=workflow_terminal)
+            self.logger(
+                f"[SSH] propagate_job_statuses finished "
+                f"workflow_terminal={workflow_terminal}"
+            )
 
             # Refresh listings first: the terminal distribution recording
             # below reads them and must see the final file set.
-            self._refresh_job_filelists(status)
+            self._refresh_job_filelists(status, entered_terminal)
             if entered_terminal:
+                self.logger(
+                    f"[SSH] workflow={self.uuid} entered terminal status={status} "
+                    "recording distributions"
+                )
                 self._record_terminal_distributions(status)
 
         except Exception as e:

@@ -194,7 +194,7 @@ def test_update_workflow_status_terminal_transition_records(tmp_path):
                                                 "logs": "{}"}
         wf.update_workflow_status()
     refresh.assert_called_once_with("proj-1", wf, "finished")
-    refresh_files.assert_called_once_with("proj-1", wf, "finished")
+    refresh_files.assert_called_once_with("proj-1", wf, "finished", True)
 
 
 def test_update_workflow_status_repeated_terminal_poll_skips(tmp_path):
@@ -215,4 +215,4 @@ def test_update_workflow_status_repeated_terminal_poll_skips(tmp_path):
                                                 "logs": "{}"}
         wf.update_workflow_status()
     refresh.assert_not_called()
-    refresh_files.assert_called_once_with("proj-1", wf, "finished")
+    refresh_files.assert_called_once_with("proj-1", wf, "finished", False)

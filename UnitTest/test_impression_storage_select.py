@@ -272,7 +272,7 @@ def test_refresh_job_filelists_dispatches_per_job(tmp_path):
     s.refresh_filelists = mock.Mock()
     wf = mock.Mock()
     wf.uuid = "wf-1"
-    wf.jobs = [mock.Mock(job_type=lambda: "task", uuid="imp-a"),
+    wf.jobs = [mock.Mock(job_type=lambda: "task", uuid="imp-a", is_input=False),
                mock.Mock(job_type=lambda: "algorithm", uuid="imp-b")]
 
     with mock.patch.object(_ims, "ImpressionStorage", return_value=s):
@@ -289,7 +289,7 @@ def test_refresh_job_filelists_swallows_job_errors(tmp_path):
     s.refresh_filelists = mock.Mock(side_effect=RuntimeError("boom"))
     wf = mock.Mock()
     wf.uuid = "wf-1"
-    wf.jobs = [mock.Mock(job_type=lambda: "task", uuid="imp-a")]
+    wf.jobs = [mock.Mock(job_type=lambda: "task", uuid="imp-a", is_input=False)]
 
     with mock.patch.object(_ims, "ImpressionStorage", return_value=s):
         _ims.refresh_job_filelists("proj-1", wf, "running")   # must not raise
