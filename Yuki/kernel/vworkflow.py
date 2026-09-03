@@ -9,6 +9,7 @@ This module defines the abstract VWorkflow class which:
 """
 # pylint: disable=cyclic-import
 
+import logging
 import os
 import time
 from abc import ABC, abstractmethod
@@ -72,7 +73,7 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
         """Log message with timestamp to both console and the workflow log file."""
         timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]", time.localtime())
         log_message = f"{timestamp} {message}"
-        print(log_message)
+        logging.getLogger("Yuki.workflow").info(message)
         with open(self.log_path, "a", encoding='utf-8') as f:
             f.write(log_message + "\n")
 
@@ -117,8 +118,9 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             from .reana_workflow import ReanaWorkflow
             workflow = ReanaWorkflow(project_uuid, jobs, uuid)
 
-        print(f"[VWorkflow.create] selected backend={mode} class={type(workflow).__name__} "
-              f"uuid={uuid or 'new'}")
+        logging.getLogger("Yuki.workflow").info(
+            f"[VWorkflow.create] selected backend={mode} "
+            f"class={type(workflow).__name__} uuid={uuid or 'new'}")
 
         # Persist backend_type on creation so reloads are independent of the
         # global backend_types mapping.
@@ -311,7 +313,9 @@ class VWorkflow(ABC):  # pylint: disable=too-many-instance-attributes
             all_finished = True
             workflow_list = []
             for j in input_jobs:
-                print(j, j.status(musical=True), j.status(musical=False), j.job_type())
+                logging.getLogger("Yuki.workflow").info(
+                    "%s %s %s %s", j, j.status(musical=True),
+                    j.status(musical=False), j.job_type())
             total_inputs = len(input_jobs)
 
             for i, job in enumerate(input_jobs):

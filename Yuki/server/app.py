@@ -9,6 +9,7 @@ from logging import getLogger
 from flask import Flask, render_template, redirect, url_for, request
 
 from .tasks import celeryapp
+from ..utils.logging_config import apply_channel_levels
 from .routes import (
     upload, execution, status, runner, workflow,
     transfer, impression, booking, remote_data, liveness,
@@ -30,6 +31,9 @@ def create_app():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
+
+    # Apply the ~/.Yuki/logging.yaml channel flags (paramiko, workflow, ...)
+    apply_channel_levels()
 
     # Flask configuration
     flask_app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 1024  # 1 GB

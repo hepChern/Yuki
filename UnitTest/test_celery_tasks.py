@@ -1,7 +1,43 @@
 """Tests for Yuki Celery tasks."""
+import logging
 from unittest import mock
 
 import pytest
+
+
+def test_task_exec_impression_logs_submit_finished():
+    """The submit task logs a completion line once the workflow is handed off."""
+    from Yuki.server import tasks
+    workflow = mock.Mock()
+    workflow.uuid = "wf-1"
+
+    records = []
+
+    def capture(record):
+        records.append(record.getMessage())
+
+    handler = logging.Handler()
+    handler.emit = capture
+    kernel_logger = logging.getLogger("Yuki.kernel")
+    kernel_logger.addHandler(handler)
+    old_level = kernel_logger.level
+    kernel_logger.setLevel(logging.DEBUG)
+    try:
+        with mock.patch.object(tasks, "metadata") as meta, \
+             mock.patch.object(tasks, "VJob"), \
+             mock.patch.object(tasks, "VWorkflow") as vwf, \
+             mock.patch.object(tasks, "_validate_remote_data_binding",
+                               return_value=[]):
+            meta.ConfigFile.return_value.read_variable.return_value = {}
+            vwf.create.return_value = workflow
+            tasks.task_exec_impression("proj", "imp1", "runner-1")
+    finally:
+        kernel_logger.removeHandler(handler)
+        kernel_logger.setLevel(old_level)
+
+    workflow.run.assert_called_once_with()
+    assert any("submit finished" in msg and "wf-1" in msg
+               for msg in records)
 
 
 def test_task_transfer_results_calls_run_transfer():

@@ -132,6 +132,7 @@ class _MockStderr:  # pylint: disable=too-few-public-methods
 
 class TestSshWorkflow(unittest.TestCase):
     """Test SshWorkflow with an in-memory Paramiko mock."""
+    # pylint: disable=too-many-instance-attributes,too-many-public-methods
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -219,6 +220,72 @@ class TestSshWorkflow(unittest.TestCase):
 
         self.assertIn("MissingInputException", str(ctx.exception))
         self.assertIn("(exit 1)", str(ctx.exception))
+
+    @patch("paramiko.SSHClient")
+    def test_start_remote_snakemake_backgrounds_wrapper(self, mock_ssh_cls):
+        """The wrapper is started detached so the submit returns immediately."""
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_client.exec_command.return_value = (
+            MagicMock(), _MockStdout("started"), _MockStderr("")
+        )
+
+        self.workflow._start_remote_snakemake()
+
+        commands = [call[0][0]
+                    for call in self.mock_client.exec_command.call_args_list]
+        start_cmd = commands[-1]
+        self.assertIn("nohup", start_cmd)
+        self.assertIn("& echo started", start_cmd)
+
+    @patch("paramiko.SSHClient")
+    def test_wrapper_records_exit_code_on_failure(self, mock_ssh_cls):
+        """yuki.exit is written even when snakemake exits nonzero."""
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_client.exec_command.return_value = (
+            MagicMock(), _MockStdout("started"), _MockStderr("")
+        )
+
+        self.workflow._start_remote_snakemake()
+
+        wrapper = self.mock_sftp.files[
+            f"{self.workflow.remote_exec_path}/yuki_run.sh"].decode("utf-8")
+        self.assertIn("wait $! || rc=$?", wrapper)
+        self.assertIn("echo ${rc:-0} > yuki.exit", wrapper)
+
+    @patch("paramiko.SSHClient")
+    def test_wrapper_conda_binary_dir_on_path(self, mock_ssh_cls):
+        """conda_path is a binary path; its directory lands on PATH."""
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_client.exec_command.return_value = (
+            MagicMock(), _MockStdout("started"), _MockStderr("")
+        )
+        self.workflow.ssh_config["conda_path"] = \
+            "/home/zhaomr/workdir/miniconda3/bin/conda"
+
+        self.workflow._start_remote_snakemake()
+
+        wrapper = self.mock_sftp.files[
+            f"{self.workflow.remote_exec_path}/yuki_run.sh"].decode("utf-8")
+        self.assertIn('CONDA_BIN="/home/zhaomr/workdir/miniconda3/bin"',
+                      wrapper)
+        self.assertIn('export PATH="${CONDA_BIN:+$CONDA_BIN:}'
+                      '$HOME/.local/bin', wrapper)
+        self.assertNotIn("miniconda3/bin/bin", wrapper)
+
+    @patch("paramiko.SSHClient")
+    def test_wrapper_conda_fallback_without_conda_path(self, mock_ssh_cls):
+        """Without conda_path the wrapper falls back to conda info --base."""
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_client.exec_command.return_value = (
+            MagicMock(), _MockStdout("started"), _MockStderr("")
+        )
+
+        self.workflow._start_remote_snakemake()
+
+        wrapper = self.mock_sftp.files[
+            f"{self.workflow.remote_exec_path}/yuki_run.sh"].decode("utf-8")
+        self.assertIn("conda info --base", wrapper)
+        self.assertIn('CONDA_BIN="${CONDA_BIN:+$CONDA_BIN/bin}"', wrapper)
 
     @patch("paramiko.SSHClient")
     def test_execute_backend_uploads_snakefile_and_starts_command(self, mock_ssh_cls):

@@ -18,33 +18,34 @@ import json  # pylint: disable=wrong-import-order
 
 bp = Blueprint('execution', __name__)
 logger = getLogger("YukiLogger")
+_debug = getLogger("Yuki.execution")
 
 @bp.route('/execute', methods=['GET', 'POST'])
 def execute():
     """Execute impressions."""
-    print("# >>> execute")
+    _debug.debug("# >>> execute")
     if request.method == 'POST':
-        print(request)
+        _debug.debug("%s", request)
         machine = request.form["machine"]
         project_uuid = request.form['project_uuid']
         cache_dict = request.form["cache_on_runner"]
         cache_dict = json.loads(cache_dict)
         contents = request.files["impressions"].read().decode()
         start_jobs = []
-        print("cache_on_runner:", cache_dict)
-        print("machine:", machine)
-        print("contents:", contents.split(" "))
+        _debug.debug("cache_on_runner: %s", cache_dict)
+        _debug.debug("machine: %s", machine)
+        _debug.debug("contents: %s", contents.split(" "))
 
         for impression in contents.split(" "):
-            print("--------------")
-            print("impression:", impression)
+            _debug.debug("--------------")
+            _debug.debug("impression: %s", impression)
             job_path = config.get_job_path(project_uuid, impression)
             job = VJob(job_path, None)
-            print("job", job, job.job_type(), job.status())
+            _debug.debug("job %s %s %s", job, job.job_type(), job.status())
 
             if job.job_type() == "task":
                 if job.status() not in (SILENCE, FAILED, DISSONANCE):
-                    print("job status is not raw or failed")
+                    _debug.debug("job status is not raw or failed")
                     continue
                 job.set_status(PRELUDE, "Job queued for execution")
                 # Redefine, only aim for write use_eos variable
@@ -59,24 +60,24 @@ def execute():
                 # start_jobs.append(job)
 
         if len(start_jobs) == 0:
-            print("no job to run")
-            print("# <<< execute")
+            _debug.debug("no job to run")
+            _debug.debug("# <<< execute")
             return "no job to run"
 
         contents = " ".join([job.uuid for job in start_jobs])
 
-        print("Asynchronous execution")
-        print("contents", contents)
+        _debug.debug("Asynchronous execution")
+        _debug.debug("contents %s", contents)
         task = task_exec_impression.apply_async(args=[project_uuid, contents, machine])
 
-        print("Contents is:", contents)
+        _debug.debug("Contents is: %s", contents)
         for impression in contents.split(" "):
             job_path = config.get_job_path(project_uuid, impression)
-            print("Project_uuid is:", project_uuid)
-            print("Job path is:", job_path)
+            _debug.debug("Project_uuid is: %s", project_uuid)
+            _debug.debug("Job path is: %s", job_path)
             job = VJob(job_path, machine)
             job.set_runid(task.id)
-        print("### <<< execute")
+        _debug.debug("### <<< execute")
         return task.id
 
     return ""  # For GET requests
@@ -84,20 +85,20 @@ def execute():
 @bp.route('/purge', methods=['GET', 'POST'])
 def purge():
     """Purge impressions."""
-    print("# >>> purge")
+    _debug.debug("# >>> purge")
     if request.method == 'POST':
         contents = request.files["impressions"].read().decode()
         project_uuid = request.form['project_uuid']
-        print("contents:", contents.split(" "))
+        _debug.debug("contents: %s", contents.split(" "))
 
         for impression in contents.split(" "):
-            print("impression:", impression)
+            _debug.debug("impression: %s", impression)
             job_path = config.get_job_path(project_uuid, impression)
             # try to remove the job
             shutil.rmtree(job_path, ignore_errors=True)
 
-        print("contents", contents)
-        print("### <<< purge")
+        _debug.debug("contents %s", contents)
+        _debug.debug("### <<< purge")
     return ""  # For GET requests
 
 

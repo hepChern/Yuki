@@ -7,12 +7,16 @@ that extends VJob functionality with container-specific operations like
 environment management, command execution, and input/output handling.
 """
 # pylint: disable=cyclic-import
+import logging
 import os
 import time
 from CelebiChrono.utils import metadata
 from .vjob import VJob
 from .image_job import ImageJob
 from .file_staging import walk_files
+
+_debug = logging.getLogger("Yuki.kernel")
+
 
 class ContainerJob(VJob):
     """
@@ -57,8 +61,8 @@ class ContainerJob(VJob):
         # print("Predecessors, ", self.predecessors())
         for pred_job in predecessors:
             if pred_job.job_type() == "algorithm":
-                print(f"    >>>> >>>> Image retrieval time after finding predecessor: "
-                       f"{time.time() - start_time}")
+                _debug.debug(f"    >>>> >>>> Image retrieval time after finding predecessor: "
+                             f"{time.time() - start_time}")
                 self._image = ImageJob(pred_job.path, self.machine_id)
                 return self._image
         return None
@@ -98,7 +102,7 @@ class ContainerJob(VJob):
         commands.append(f"touch {self.short_uuid()}.done")
 
         step = self._create_reana_step_metadata()
-        print(f"    >>>> Step creation time after metadata creation: {time.time() - start_time}")
+        _debug.debug(f"    >>>> Step creation time after metadata creation: {time.time() - start_time}")
         # step["commands"] = " && ".join(commands)
         step["commands"] = commands
 
@@ -116,7 +120,7 @@ class ContainerJob(VJob):
         if self.is_input or self.compute_backend() == "htcondorcern":
             return []
 
-        print(f"    >>>> >>>> User command processing start time: {time.time() - start_time}")
+        _debug.debug(f"    >>>> >>>> User command processing start time: {time.time() - start_time}")
 
         raw_commands = self.yaml_file.read_variable("commands", [])
         if not raw_commands:
@@ -125,15 +129,15 @@ class ContainerJob(VJob):
                 raw_commands = img.yaml_file.read_variable("commands", [])
         processed_commands = []
 
-        print(raw_commands)
+        _debug.debug(raw_commands)
         for i, command in enumerate(raw_commands):
-            print(f"    >>>> >>>> Processing command {i} start time: {time.time() - start_time}")
+            _debug.debug(f"    >>>> >>>> Processing command {i} start time: {time.time() - start_time}")
             command = self._substitute_parameters(command)
-            print(f"    >>>> >>>> After parameter substitution time: {time.time() - start_time}")
+            _debug.debug(f"    >>>> >>>> After parameter substitution time: {time.time() - start_time}")
             command = self._substitute_inputs(command)
-            print(f"    >>>> >>>> After input substitution time: {time.time() - start_time}")
+            _debug.debug(f"    >>>> >>>> After input substitution time: {time.time() - start_time}")
             command = self._substitute_paths(command)
-            print(f"    >>>> >>>> After path substitution time: {time.time() - start_time}")
+            _debug.debug(f"    >>>> >>>> After path substitution time: {time.time() - start_time}")
             command = "{ " + command + " ; } >> " + f"logs/celebi_user_step{i}.log 2>&1"
             processed_commands.append(command.replace("\"", "\\\""))
 
@@ -262,9 +266,9 @@ class ContainerJob(VJob):
         # Link to input impressions
         start_time = time.time()
         alias_list, alias_map = self.inputs()
-        print(f"    >>>> >>>> Symlink creation time after inputs retrieval: "
-               f"{time.time() - start_time}")
-        print("The alias_list is:", alias_list)
+        _debug.debug(f"    >>>> >>>> Symlink creation time after inputs retrieval: "
+                     f"{time.time() - start_time}")
+        _debug.debug("The alias_list is: %s", alias_list)
         for alias in alias_list:
             impression = alias_map[alias]
             commands.append(f"ln -s ../imp{impression[:7]} {alias}")
@@ -511,7 +515,7 @@ class ContainerJob(VJob):
         start_time = time.time()
         parameters = self.yaml_file.read_variable("parameters", {})
         sorted_keys = sorted(parameters.keys())
-        print(f"    >>>> >>>> Parameters retrieval time: {time.time() - start_time}")
+        _debug.debug(f"    >>>> >>>> Parameters retrieval time: {time.time() - start_time}")
         return sorted_keys, parameters
 
     def outputs(self):

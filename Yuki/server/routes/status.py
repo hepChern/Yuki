@@ -4,6 +4,7 @@ Status and monitoring routes.
 import json
 import os
 import time
+from logging import getLogger
 from flask import Blueprint, render_template, request, jsonify, url_for, send_from_directory
 from werkzeug.utils import secure_filename
 from CelebiChrono.utils.metadata import ConfigFile
@@ -19,6 +20,7 @@ from ..config import config
 from ..tasks import task_update_workflow_status
 
 bp = Blueprint('status', __name__)
+_debug = getLogger("Yuki.execution")
 
 CHERN_CACHE = ChernCache.instance()
 
@@ -64,7 +66,7 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
     Returns JSON with musical status name and detailed status message.
     Optional query parameter: legacy=true to return legacy status name.
     """
-    print(
+    _debug.debug(
         f"[status] request path={request.path} "
         f"project={project_uuid} impression={impression_name} "
         f"remote={request.remote_addr} "
@@ -81,7 +83,7 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
     current_path = job_config_file.read_variable("current_path", "")
     dependencies = job_config_file.read_variable("dependencies", [])
     aliases = job_config_file.read_variable("alias_to_impression", {})
-    print(
+    _debug.debug(
         f"[status] job_config object_type={object_type!r} "
         f"current_path={current_path!r} "
         f"dependencies={dependencies} "
@@ -100,15 +102,15 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
 
         job = VJob(job_path, machine_id)
         if job.workflow_id() == "":
-            print(
+            _debug.debug(
                 f"[status] skipping runner={machine} machine_id={machine_id} "
                 f"because workflow_id is empty"
             )
             continue
-        print(f"[status] impression={impression_name} runner={machine} "
-              f"machine_id={machine_id} workflow_id={job.workflow_id()}")
+        _debug.debug(f"[status] impression={impression_name} runner={machine} "
+                     f"machine_id={machine_id} workflow_id={job.workflow_id()}")
         workflow = VWorkflow.create(project_uuid, [], job.workflow_id())
-        print(f"[status] workflow backend_type={workflow.backend_type()}")
+        _debug.debug(f"[status] workflow backend_type={workflow.backend_type()}")
         workflow_status = workflow.status()
         # print("Status from workflow", workflow_status)
         workflow_path = os.path.join(
@@ -119,26 +121,26 @@ def status(project_uuid, impression_name):  # pylint: disable=too-many-locals
             job.workflow_id()
         )
 
-        print("Path:", workflow_path)
+        _debug.debug("Path: %s", workflow_path)
         job.update_status_from_workflow( # workflow path
                     workflow_path
                 )
         # Update workflow status check to use musical names
         workflow_musical = translate_to_musical(workflow_status)
-        print("The status is:", workflow_musical)
+        _debug.debug("The status is: %s", workflow_musical)
         if workflow_musical not in (CODA, FAILED):
             last_update_time = CHERN_CACHE.update_table.get(workflow.uuid, -1)
-            print(f"Time difference: {time.time() - last_update_time}")
+            _debug.debug(f"Time difference: {time.time() - last_update_time}")
             if (time.time() - last_update_time) > 5:
                 CHERN_CACHE.update_table[workflow.uuid] = time.time()
-                print(f"[status] scheduling task_update_workflow_status for "
-                      f"workflow={workflow.uuid} backend={workflow.backend_type()}")
+                _debug.debug(f"[status] scheduling task_update_workflow_status for "
+                             f"workflow={workflow.uuid} backend={workflow.backend_type()}")
                 task_update_workflow_status.apply_async(args=[project_uuid, workflow.uuid])
             else:
-                print("Skipping workflow status update to avoid frequent updates.")
+                _debug.debug("Skipping workflow status update to avoid frequent updates.")
         else:
-            print(f"[status] not scheduling task_update_workflow_status for "
-                  f"workflow={workflow.uuid}: already terminal ({workflow_musical})")
+            _debug.debug(f"[status] not scheduling task_update_workflow_status for "
+                         f"workflow={workflow.uuid}: already terminal ({workflow_musical})")
 
         job_status = job.status()
         detailed_status = job.detailed_status()
@@ -411,7 +413,7 @@ def impview(project_uuid, impression_name):
     process_directory(job_path, runner_id, "logs", file_infos_dict, max_preview_chars)
     process_directory(job_path, runner_id, "watermarks", file_infos_dict, max_preview_chars)
 
-    print(file_infos_dict)
+    _debug.debug(file_infos_dict)
     # Convert dictionary values to a list for the template
     final_file_infos = list(file_infos_dict.values())
 
@@ -612,7 +614,8 @@ def bookkeeping():
         # Save the file
         file_obj.save(target_file_path)
 
-    print(f"Project {project_uuid} bookkept successfully at {base_save_path}")
+    _debug.debug("Project %s bookkept successfully at %s",
+                 project_uuid, base_save_path)
 
     return jsonify({
         "status": "success",

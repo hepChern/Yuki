@@ -1,12 +1,16 @@
 """
 Celery tasks for Yuki server.
 """
+import logging
 import os
 from celery import Celery
 from CelebiChrono.utils import metadata
 from ..kernel import remote_data_ops, result_transfer
 from ..kernel.vjob import VJob
 from ..kernel.vworkflow import VWorkflow
+from ..utils.logging_config import apply_channel_levels
+
+_debug = logging.getLogger("Yuki.kernel")
 
 
 def create_celery_app():
@@ -20,6 +24,7 @@ def create_celery_app():
         timezone='UTC',
         enable_utc=True,
     )
+    apply_channel_levels()
     return app
 
 
@@ -35,16 +40,16 @@ def task_exec_impression(project_uuid, impressions, machine_uuid):
     backend_type = backend_types.get(machine_uuid, "reana")
     runners_id = config.read_variable("runners_id", {})
     runner_name = {v: k for k, v in runners_id.items()}.get(machine_uuid, machine_uuid)
-    print(f"[task_exec_impression] runner={runner_name} machine_uuid={machine_uuid} "
-          f"backend_type={backend_type} impressions={impressions}")
+    _debug.debug(f"[task_exec_impression] runner={runner_name} machine_uuid={machine_uuid} "
+                 f"backend_type={backend_type} impressions={impressions}")
     jobs = [
         VJob(os.path.join(os.environ["HOME"], ".Yuki/Storage", project_uuid, imp),
              machine_uuid)
         for imp in impressions.split(" ")
     ]
-    print("jobs", jobs)
+    _debug.debug("jobs %s", jobs)
     workflow = VWorkflow.create(project_uuid, jobs, None, mode=backend_type)
-    print("workflow", workflow)
+    _debug.debug("workflow %s", workflow)
 
     marks = _validate_remote_data_binding(workflow, project_uuid, machine_uuid)
     if marks:
@@ -55,6 +60,8 @@ def task_exec_impression(project_uuid, impressions, machine_uuid):
         return
 
     workflow.run()
+    _debug.debug("[task_exec_impression] submit finished workflow=%s",
+                 workflow.uuid)
 
 
 def _validate_remote_data_binding(workflow, project_uuid, machine_uuid):
@@ -104,21 +111,21 @@ def task_update_workflow_status(project_uuid, workflow_id):
     The distribution refresh on the terminal transition happens inside
     update_workflow_status itself.
     """
-    print("# >>> task_update_workflow_status")
-    print(f"[task_update_workflow_status] project_uuid={project_uuid} "
-          f"workflow_id={workflow_id}")
+    _debug.debug("# >>> task_update_workflow_status")
+    _debug.debug(f"[task_update_workflow_status] project_uuid={project_uuid} "
+                 f"workflow_id={workflow_id}")
     workflow = VWorkflow.create(project_uuid, [], workflow_id)
-    print(f"[task_update_workflow_status] backend={workflow.backend_type()} "
-          f"uuid={workflow.uuid} path={workflow.path}")
+    _debug.debug(f"[task_update_workflow_status] backend={workflow.backend_type()} "
+                 f"uuid={workflow.uuid} path={workflow.path}")
     from ..kernel.status_constants import CODA, FAILED, translate_to_musical
     current_status = workflow.status()
     if translate_to_musical(current_status) in (CODA, FAILED):
-        print(f"[task_update_workflow_status] workflow already terminal "
-              f"status={current_status}; skipping update_workflow_status")
-        print("# <<< task_update_workflow_status")
+        _debug.debug(f"[task_update_workflow_status] workflow already terminal "
+                     f"status={current_status}; skipping update_workflow_status")
+        _debug.debug("# <<< task_update_workflow_status")
         return
     workflow.update_workflow_status()
-    print("# <<< task_update_workflow_status")
+    _debug.debug("# <<< task_update_workflow_status")
 
 
 @celeryapp.task

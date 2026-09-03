@@ -2,6 +2,7 @@
 Runner management routes.
 """
 import os
+from logging import getLogger
 from flask import Blueprint, request, jsonify
 from CelebiChrono.utils import csys
 from ...kernel import runner_config
@@ -13,6 +14,7 @@ from ..config import config
 from ..utils import ping
 
 bp = Blueprint('runner', __name__)
+_debug = getLogger("Yuki.execution")
 
 
 def _ssh_ping(host, user, key_path, port=22):
@@ -231,7 +233,7 @@ def removerunner(runner):
         return "runner not found"
 
     runner_id = runners_id[runner]
-    print("runner_id", runner_id)
+    _debug.debug("runner_id %s", runner_id)
     runners_list.remove(runner)
     del runners_id[runner]
 

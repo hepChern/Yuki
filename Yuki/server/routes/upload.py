@@ -16,6 +16,7 @@ from ...kernel.vworkflow import VWorkflow
 
 bp = Blueprint('upload', __name__)
 logger = getLogger("YukiLogger")
+_debug = getLogger("Yuki.execution")
 
 
 def _safe_send_from_directory(directory, filename):
@@ -97,7 +98,7 @@ def export(project_uuid, impression, filename):
     job_path = config.get_job_path(project_uuid, impression)
     config_file = config.get_config_file()
 
-    print("EXPORTING", job_path, filename)
+    _debug.debug("EXPORTING %s %s", job_path, filename)
     rawdata_dir = os.path.join(job_path, "rawdata")
     full_path = os.path.join(rawdata_dir, filename)
     if os.path.exists(full_path):
@@ -111,7 +112,7 @@ def export(project_uuid, impression, filename):
         runner_id = runners_id[runner]
         path = os.path.join(job_path, runner_id, "stageout")
         full_path = os.path.join(path, filename)
-        print("path", full_path)
+        _debug.debug("path %s", full_path)
         if os.path.exists(full_path):
             return _safe_send_from_directory(path, filename)
     return "NOTFOUND"
