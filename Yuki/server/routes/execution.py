@@ -141,3 +141,15 @@ def file_status(project_uuid, impression, machine):  # pylint: disable=unused-ar
     detailed = request.args.get("detailed") == "1"
     storage = ImpressionStorage(project_uuid, impression)
     return jsonify(storage.file_status(kind, detailed=detailed))
+
+
+@bp.route("/refresh-filelists/<project_uuid>/<impression>", methods=['GET'])
+def refresh_filelists(project_uuid, impression):
+    """Force a live re-listing of the runner's stageout and logs.
+
+    Terminal workflows are no longer polled, so their saved listing
+    freezes at the terminal stamp; this endpoint re-lists the runner on
+    demand and rewrites the saved listings.
+    """
+    storage = ImpressionStorage(project_uuid, impression)
+    return jsonify(storage.force_refresh_filelists())

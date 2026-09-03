@@ -104,3 +104,16 @@ def test_export_blocks_path_traversal(tmp_path):
         r = c.get("/export/proj/imp/..%2F..%2Frawdata%2Fsafe.txt")
         assert r.status_code == 200
         assert r.get_data(as_text=True) == "NOTFOUND"
+
+
+def test_refresh_filelists_route_returns_report():
+    """refresh-filelists returns the force refresh report."""
+    app = _app(ex_routes.bp)
+    with mock.patch.object(ex_routes, "ImpressionStorage") as storage_cls:
+        storage_cls.return_value.force_refresh_filelists.return_value = {
+            "runner": {"stageout": {"files": 23, "error": None},
+                       "logs": {"files": 1, "error": None}}}
+        c = app.test_client()
+        r = c.get("/refresh-filelists/proj/imp")
+        assert r.status_code == 200
+        assert r.get_json()["runner"]["stageout"]["files"] == 23

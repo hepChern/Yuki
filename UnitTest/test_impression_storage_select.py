@@ -293,3 +293,74 @@ def test_refresh_job_filelists_swallows_job_errors(tmp_path):
 
     with mock.patch.object(_ims, "ImpressionStorage", return_value=s):
         _ims.refresh_job_filelists("proj-1", wf, "running")   # must not raise
+
+
+def test_force_refresh_filelists_lists_live_for_each_kind(tmp_path):
+    """force_refresh_filelists re-lists stageout and logs for every context."""
+    s, _ims = _storage(tmp_path)
+    wf = mock.Mock()
+    wf.list_runner_files.return_value = [{"name": "tmva.root", "size": 10}]
+    s._get_runner_contexts = lambda: [("runner", _finished_job("wf-1"), wf)]
+
+    report = s.force_refresh_filelists()
+
+    assert wf.list_runner_files.call_args_list[0].args == ("imp7", "stageout")
+    assert wf.list_runner_files.call_args_list[1].args == ("imp7", "logs")
+    machine_dir = tmp_path / "job" / "runner-1"
+    payload = _read_cache(machine_dir)
+    assert payload["files"][0]["name"] == "tmva.root"
+    assert payload["workflow_id"] == "wf-1"
+    assert "stamp" in payload and "error" not in payload
+    logs_payload = json.loads(
+        (machine_dir / "logs.filelist.json").read_text())
+    assert logs_payload["files"][0]["name"] == "tmva.root"
+    assert report["runner"]["stageout"] == {"files": 1, "error": None}
+
+
+def test_force_refresh_filelists_keeps_previous_on_failure(tmp_path):
+    """A failed force refresh keeps the previous listing and records the error."""
+    s, _ims = _storage(tmp_path)
+    machine_dir = tmp_path / "job" / "runner-1"
+    _write_cache(machine_dir, "wf-1", [{"name": "old.root", "size": 3}])
+    wf = mock.Mock()
+    wf.list_runner_files.side_effect = ConnectionError("boom")
+    s._get_runner_contexts = lambda: [("runner", _finished_job("wf-1"), wf)]
+
+    report = s.force_refresh_filelists()
+
+    payload = _read_cache(machine_dir)
+    assert payload["files"][0]["name"] == "old.root"   # previous kept
+    assert "ConnectionError" in payload["error"]
+    assert "ConnectionError" in report["runner"]["stageout"]["error"]
+
+
+def test_force_refresh_filelists_keeps_previous_on_empty_same_workflow(tmp_path):
+    """An empty listing keeps a previous listing of the same workflow id."""
+    s, _ims = _storage(tmp_path)
+    machine_dir = tmp_path / "job" / "runner-1"
+    _write_cache(machine_dir, "wf-1", [{"name": "old.root", "size": 3}])
+    wf = mock.Mock()
+    wf.list_runner_files.return_value = []
+    s._get_runner_contexts = lambda: [("runner", _finished_job("wf-1"), wf)]
+
+    s.force_refresh_filelists()
+
+    payload = _read_cache(machine_dir)
+    assert payload["files"][0]["name"] == "old.root"   # previous kept
+    assert "no files" in payload["error"]
+
+
+def test_force_refresh_filelists_writes_empty_for_new_workflow(tmp_path):
+    """An empty listing with no matching previous listing writes empty."""
+    s, _ims = _storage(tmp_path)
+    machine_dir = tmp_path / "job" / "runner-1"
+    _write_cache(machine_dir, "wf-old", [{"name": "old.root", "size": 3}])
+    wf = mock.Mock()
+    wf.list_runner_files.return_value = []
+    s._get_runner_contexts = lambda: [("runner", _finished_job("wf-1"), wf)]
+
+    s.force_refresh_filelists()
+
+    payload = _read_cache(machine_dir)
+    assert payload["files"] == [] and payload["workflow_id"] == "wf-1"
+    assert "error" not in payload

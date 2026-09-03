@@ -268,6 +268,42 @@ class ImpressionStorage:
                               f"(listing from {stamp})"}
         return files, note
 
+    @staticmethod
+    def _write_filelist(machine_dir, kind, workflow_id, files, error=None):
+        """Atomically write a saved runner listing (tmp + rename).
+
+        /file-status reads the file concurrently, so writes must be atomic.
+        """
+        payload = {
+            "workflow_id": workflow_id,
+            "files": files,
+            "stamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        if error:
+            payload["error"] = error
+        os.makedirs(machine_dir, exist_ok=True)
+        cache_path = os.path.join(machine_dir, kind + ".filelist.json")
+        tmp_path = cache_path + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp_path, cache_path)
+        except OSError:
+            pass   # best-effort; status still works without it
+
+    @staticmethod
+    def _previous_files(machine_dir, kind, workflow_id):
+        """Return the previous saved listing when it matches <workflow_id>."""
+        try:
+            with open(os.path.join(machine_dir, kind + ".filelist.json"),
+                      encoding="utf-8") as fh:
+                cached = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        if cached.get("workflow_id") != workflow_id:
+            return None
+        return cached.get("files")
+
     def refresh_filelists(self, workflow, pre_execution):  # pylint: disable=too-many-locals
         """Write the saved runner listings after a status update.
 
@@ -276,8 +312,7 @@ class ImpressionStorage:
         listings are written locally without contacting the runner.
         Otherwise the runner is listed live (stageout and logs); a failed
         listing keeps the previous files and records the error in the
-        listing file so /file-status can report it. Writes are atomic
-        (tmp + rename) because /file-status reads the file concurrently.
+        listing file so /file-status can report it.
         """
         machine_dir = None
         workflow_id = None
@@ -295,29 +330,49 @@ class ImpressionStorage:
                     files = workflow.list_runner_files(self.impression, kind)
                 except Exception as exc:  # runner unreachable
                     error = f"{type(exc).__name__}: {exc}"
-                    cache_path = os.path.join(machine_dir,
-                                              kind + ".filelist.json")
-                    try:
-                        with open(cache_path, encoding="utf-8") as fh:
-                            files = json.load(fh).get("files", [])
-                    except (OSError, ValueError):
-                        files = []
-            payload = {
-                "workflow_id": workflow_id,
-                "files": files,
-                "stamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-            }
-            if error:
-                payload["error"] = error
-            os.makedirs(machine_dir, exist_ok=True)
-            cache_path = os.path.join(machine_dir, kind + ".filelist.json")
-            tmp_path = cache_path + ".tmp"
-            try:
-                with open(tmp_path, "w", encoding="utf-8") as fh:
-                    json.dump(payload, fh)
-                os.replace(tmp_path, cache_path)
-            except OSError:
-                pass   # best-effort; status still works without it
+                    previous = self._previous_files(machine_dir, kind,
+                                                    workflow_id)
+                    files = previous if previous is not None else []
+            self._write_filelist(machine_dir, kind, workflow_id, files, error)
+
+    def force_refresh_filelists(self):
+        """Re-list the runner live and rewrite the saved file listings.
+
+        The status-update path skips terminal jobs (see
+        refresh_job_filelists), so a finished job's listing freezes at its
+        terminal stamp. Called from /refresh-filelists, this method lists
+        stageout and logs on demand for every runner context. A failed
+        listing keeps the previous files and records the error; an empty
+        listing also keeps a previous listing of the same workflow (the
+        workspace may be gone) and records a note.
+        """
+        report = {}
+        for name, job, workflow in self._get_runner_contexts():
+            machine_dir = os.path.join(self.job_path, self.runners_id[name])
+            workflow_id = job.workflow_id()
+            runner_report = {}
+            for kind in ("stageout", "logs"):
+                error = None
+                files = []
+                try:
+                    files = workflow.list_runner_files(self.impression, kind)
+                except Exception as exc:  # runner unreachable
+                    error = f"{type(exc).__name__}: {exc}"
+                    previous = self._previous_files(machine_dir, kind,
+                                                    workflow_id)
+                    files = previous if previous is not None else []
+                if not error and not files:
+                    previous = self._previous_files(machine_dir, kind,
+                                                    workflow_id)
+                    if previous:
+                        files = previous
+                        error = ("runner returned no files; keeping the "
+                                 "previous listing")
+                self._write_filelist(machine_dir, kind, workflow_id, files,
+                                     error)
+                runner_report[kind] = {"files": len(files), "error": error}
+            report[name] = runner_report
+        return report
 
     def collect_outputs(self):
         """Retrieves only output files from runners."""
