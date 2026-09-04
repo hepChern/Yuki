@@ -61,8 +61,12 @@ def test_wrapper_uses_cores_and_paths(tmp_path, monkeypatch):
             """Record the written wrapper file."""
             written[path] = text
 
-        def exec(self, _cmd):
+        def exec(self, _cmd, timeout=None):  # pylint: disable=unused-argument
             """Report a successful remote command."""
+            return "", "", 0
+
+        def exec_start_detached(self, command, timeout=30, grace=2):  # pylint: disable=unused-argument
+            """Report a successful detached start."""
             return "", "", 0
 
     with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
@@ -483,8 +487,12 @@ def test_wrapper_sanitizes_environment_without_conda_path(tmp_path, monkeypatch)
             """Record the written wrapper file."""
             written[path] = text
 
-        def exec(self, _cmd):
+        def exec(self, _cmd, timeout=None):  # pylint: disable=unused-argument
             """Report a successful remote command."""
+            return "", "", 0
+
+        def exec_start_detached(self, command, timeout=30, grace=2):  # pylint: disable=unused-argument
+            """Report a successful detached start."""
             return "", "", 0
 
     with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):
@@ -526,8 +534,12 @@ def test_wrapper_conda_path_curates_path(tmp_path, monkeypatch):
             """Record the written wrapper file."""
             written[path] = text
 
-        def exec(self, _cmd):
+        def exec(self, _cmd, timeout=None):  # pylint: disable=unused-argument
             """Report a successful remote command."""
+            return "", "", 0
+
+        def exec_start_detached(self, command, timeout=30, grace=2):  # pylint: disable=unused-argument
+            """Report a successful detached start."""
             return "", "", 0
 
     with mock.patch.object(SshWorkflow, "_ssh", return_value=FakeSsh()):

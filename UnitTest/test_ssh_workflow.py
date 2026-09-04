@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import socket
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -99,12 +100,45 @@ class _MockSftp:
 class _MockChannel:  # pylint: disable=too-few-public-methods
     """A channel double reporting a fixed exit code."""
 
-    def __init__(self, exit_code=0):
+    def __init__(self, exit_code=0, ready=True, data=b"", stderr_data=b""):
         self._exit_code = exit_code
+        self._ready = ready
+        self.timeout = None
+        self._closed = False
+        self._data = data
+        self._stderr_data = stderr_data
+
+    def settimeout(self, timeout):
+        """Record the channel timeout."""
+        self.timeout = timeout
+
+    def exit_status_ready(self):
+        """Report whether the remote exit status is available."""
+        return self._ready
 
     def recv_exit_status(self):
         """Return the configured exit code."""
         return self._exit_code
+
+    def recv_ready(self):
+        """Report whether buffered stdout data is available."""
+        return bool(self._data)
+
+    def recv(self, _size):
+        """Return the buffered stdout data."""
+        return self._data
+
+    def recv_stderr_ready(self):
+        """Report whether buffered stderr data is available."""
+        return bool(self._stderr_data)
+
+    def recv_stderr(self, _size):
+        """Return the buffered stderr data."""
+        return self._stderr_data
+
+    def close(self):
+        """Record the client-side channel close."""
+        self._closed = True
 
 
 class _MockStdout:  # pylint: disable=too-few-public-methods
@@ -234,11 +268,110 @@ class TestSshWorkflow(unittest.TestCase):
         commands = [call[0][0]
                     for call in self.mock_client.exec_command.call_args_list]
         start_cmd = commands[-1]
-        self.assertIn("nohup", start_cmd)
+        self.assertNotIn("nohup", start_cmd)
+        self.assertIn("bash yuki_run.sh", start_cmd)
         self.assertIn("& echo started", start_cmd)
         # All three fds must leave the channel, or sshd keeps the channel
         # open and recv_exit_status blocks forever (submit stuck running).
         self.assertIn("< /dev/null", start_cmd)
+        # setsid moves the wrapper into its own session: it survives the
+        # sshd session teardown (SIGHUP) without nohup, and the exec
+        # session may actually close once no members remain.
+        self.assertIn("setsid", start_cmd)
+
+    @patch("paramiko.SSHClient")
+    def test_start_remote_snakemake_tolerates_silent_remote(self, mock_ssh_cls):
+        """A remote that never confirms is logged as an error but does not
+        fail the submit: the wrapper is detached and polling tracks it."""
+        mock_ssh_cls.return_value = self.mock_client
+        self.mock_client.exec_command.return_value = (
+            MagicMock(), _MockStdout("started"), _MockStderr("")
+        )
+        from Yuki.kernel.ssh_workflow import SSHStartNotConfirmed
+
+        with patch("Yuki.kernel.ssh_workflow._SshConnection.exec_start_detached",
+                   side_effect=SSHStartNotConfirmed("no confirmation")):
+            self.workflow._start_remote_snakemake()  # must not raise
+
+    def test_exec_start_detached_raises_on_silent_remote(self):
+        """A silent remote raises SSHStartNotConfirmed.
+
+        The channel is left for the connection teardown: closing it
+        directly blocks on hosts whose sshd never confirms the close.
+        """
+        from Yuki.kernel.ssh_workflow import _SshConnection, SSHStartNotConfirmed
+        conn = _SshConnection("host", "user")
+        conn._client = MagicMock()
+        stdout = MagicMock()
+        stdout.channel = _MockChannel(ready=False)
+        stderr = MagicMock()
+        conn._client.exec_command.return_value = (MagicMock(), stdout, stderr)
+
+        with self.assertRaises(SSHStartNotConfirmed):
+            conn.exec_start_detached("cmd", timeout=30, grace=0)
+
+        self.assertFalse(stdout.channel._closed)  # pylint: disable=protected-access
+
+    def test_exec_start_detached_returns_result_when_reported(self):
+        """A remote that reports promptly returns (out, err, code).
+
+        The outputs come from the channel's buffered data, not from
+        waiting for EOF (the channel may never reach EOF when the
+        session keeps a background job alive).
+        """
+        from Yuki.kernel.ssh_workflow import _SshConnection
+        conn = _SshConnection("host", "user")
+        conn._client = MagicMock()
+        stdout = MagicMock()
+        stdout.channel = _MockChannel(ready=True, data=b"started")
+        stderr = MagicMock()
+        conn._client.exec_command.return_value = (MagicMock(), stdout, stderr)
+
+        result = conn.exec_start_detached("cmd", timeout=30, grace=0)
+
+        self.assertEqual(result, ("started", "", 0))
+        stdout.read.assert_not_called()
+
+    def test_exec_bounds_the_wait_with_channel_timeout(self):
+        """exec polls for readiness before fetching the exit status."""
+        from Yuki.kernel.ssh_workflow import _SshConnection
+        conn = _SshConnection("host", "user")
+        conn._client = MagicMock()
+        stdout = MagicMock()
+        stdout.channel = MagicMock()
+        stdout.channel.exit_status_ready.side_effect = [False, False, True]
+        stdout.channel.recv_exit_status.return_value = 0
+        stdout.read.return_value = b"ok"
+        stderr = MagicMock()
+        stderr.read.return_value = b""
+        conn._client.exec_command.return_value = (MagicMock(), stdout, stderr)
+
+        with patch("time.sleep", return_value=None) as mock_sleep:
+            out, err, code = conn.exec("true", timeout=7)
+
+        self.assertEqual((out, err, code), ("ok", "", 0))
+        stdout.channel.settimeout.assert_called_once_with(7)
+        self.assertEqual(stdout.channel.exit_status_ready.call_count, 3)
+        stdout.channel.recv_exit_status.assert_called_once_with()
+        mock_sleep.assert_called()
+
+    def test_exec_times_out_when_channel_never_finishes(self):
+        """A stuck channel raises socket.timeout instead of hanging forever."""
+        from Yuki.kernel.ssh_workflow import _SshConnection
+        conn = _SshConnection("host", "user")
+        conn._client = MagicMock()
+        stdout = MagicMock()
+        stdout.channel = MagicMock()
+        stdout.channel.exit_status_ready.return_value = False
+        stdout.read.return_value = b""
+        stderr = MagicMock()
+        stderr.read.return_value = b""
+        conn._client.exec_command.return_value = (MagicMock(), stdout, stderr)
+
+        with patch("time.sleep", return_value=None), \
+                patch("time.monotonic", side_effect=[0.0, 10.0]):
+            with self.assertRaises(socket.timeout):
+                conn.exec("true", timeout=1)
 
     @patch("paramiko.SSHClient")
     def test_wrapper_records_exit_code_on_failure(self, mock_ssh_cls):

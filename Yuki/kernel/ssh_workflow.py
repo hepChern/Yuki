@@ -3,10 +3,11 @@
 This module provides the SshWorkflow class which implements workflow execution
 by copying files to a remote host over SFTP and running Snakemake there over SSH.
 """
-# pylint: disable=cyclic-import
+# pylint: disable=cyclic-import,too-many-lines
 import json
 import os
 import shlex
+import socket
 import stat
 import time
 from logging import getLogger
@@ -26,6 +27,10 @@ DEFAULT_SSH_PORT = 22
 
 # Environments that need no conda activation on ssh runners
 PURE_COPY_ENVIRONMENTS = ("rawdata", "datalist", "lhcb_ap_datalist", "script")
+
+
+class SSHStartNotConfirmed(RuntimeError):
+    """The remote never confirmed a detached start within the grace period."""
 
 
 def resolve_conda_environment(environment, config_path):
@@ -208,13 +213,77 @@ class _SshConnection:
     def exec(self, command, timeout=300):
         """Execute a command on the remote host.
 
-        Returns (stdout_str, stderr_str, exit_code).
+        Returns (stdout_str, stderr_str, exit_code). The timeout bounds
+        the whole wait by polling for exit status readiness. This avoids
+        hanging on sshd setups that keep exec sessions alive while a
+        background job still exists.
         """
+        logger.debug("[SSH] Executing command: %s with timeout %s",
+                     command, timeout)
         stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
-        exit_code = stdout.channel.recv_exit_status()
+        logger.debug("[SSH] Command executed, waiting for exit status...")
+        channel = stdout.channel
+        channel.settimeout(timeout)
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while not channel.exit_status_ready():
+            if deadline is not None and time.monotonic() >= deadline:
+                stdin.close()
+                raise socket.timeout(
+                    f"SSH command timed out after {timeout} seconds")
+            time.sleep(0.1)
+        exit_code = channel.recv_exit_status()
         out = stdout.read().decode("utf-8", errors="replace")
         err = stderr.read().decode("utf-8", errors="replace")
         stdin.close()
+        return out, err, exit_code
+
+    def exec_start_detached(self, command, timeout=30, grace=2):
+        """Start a detached remote command without waiting forever.
+
+        Waits up to grace seconds for the exec session to report its exit
+        status; on hosts where sshd keeps exec sessions alive while a
+        background job exists (observed on a WSL runner), the status never
+        arrives. In that case SSHStartNotConfirmed is raised — the
+        detached remote process (setsid'd, fds on /dev/null) survives;
+        the channel is left to the connection teardown (closing it
+        directly blocks on such hosts). Returns (out, err, code) when
+        the remote reports within the grace period.
+        """
+        logger.debug("[SSH] Starting detached command: %s with timeout %s",
+                     command, timeout)
+        stdin, stdout, _stderr = self._client.exec_command(command, timeout=timeout)
+        logger.debug("[SSH] Detached command started, waiting for confirmation...")
+        channel = stdout.channel
+        channel.settimeout(timeout)
+        deadline = time.monotonic() + grace
+        while not channel.exit_status_ready():
+            logger.debug("[SSH] Waiting for remote confirmation, "
+                         "time left: %.2fs",
+                         deadline - time.monotonic())
+            if time.monotonic() >= deadline:
+                # Do NOT channel.close() here: on a hung session the
+                # remote never confirms the close either, so close()
+                # blocks until the channel timeout (30s) and raises a
+                # bare socket.timeout that escapes. The connection
+                # teardown reaps the channel.
+                stdin.close()
+                raise SSHStartNotConfirmed(
+                    f"remote did not confirm the start within {grace}s: "
+                    f"{command[:80]}")
+            time.sleep(0.05)
+        exit_code = channel.recv_exit_status()
+        logger.debug("[SSH] Remote command finished, exit code: %s", exit_code)
+        # The channel may never reach EOF on hosts that keep the session
+        # open for background jobs (exit-status arrives, EOF does not);
+        # read only what is already buffered instead of waiting for EOF.
+        out = (channel.recv(65536).decode("utf-8", errors="replace")
+               if channel.recv_ready() else "")
+        logger.debug("[SSH] Remote command output: %s", out)
+        err = (channel.recv_stderr(65536).decode("utf-8", errors="replace")
+               if channel.recv_stderr_ready() else "")
+        logger.debug("[SSH] Remote command error: %s", err)
+        stdin.close()
+        logger.debug("[SSH] Remote command output: %s, error: %s", out, err)
         return out, err, exit_code
 
 
@@ -471,10 +540,14 @@ wait $! || rc=$?
 echo ${{rc:-0}} > yuki.exit
 exit ${{rc:-0}}
 '''
+        self.logger(f"[SSH] Uploading remote wrapper script to {self.remote_exec_path}/yuki_run.sh")
         remote_wrapper = f"{self.remote_exec_path}/yuki_run.sh"
         with self._ssh() as ssh:
+            self.logger(f"[SSH] Uploading wrapper script to {remote_wrapper}")
             ssh.put_text(wrapper, remote_wrapper)
+            self.logger(f"[SSH] Making wrapper script executable: {remote_wrapper}")
             out, err, code = ssh.exec(f"chmod +x {remote_wrapper}")
+            self.logger(f"[SSH] chmod output: {out}, error: {err}, exit code: {code}")
             if code != 0:
                 raise RuntimeError(
                     f"Failed to make yuki_run.sh executable: {err or out} (exit {code})"
@@ -482,12 +555,28 @@ exit ${{rc:-0}}
             # Detach the wrapper: it waits for snakemake itself, so a
             # foreground exec would block the submit until the whole
             # workflow finishes. All three fds must leave the channel
-            # (stdin included — nohup only redirects it for ttys), or
-            # sshd keeps the channel open and recv_exit_status blocks.
+            # or sshd keeps the channel open and recv_exit_status blocks.
             # The polling path reads yuki.pid/yuki.exit.
-            out, err, code = ssh.exec(
-                f"cd {self.remote_exec_path} && nohup bash yuki_run.sh "
-                f"> /dev/null 2>&1 < /dev/null & echo started")
+            self.logger("[SSH] Starting remote Snakemake in background")
+            try:
+                result = ssh.exec_start_detached(
+                    f"cd {self.remote_exec_path} && setsid bash yuki_run.sh "
+                    f"> /dev/null 2>&1 < /dev/null & echo started",
+                    timeout=30, grace=2)
+            except SSHStartNotConfirmed:
+                # The remote never reported (its sshd keeps the exec
+                # session alive while background jobs exist). This is an
+                # error and is logged as one, but the workflow itself may
+                # still be running remotely — the wrapper is detached and
+                # polling tracks it via yuki.pid/yuki.exit.
+                getLogger("Yuki.workflow").error(
+                    "[SSH] remote did not confirm the start within 2s; "
+                    "treating the workflow as started — "
+                    "polling will track it")
+                return
+            out, err, code = result
+            self.logger(f"[SSH] start output: {out}, error: {err}, exit code: {code}")
+            self.logger(f"[SSH] type(code)={type(code)}, code={code}")
             if code != 0:
                 detail = err.strip() if err.strip() else out.strip()
                 log_tail = self._read_remote_snakemake_tail(ssh)
