@@ -481,10 +481,13 @@ exit ${{rc:-0}}
                 )
             # Detach the wrapper: it waits for snakemake itself, so a
             # foreground exec would block the submit until the whole
-            # workflow finishes. The polling path reads yuki.pid/yuki.exit.
+            # workflow finishes. All three fds must leave the channel
+            # (stdin included — nohup only redirects it for ttys), or
+            # sshd keeps the channel open and recv_exit_status blocks.
+            # The polling path reads yuki.pid/yuki.exit.
             out, err, code = ssh.exec(
                 f"cd {self.remote_exec_path} && nohup bash yuki_run.sh "
-                f"> /dev/null 2>&1 & echo started")
+                f"> /dev/null 2>&1 < /dev/null & echo started")
             if code != 0:
                 detail = err.strip() if err.strip() else out.strip()
                 log_tail = self._read_remote_snakemake_tail(ssh)

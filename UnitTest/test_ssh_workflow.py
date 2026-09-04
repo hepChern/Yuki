@@ -236,6 +236,9 @@ class TestSshWorkflow(unittest.TestCase):
         start_cmd = commands[-1]
         self.assertIn("nohup", start_cmd)
         self.assertIn("& echo started", start_cmd)
+        # All three fds must leave the channel, or sshd keeps the channel
+        # open and recv_exit_status blocks forever (submit stuck running).
+        self.assertIn("< /dev/null", start_cmd)
 
     @patch("paramiko.SSHClient")
     def test_wrapper_records_exit_code_on_failure(self, mock_ssh_cls):
